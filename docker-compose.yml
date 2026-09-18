@@ -46,12 +46,7 @@ services:
   web:
     build: ./web
     ports:
-      - "5173:5173"
-    volumes:
-      - ./web:/app
-      - /app/node_modules
-    environment:
-      API_URL: http://api:3000
+      - "80:80"
     depends_on:
       - api
     restart: unless-stopped
