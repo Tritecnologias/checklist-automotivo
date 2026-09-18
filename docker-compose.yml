@@ -51,6 +51,13 @@ services:
       - internal
       - coolify
     restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.checklist-web.rule=Host(`4rodas.tritecnologias.com.br`)"
+      - "traefik.http.routers.checklist-web.entrypoints=https"
+      - "traefik.http.routers.checklist-web.tls=true"
+      - "traefik.http.routers.checklist-web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.checklist-web.loadbalancer.server.port=80"
 
 networks:
   internal:
