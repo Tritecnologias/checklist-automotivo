@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Checklist Automotivo",
+    "slug": "checklist-automotivo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "checklist-automotivo",
+    "plugins": [
+      "expo-router"
+    ],
+    "android": {
+      "package": "com.seudominio.checklistautomotivo"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.seudominio.checklistautomotivo"
+    },
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

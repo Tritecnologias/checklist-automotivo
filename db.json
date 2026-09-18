@@ -1,0 +1,95 @@
+{
+  "orders": [
+    {
+      "vehicle": {
+        "plate": "ADF3478",
+        "model": "Ford Fiesta 2010",
+        "mileage": 100000
+      },
+      "status": "open",
+      "items": [],
+      "totalAmount": 0,
+      "createdAt": "2026-09-17T21:03:45.310Z",
+      "updatedAt": "2026-09-17T21:03:45.319Z",
+      "id": "wFXJv4uuz08"
+    }
+  ],
+  "items": [
+    {
+      "id": "1",
+      "code": "FIL-001",
+      "description": "Filtro de óleo Mann",
+      "type": "part",
+      "unitPrice": 45.9,
+      "stock": 8
+    },
+    {
+      "id": "2",
+      "code": "OL-5W30",
+      "description": "Óleo Mobil 5W30 1L",
+      "type": "part",
+      "unitPrice": 38,
+      "stock": 24
+    },
+    {
+      "id": "3",
+      "code": "FIL-AR",
+      "description": "Filtro de ar esportivo",
+      "type": "part",
+      "unitPrice": 72.5,
+      "stock": 5
+    },
+    {
+      "id": "4",
+      "code": "FIL-CB",
+      "description": "Filtro de combustível",
+      "type": "part",
+      "unitPrice": 55,
+      "stock": 3
+    },
+    {
+      "id": "5",
+      "code": "VEL-NGK",
+      "description": "Vela de ignição NGK (jogo 4)",
+      "type": "part",
+      "unitPrice": 120,
+      "stock": 10
+    },
+    {
+      "id": "6",
+      "code": "MO-TROCA",
+      "description": "Troca de óleo (Mão de Obra)",
+      "type": "service",
+      "unitPrice": 60
+    },
+    {
+      "id": "7",
+      "code": "MO-ALIN",
+      "description": "Alinhamento e balanceamento",
+      "type": "service",
+      "unitPrice": 150
+    },
+    {
+      "id": "8",
+      "code": "MO-FREI",
+      "description": "Revisão de freios completa",
+      "type": "service",
+      "unitPrice": 200
+    },
+    {
+      "id": "9",
+      "code": "MO-SUSP",
+      "description": "Revisão de suspensão",
+      "type": "service",
+      "unitPrice": 180
+    },
+    {
+      "id": "10",
+      "code": "MO-AC",
+      "description": "Recarga de ar-condicionado",
+      "type": "service",
+      "unitPrice": 250
+    }
+  ],
+  "$schema": "./node_modules/json-server/schema.json"
+}
