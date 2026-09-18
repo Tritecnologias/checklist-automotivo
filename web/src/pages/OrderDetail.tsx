@@ -148,7 +148,7 @@ export default function OrderDetail() {
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Resumo</h3>
           <div className="space-y-2.5">
             <SummaryRow label="Peças"       value={currency(totalParts)}    color="text-amber-400" />
-            <SummaryRow label="Mão de obra" value={currency(totalServices)} color="text-blue-400" />
+            <SummaryRow label="Mão de obra" value={currency(totalServices + (order.laborAmount ?? 0))} color="text-blue-400" />
             <div className="border-t border-slate-700 pt-3 mt-1">
               <SummaryRow
                 label="Total geral"

@@ -19,6 +19,7 @@ export interface Order {
   vehicle: Vehicle
   status: 'open' | 'in_progress' | 'closed'
   items: OrderItem[]
+  laborAmount: number
   totalAmount: number
   createdAt: string
   updatedAt: string
