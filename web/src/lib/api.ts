@@ -33,7 +33,7 @@ function adminRequest<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const adminApi = {
   listProducts: (search: string, page: number) =>
-    adminRequest<{ data: unknown[]; total: number; pages: number }>(
+    adminRequest<{ data: any[]; total: number; pages: number }>(
       `/admin/products?search=${encodeURIComponent(search)}&page=${page}`
     ),
   updateProduct: (id: number, data: unknown) =>
@@ -44,7 +44,7 @@ export const adminApi = {
     adminRequest(`/admin/products/${id}/toggle`, { method: 'PATCH' }),
 
   listClients: (search: string, page: number) =>
-    adminRequest<{ data: unknown[]; total: number; pages: number }>(
+    adminRequest<{ data: any[]; total: number; pages: number }>(
       `/admin/clients?search=${encodeURIComponent(search)}&page=${page}`
     ),
   updateClient: (id: number, data: unknown) =>
