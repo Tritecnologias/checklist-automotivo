@@ -2,8 +2,8 @@ import type { Order } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
