@@ -17,8 +17,6 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql-init:/docker-entrypoint-initdb.d
-    ports:
-      - "3306:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot4rodas"]
       interval: 15s
@@ -28,8 +26,6 @@ services:
 
   api:
     build: ./backend
-    ports:
-      - "3001:3000"
     environment:
       DB_HOST: mysql
       DB_PORT: "3306"
@@ -45,8 +41,6 @@ services:
 
   web:
     build: ./web
-    ports:
-      - "80:80"
     depends_on:
       - api
     restart: unless-stopped
