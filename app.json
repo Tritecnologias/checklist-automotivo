@@ -18,6 +18,13 @@
     },
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ea1f840c-fd6a-4859-9798-eb21cee9c56e"
+      }
+    },
+    "owner": "wandersonms"
   }
 }
