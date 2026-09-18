@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 const nav = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/orders', label: 'Ordens de Serviço', end: false },
+  { to: '/admin', label: '⚙️ Admin', end: false },
 ]
 
 export default function Layout() {

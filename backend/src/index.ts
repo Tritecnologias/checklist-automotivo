@@ -3,6 +3,7 @@ import cors from 'cors';
 import itemsRouter  from './routes/items';
 import ordersRouter from './routes/orders';
 import authRouter   from './routes/auth';
+import adminRouter  from './routes/admin';
 
 const app  = express();
 const PORT = Number(process.env.PORT ?? 3000);
@@ -13,6 +14,7 @@ app.use(express.json());
 app.use('/items',  itemsRouter);
 app.use('/orders', ordersRouter);
 app.use('/auth',   authRouter);
+app.use('/admin',  adminRouter);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
