@@ -83,6 +83,13 @@ export const api = {
   removeItem: (orderId: string, itemId: string) =>
     request<void>(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' }),
 
+  /** PATCH /orders/:id/labor — define o valor de mão de obra da OS */
+  updateLaborAmount: (orderId: string, amount: number) =>
+    request<Order>(`/orders/${orderId}/labor`, {
+      method: 'PATCH',
+      body: JSON.stringify({ amount }),
+    }),
+
   // ─── Autenticação ──────────────────────────────────────────────────────────
 
   /** POST /auth/verify-supervisor-pin — retorna { authorized, supervisorName } */

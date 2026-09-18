@@ -15,6 +15,7 @@ export interface Order {
   vehicle: Vehicle;
   items: OrderItem[];
   status: OrderStatus;
+  laborAmount: number;
   totalAmount: number;
   createdAt: string;
   updatedAt: string;
@@ -50,6 +51,7 @@ export interface CatalogItem {
 export interface AddItemPayload {
   catalogItemId: string;
   quantity: number;
+  unitPrice?: number;
 }
 
 export interface UpdateQuantityPayload {

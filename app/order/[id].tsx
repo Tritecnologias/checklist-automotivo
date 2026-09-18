@@ -14,6 +14,7 @@ import { SearchBar } from '@/components/SearchBar';
 import { SearchResultItem } from '@/components/SearchResultItem';
 import { ItemRow } from '@/components/ItemRow';
 import { PinModal } from '@/components/PinModal';
+import { ServicePriceModal } from '@/components/ServicePriceModal';
 import {
   useAddItem,
   useRemoveItem,
@@ -35,6 +36,7 @@ export default function OrderScreen() {
 
   const [search, setSearch] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [showLaborModal, setShowLaborModal] = useState(false);
   const debouncedSearch = useDebounce(search, 400);
 
   // ─── Queries ────────────────────────────────────────────────────────────────
@@ -80,11 +82,22 @@ export default function OrderScreen() {
     },
   });
 
+  const { mutate: updateLabor } = useMutation({
+    mutationFn: (amount: number) => api.updateLaborAmount(id, amount),
+    onSuccess: (updated: Order) => {
+      qc.setQueryData(['order', id], updated);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    },
+  });
+
   // ─── Totais (calculados antes dos handlers para uso nas deps) ───────────────
 
   const items = order?.items ?? [];
-  const totalParts = items.filter((i) => i.type === 'part').reduce((acc, i) => acc + i.total, 0);
-  const totalServices = items.filter((i) => i.type === 'service').reduce((acc, i) => acc + i.total, 0);
+  const totalParts = items.reduce((acc, i) => acc + i.total, 0);
+  const laborAmount = order?.laborAmount ?? 0;
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
 
@@ -104,6 +117,14 @@ export default function OrderScreen() {
       );
     },
     [addItem],
+  );
+
+  const handleLaborConfirm = useCallback(
+    (price: number) => {
+      setShowLaborModal(false);
+      updateLabor(price);
+    },
+    [updateLabor],
   );
 
   const handleDeleteRequest = useCallback((item: OrderItem) => {
@@ -132,34 +153,23 @@ export default function OrderScreen() {
       '',
     ];
 
-    const parts = order.items.filter((i) => i.type === 'part');
-    const services = order.items.filter((i) => i.type === 'service');
-
-    if (parts.length) {
-      lines.push('PEÇAS:');
-      parts.forEach((i) =>
-        lines.push(
-          `  • ${i.description} x${i.quantity} = ${currency(i.total)}`,
-        ),
+    if (order.items.length) {
+      lines.push('PEÇAS/SERVIÇOS:');
+      order.items.forEach((i) =>
+        lines.push(`  • ${i.description} x${i.quantity} = ${currency(i.total)}`),
       );
       lines.push('');
     }
-    if (services.length) {
-      lines.push('MÃO DE OBRA:');
-      services.forEach((i) =>
-        lines.push(
-          `  • ${i.description} x${i.quantity} = ${currency(i.total)}`,
-        ),
-      );
-      lines.push('');
+    if (order.laborAmount > 0) {
+      lines.push(`Mão de obra:  ${currency(order.laborAmount)}`);
     }
 
     lines.push(`Total Peças:  ${currency(totalParts)}`);
-    lines.push(`Total M.O.:   ${currency(totalServices)}`);
+    lines.push(`Total M.O.:   ${currency(laborAmount)}`);
     lines.push(`TOTAL GERAL:  ${currency(order.totalAmount)}`);
 
     await Share.share({ message: lines.join('\n'), title: `OS ${order.vehicle.plate}` });
-  }, [order, totalParts, totalServices]);
+  }, [order, totalParts, laborAmount]);
 
   const handleQuantityChange = useCallback(
     (item: OrderItem, delta: 1 | -1) => {
@@ -366,14 +376,18 @@ export default function OrderScreen() {
                     {currency(totalParts)}
                   </Text>
                 </View>
-                <View className="flex-row justify-between mb-3">
+                <TouchableOpacity
+                  onPress={() => setShowLaborModal(true)}
+                  className="flex-row justify-between mb-3 py-1 -mx-1 px-1 rounded-lg active:bg-blue-50 dark:active:bg-blue-900/20"
+                  activeOpacity={0.7}
+                >
                   <Text className="text-sm text-gray-600 dark:text-slate-400">
-                    Mão de obra
+                    Mão de obra ✏️
                   </Text>
                   <Text className="text-sm font-medium text-blue-600 dark:text-blue-400">
-                    {currency(totalServices)}
+                    {currency(laborAmount)}
                   </Text>
-                </View>
+                </TouchableOpacity>
                 <View className="border-t border-gray-100 dark:border-slate-700 pt-3 flex-row justify-between">
                   <Text className="text-base font-bold text-gray-900 dark:text-white">
                     Total
@@ -417,6 +431,15 @@ export default function OrderScreen() {
           keyboardShouldPersistTaps="handled"
         />
       )}
+
+      {/* Modal de mão de obra */}
+      <ServicePriceModal
+        visible={showLaborModal}
+        title="Mão de Obra"
+        initialValue={laborAmount}
+        onConfirm={handleLaborConfirm}
+        onCancel={() => setShowLaborModal(false)}
+      />
 
       {/* Modal de PIN */}
       <PinModal
