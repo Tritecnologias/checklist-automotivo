@@ -24,6 +24,9 @@ ios/
 # Database backup (dados sensíveis da empresa — restaurar manualmente na VPS)
 mysql-init/00-backup.sql
 
+# Local dev override (não commitar — cada dev tem o seu)
+docker-compose.override.yml
+
 # Logs
 *.log
 npm-debug.log*

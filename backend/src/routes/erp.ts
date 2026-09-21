@@ -1,0 +1,457 @@
+import { Router, Request, Response, NextFunction } from 'express';
+import { pool } from '../db';
+
+const router = Router();
+const ADMIN_TOKEN = process.env.ADMIN_PASSWORD ?? 'admin@2026';
+
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (req.headers['x-admin-token'] !== ADMIN_TOKEN) {
+    res.status(401).json({ message: 'Não autorizado' });
+    return;
+  }
+  next();
+}
+router.use(requireAdmin);
+
+// ── DASHBOARD ────────────────────────────────────────────────────────────────
+
+router.get('/dashboard', async (_req, res) => {
+  const [[hoje]] = await pool.query<any>(
+    `SELECT COUNT(*) as count_vendas, COALESCE(SUM(vr_total),0) as total_dia
+     FROM mv_vendas WHERE data_venda = CURDATE()`
+  );
+  const [[semana]] = await pool.query<any>(
+    `SELECT COALESCE(SUM(vr_total),0) as total_semana
+     FROM mv_vendas WHERE data_venda >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)`
+  );
+  const [[mes]] = await pool.query<any>(
+    `SELECT COALESCE(SUM(vr_total),0) as total_mes
+     FROM mv_vendas WHERE MONTH(data_venda)=MONTH(CURDATE()) AND YEAR(data_venda)=YEAR(CURDATE())`
+  );
+  const [top_produtos] = await pool.query<any>(
+    `SELECT p.nome_produto, SUM(m.quant) as quant, SUM(m.vr_total) as total
+     FROM mv_vendas_movimento m
+     JOIN cad_produtos p ON p.id = m.id_produto
+     WHERE m.data_venda = CURDATE()
+     GROUP BY m.id_produto ORDER BY total DESC LIMIT 5`
+  );
+  const [estoque_baixo] = await pool.query<any>(
+    `SELECT id, nome_produto, estoque, min_estoque
+     FROM cad_produtos
+     WHERE estoque <= min_estoque AND min_estoque > 0 AND inativo = 0
+     ORDER BY estoque ASC LIMIT 8`
+  );
+  const [[caixa]] = await pool.query<any>(
+    `SELECT id, status_caixa, turno, terminal, hora_abertura, vr_abertura
+     FROM mv_caixa WHERE status_caixa = 'A' ORDER BY id DESC LIMIT 1`
+  );
+  const [[contas_pendentes]] = await pool.query<any>(
+    `SELECT COUNT(*) as count_pendentes, COALESCE(SUM(vr_parcela - vr_abatimentos),0) as vr_pendente
+     FROM cad_lancamentos WHERE status_lancamento = 0`
+  );
+
+  res.json({
+    hoje: { count: Number(hoje.count_vendas), total: Number(hoje.total_dia) },
+    semana: { total: Number(semana.total_semana) },
+    mes: { total: Number(mes.total_mes) },
+    top_produtos: top_produtos.map((r: any) => ({
+      nome: r.nome_produto,
+      quant: Number(r.quant),
+      total: Number(r.total),
+    })),
+    estoque_baixo: estoque_baixo.map((r: any) => ({
+      id: r.id,
+      nome: r.nome_produto,
+      estoque: Number(r.estoque),
+      min_estoque: Number(r.min_estoque),
+    })),
+    caixa: caixa ?? null,
+    contas: {
+      count: Number(contas_pendentes.count_pendentes),
+      total: Number(contas_pendentes.vr_pendente),
+    },
+  });
+});
+
+// ── CAIXA ────────────────────────────────────────────────────────────────────
+
+router.get('/caixa', async (req, res) => {
+  const page  = Math.max(1, Number(req.query.page ?? 1));
+  const limit = 20;
+  const offset = (page - 1) * limit;
+
+  const [[{ total }]] = await pool.query<any>('SELECT COUNT(*) as total FROM mv_caixa');
+  const [rows] = await pool.query<any>(
+    `SELECT c.*, l.nome_login
+     FROM mv_caixa c LEFT JOIN cad_login l ON l.id = c.id_login
+     ORDER BY c.id DESC LIMIT ? OFFSET ?`,
+    [limit, offset]
+  );
+
+  res.json({ data: rows, total: Number(total), pages: Math.ceil(total / limit) });
+});
+
+router.get('/caixa/status', async (_req, res) => {
+  const [[row]] = await pool.query<any>(
+    `SELECT c.*, l.nome_login
+     FROM mv_caixa c LEFT JOIN cad_login l ON l.id = c.id_login
+     WHERE c.status_caixa = 'A' ORDER BY c.id DESC LIMIT 1`
+  );
+  res.json(row ?? null);
+});
+
+router.post('/caixa/abrir', async (req, res) => {
+  const { vr_abertura = 0, terminal = '01', turno = '1', id_login = 1 } = req.body;
+
+  const [existing] = await pool.query<any>(
+    "SELECT id FROM mv_caixa WHERE status_caixa = 'A' LIMIT 1"
+  );
+  if ((existing as any[]).length > 0) {
+    res.status(409).json({ message: 'Já existe um caixa aberto' });
+    return;
+  }
+
+  const now = new Date();
+  const hora = now.toTimeString().slice(0, 8);
+  const data = now.toISOString().slice(0, 10);
+
+  const [result] = await pool.query<any>(
+    `INSERT INTO mv_caixa (hora_abertura, data_abertura, vr_abertura, vr_fechamento,
+      vr_fechado_turno, id_login, turno, terminal, status_caixa)
+     VALUES (?,?,?,0,0,?,?,?,'A')`,
+    [hora, data, vr_abertura, id_login, turno, terminal]
+  );
+  res.status(201).json({ id: result.insertId });
+});
+
+router.patch('/caixa/:id/fechar', async (req, res) => {
+  const { vr_fechamento = 0 } = req.body;
+  const now = new Date();
+  const hora = now.toTimeString().slice(0, 8);
+  const data = now.toISOString().slice(0, 10);
+
+  const [[totals]] = await pool.query<any>(
+    `SELECT COALESCE(SUM(vr_total),0) as vr_fechado_turno
+     FROM mv_vendas v
+     JOIN mv_caixa c ON c.id = ? AND v.data_venda = c.data_abertura AND v.turno = c.turno AND v.terminal = c.terminal`,
+    [req.params.id]
+  );
+
+  await pool.query(
+    `UPDATE mv_caixa SET status_caixa='F', hora_fechamento=?, data_fechamento=?,
+      vr_fechamento=?, vr_fechado_turno=? WHERE id=?`,
+    [hora, data, vr_fechamento, Number(totals.vr_fechado_turno), req.params.id]
+  );
+  res.json({ ok: true });
+});
+
+// ── VENDAS ───────────────────────────────────────────────────────────────────
+
+router.get('/vendas', async (req, res) => {
+  const page  = Math.max(1, Number(req.query.page ?? 1));
+  const limit = 30;
+  const offset = (page - 1) * limit;
+  const data  = String(req.query.data ?? new Date().toISOString().slice(0, 10));
+  const search = String(req.query.search ?? '');
+
+  const where = search.length >= 2
+    ? 'AND (c.nome_cliente LIKE ? OR v.controle LIKE ?)'
+    : '';
+  const params: any[] = search.length >= 2
+    ? [data, `%${search}%`, `%${search}%`]
+    : [data];
+
+  const [[{ total }]] = await pool.query<any>(
+    `SELECT COUNT(*) as total FROM mv_vendas v
+     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+     WHERE v.data_venda = ? ${where}`,
+    params
+  );
+
+  const [rows] = await pool.query<any>(
+    `SELECT v.id, v.controle, v.data_venda, v.vr_total, v.vr_adicional,
+            v.vr_dinheiro, v.vr_cheque, v.vr_cartao, v.vr_carne, v.vr_ticket,
+            v.em_aberto, v.parcelas, v.id_cliente,
+            COALESCE(c.nome_cliente, 'Consumidor') as nome_cliente
+     FROM mv_vendas v
+     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+     WHERE v.data_venda = ? ${where}
+     ORDER BY v.id DESC LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
+  );
+
+  res.json({
+    data: rows.map((r: any) => ({
+      ...r,
+      vr_total: Number(r.vr_total),
+      vr_adicional: Number(r.vr_adicional),
+      vr_dinheiro: Number(r.vr_dinheiro),
+      vr_cheque: Number(r.vr_cheque),
+      vr_cartao: Number(r.vr_cartao),
+      vr_carne: Number(r.vr_carne),
+      vr_ticket: Number(r.vr_ticket),
+    })),
+    total: Number(total),
+    pages: Math.ceil(total / limit),
+  });
+});
+
+router.get('/vendas/:controle', async (req, res) => {
+  const [[venda]] = await pool.query<any>(
+    `SELECT v.*, COALESCE(c.nome_cliente,'Consumidor') as nome_cliente
+     FROM mv_vendas v LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+     WHERE v.controle = ?`,
+    [req.params.controle]
+  );
+  if (!venda) { res.status(404).json({ message: 'Venda não encontrada' }); return; }
+
+  const [itens] = await pool.query<any>(
+    `SELECT m.id, m.id_produto, p.nome_produto, m.valor, m.quant, m.vr_total
+     FROM mv_vendas_movimento m
+     JOIN cad_produtos p ON p.id = m.id_produto
+     WHERE m.controle = ? ORDER BY m.id`,
+    [req.params.controle]
+  );
+
+  res.json({
+    ...venda,
+    vr_total: Number(venda.vr_total),
+    itens: itens.map((i: any) => ({
+      ...i,
+      valor: Number(i.valor),
+      quant: Number(i.quant),
+      vr_total: Number(i.vr_total),
+    })),
+  });
+});
+
+router.post('/vendas', async (req, res) => {
+  const {
+    id_cliente = 0,
+    itens = [],
+    vr_dinheiro = 0,
+    vr_cheque = 0,
+    vr_cartao = 0,
+    vr_carne = 0,
+    vr_ticket = 0,
+    vr_adicional = 0,
+    parcelas = 1,
+    id_login = 1,
+    terminal = '01',
+    turno = '1',
+  } = req.body as {
+    id_cliente?: number;
+    itens: { id_produto: number; valor: number; quant: number }[];
+    vr_dinheiro?: number;
+    vr_cheque?: number;
+    vr_cartao?: number;
+    vr_carne?: number;
+    vr_ticket?: number;
+    vr_adicional?: number;
+    parcelas?: number;
+    id_login?: number;
+    terminal?: string;
+    turno?: string;
+  };
+
+  if (!itens.length) {
+    res.status(400).json({ message: 'Venda sem itens' });
+    return;
+  }
+
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const controle = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const data_venda = now.toISOString().slice(0, 10);
+
+  const vr_total = itens.reduce((s, i) => s + i.valor * i.quant, 0) + Number(vr_adicional);
+  const em_aberto = vr_carne > 0 ? 1 : 0;
+
+  // Detect primary payment mode for cod_lancamento mapping
+  const codLancamento =
+    vr_cartao > 0 ? (vr_cartao === vr_total ? 7 : 1) :
+    vr_cheque  > 0 ? 2 :
+    vr_carne   > 0 ? 5 :
+    vr_ticket  > 0 ? 8 : 1;
+
+  const [vendaResult] = await pool.query<any>(
+    `INSERT INTO mv_vendas
+       (controle, data_venda, parcelas, id_cliente, id_cliente_convenio,
+        id_login, terminal, turno, vr_total, vr_adicional,
+        vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket,
+        em_aberto, vr_pagto_parcial, cod_lancamento)
+     VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
+    [controle, data_venda, parcelas, id_cliente, id_login, terminal, turno,
+     vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket,
+     em_aberto, codLancamento]
+  );
+  const id_venda = vendaResult.insertId;
+
+  for (const item of itens) {
+    const item_total = Number(item.valor) * Number(item.quant);
+    await pool.query(
+      `INSERT INTO mv_vendas_movimento
+         (data_venda, controle, modo_venda, cod_lancamento, id_login,
+          id_cliente, id_cliente_convenio, id_produto, id_grade,
+          modo_lancamento, terminal, turno, valor, quant, vr_total, vr_cotacao, desconto_total_venda)
+       VALUES (?,?,1,?,?,?,0,?,0,0,?,?,?,?,?,1,'N')`,
+      [data_venda, controle, codLancamento, id_login, id_cliente,
+       item.id_produto, terminal, turno, item.valor, item.quant, item_total]
+    );
+    await pool.query(
+      'UPDATE cad_produtos SET estoque = estoque - ? WHERE id = ?',
+      [item.quant, item.id_produto]
+    );
+  }
+
+  // Lançamento financeiro
+  const hist = `VENDA REALIZADA [ ${controle} ]`;
+  await pool.query(
+    `INSERT INTO cad_lancamentos
+       (id_planejamento, id_conta, id_modo_lancamento, status_lancamento,
+        controle, documento, historico, parcela, data_vencimento,
+        vr_parcela, vr_abatimentos, vr_acrescimo, transferido,
+        id_cliente, id_venda, data_confirmacao, dias_atraso)
+     VALUES (2,1,?,?,?,?,?,1,?,?,0,0,0,?,?,?,0)`,
+    [codLancamento, em_aberto === 0 ? 1 : 0,
+     controle, controle, hist, data_venda,
+     vr_total, id_cliente, id_venda,
+     em_aberto === 0 ? data_venda : null]
+  );
+
+  res.status(201).json({ controle, id: id_venda, vr_total });
+});
+
+// ── CONTAS / FINANCEIRO ──────────────────────────────────────────────────────
+
+router.get('/contas', async (req, res) => {
+  const page   = Math.max(1, Number(req.query.page ?? 1));
+  const limit  = 30;
+  const offset = (page - 1) * limit;
+  const status = req.query.status === 'pago' ? 1 : req.query.status === 'todos' ? null : 0;
+  const search = String(req.query.search ?? '');
+
+  const whereParts: string[] = [];
+  const params: any[] = [];
+
+  if (status !== null) { whereParts.push('l.status_lancamento = ?'); params.push(status); }
+  if (search.length >= 2) {
+    whereParts.push('(c.nome_cliente LIKE ? OR l.historico LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
+  }
+
+  const where = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
+
+  const [[{ total }]] = await pool.query<any>(
+    `SELECT COUNT(*) as total FROM cad_lancamentos l
+     LEFT JOIN cad_clientes c ON c.id = l.id_cliente ${where}`,
+    params
+  );
+  const [rows] = await pool.query<any>(
+    `SELECT l.id, l.controle, l.historico, l.data_vencimento, l.data_confirmacao,
+            l.vr_parcela, l.vr_abatimentos, l.status_lancamento,
+            l.id_cliente, COALESCE(c.nome_cliente,'Consumidor') as nome_cliente,
+            m.modo_lancamento
+     FROM cad_lancamentos l
+     LEFT JOIN cad_clientes c ON c.id = l.id_cliente
+     LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
+     ${where}
+     ORDER BY l.id DESC LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
+  );
+
+  res.json({
+    data: rows.map((r: any) => ({
+      ...r,
+      vr_parcela: Number(r.vr_parcela),
+      vr_abatimentos: Number(r.vr_abatimentos),
+      vr_liquido: Number(r.vr_parcela) - Number(r.vr_abatimentos),
+    })),
+    total: Number(total),
+    pages: Math.ceil(total / limit),
+  });
+});
+
+router.patch('/contas/:id/receber', async (req, res) => {
+  const data_confirmacao = new Date().toISOString().slice(0, 10);
+  await pool.query(
+    'UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=? WHERE id=?',
+    [data_confirmacao, req.params.id]
+  );
+  res.json({ ok: true });
+});
+
+// ── BUSCA RÁPIDA (PDV) ───────────────────────────────────────────────────────
+
+router.get('/busca/produtos', async (req, res) => {
+  const q = String(req.query.q ?? '');
+  if (q.length < 2) { res.json([]); return; }
+
+  const [rows] = await pool.query<any>(
+    `SELECT id, nome_produto, cod_barra, unidade, vr_venda, estoque
+     FROM cad_produtos
+     WHERE inativo = 0 AND (nome_produto LIKE ? OR cod_barra LIKE ?)
+     ORDER BY nome_produto LIMIT 20`,
+    [`%${q}%`, `%${q}%`]
+  );
+  res.json(rows.map((r: any) => ({ ...r, vr_venda: Number(r.vr_venda), estoque: Number(r.estoque) })));
+});
+
+router.get('/busca/clientes', async (req, res) => {
+  const q = String(req.query.q ?? '');
+  if (q.length < 2) { res.json([]); return; }
+
+  const [rows] = await pool.query<any>(
+    `SELECT id, nome_cliente, cpf_cnpj, telefone, celular
+     FROM cad_clientes
+     WHERE inativo = 0 AND (nome_cliente LIKE ? OR cpf_cnpj LIKE ? OR telefone LIKE ?)
+     ORDER BY nome_cliente LIMIT 15`,
+    [`%${q}%`, `%${q}%`, `%${q}%`]
+  );
+  res.json(rows);
+});
+
+// ── ESTOQUE ──────────────────────────────────────────────────────────────────
+
+router.get('/estoque', async (req, res) => {
+  const page   = Math.max(1, Number(req.query.page ?? 1));
+  const limit  = 50;
+  const offset = (page - 1) * limit;
+  const search = String(req.query.search ?? '');
+  const filtro = req.query.filtro; // 'baixo' | 'zerado' | undefined
+
+  const whereParts: string[] = ['inativo = 0'];
+  const params: any[] = [];
+
+  if (search.length >= 2) {
+    whereParts.push('(nome_produto LIKE ? OR cod_barra LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
+  }
+  if (filtro === 'baixo')   whereParts.push('estoque <= min_estoque AND min_estoque > 0');
+  if (filtro === 'zerado')  whereParts.push('estoque <= 0');
+
+  const where = 'WHERE ' + whereParts.join(' AND ');
+
+  const [[{ total }]] = await pool.query<any>(
+    `SELECT COUNT(*) as total FROM cad_produtos ${where}`, params
+  );
+  const [rows] = await pool.query<any>(
+    `SELECT id, nome_produto, cod_barra, unidade, estoque, min_estoque, vr_compra, vr_venda
+     FROM cad_produtos ${where} ORDER BY nome_produto LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
+  );
+
+  res.json({
+    data: rows.map((r: any) => ({
+      ...r,
+      estoque: Number(r.estoque),
+      min_estoque: Number(r.min_estoque),
+      vr_compra: Number(r.vr_compra),
+      vr_venda: Number(r.vr_venda),
+    })),
+    total: Number(total),
+    pages: Math.ceil(total / limit),
+  });
+});
+
+export default router;
