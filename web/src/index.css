@@ -7,3 +7,26 @@ body {
   background-color: #0f172a;
   color: #f1f5f9;
 }
+
+@media print {
+  /* Oculta elementos de navegação */
+  aside, header, nav, .no-print { display: none !important; }
+
+  /* Fundo branco, texto preto */
+  body, html { background: #fff !important; color: #000 !important; }
+
+  /* Remove margens do layout flex */
+  .min-h-screen { min-height: unset !important; }
+  .flex { display: block !important; }
+
+  /* Garante que tabelas não quebrem no meio */
+  table { width: 100% !important; border-collapse: collapse; }
+  tr { break-inside: avoid; }
+
+  /* Cores de texto para impressão */
+  * { color: #000 !important; background: transparent !important;
+      border-color: #ccc !important; box-shadow: none !important; }
+
+  /* Destaque de valores em negrito */
+  .print-bold { font-weight: 700 !important; }
+}

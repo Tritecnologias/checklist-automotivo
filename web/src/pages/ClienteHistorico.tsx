@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { Venda } from '../types'
 
@@ -24,13 +24,20 @@ const STATUS_CLASS: Record<string, string> = {
 
 // ── Linha expansível de venda ─────────────────────────────────────────────────
 
-function VendaRow({ v }: { v: { controle: string; data: string; total: number; em_aberto: number } }) {
+function VendaRow({
+  v,
+  forceOpen,
+}: {
+  v: { controle: string; data: string; total: number; em_aberto: number }
+  forceOpen?: boolean
+}) {
   const [open, setOpen] = useState(false)
+  const isOpen = forceOpen || open
 
   const { data: detail, isLoading } = useQuery({
     queryKey: ['venda-detail', v.controle],
     queryFn: () => erpApi.venda(v.controle),
-    enabled: open,
+    enabled: isOpen,
     staleTime: Infinity,
   })
 
@@ -39,11 +46,13 @@ function VendaRow({ v }: { v: { controle: string; data: string; total: number; e
   return (
     <>
       <tr
-        onClick={() => setOpen(o => !o)}
-        className="hover:bg-slate-800 cursor-pointer transition-colors select-none"
+        onClick={() => !forceOpen && setOpen(o => !o)}
+        className={`transition-colors ${forceOpen ? '' : 'hover:bg-slate-800 cursor-pointer select-none'}`}
       >
         <td className="px-4 py-3">
-          <span className="text-slate-500 mr-2 text-xs">{open ? '▼' : '▶'}</span>
+          {!forceOpen && (
+            <span className="text-slate-500 mr-2 text-xs">{isOpen ? '▼' : '▶'}</span>
+          )}
           <span className="font-mono text-xs text-slate-300">{v.controle}</span>
         </td>
         <td className="px-4 py-3 text-slate-400 text-xs">{formatDate(v.data)}</td>
@@ -59,7 +68,7 @@ function VendaRow({ v }: { v: { controle: string; data: string; total: number; e
         </td>
       </tr>
 
-      {open && (
+      {isOpen && (
         <tr>
           <td colSpan={4} className="bg-slate-950 px-0 py-0">
             {isLoading ? (
@@ -119,12 +128,40 @@ function VendaRow({ v }: { v: { controle: string; data: string; total: number; e
 export default function ClienteHistorico() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [printMode, setPrintMode] = useState(false)
+  const [printing, setPrinting] = useState(false)
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['cliente-historico', id],
     queryFn: () => erpApi.clienteHistorico(Number(id)),
     enabled: Boolean(id),
   })
+
+  const handlePrint = useCallback(async () => {
+    if (!data) return
+    setPrinting(true)
+
+    // Pre-fetch all venda details so rows render fully before window.print()
+    await Promise.all(
+      data.vendas.map(v =>
+        qc.fetchQuery({
+          queryKey: ['venda-detail', v.controle],
+          queryFn: () => erpApi.venda(v.controle),
+          staleTime: Infinity,
+        })
+      )
+    )
+
+    setPrintMode(true)
+    setPrinting(false)
+
+    // Small delay to let React render the expanded rows
+    setTimeout(() => {
+      window.print()
+      setPrintMode(false)
+    }, 300)
+  }, [data, qc])
 
   if (isLoading) {
     return (
@@ -153,16 +190,40 @@ export default function ClienteHistorico() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      {/* Breadcrumb + ações */}
+      <div className="flex items-center justify-between no-print">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <button
+            onClick={() => navigate('/erp/clientes')}
+            className="hover:text-slate-300 transition-colors"
+          >
+            Clientes
+          </button>
+          <span>/</span>
+          <span className="text-slate-300">{cliente.nome}</span>
+        </div>
         <button
-          onClick={() => navigate('/erp/clientes')}
-          className="hover:text-slate-300 transition-colors"
+          onClick={handlePrint}
+          disabled={printing}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 text-sm rounded-lg transition-colors"
         >
-          Clientes
+          {printing ? (
+            <>
+              <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+              Preparando…
+            </>
+          ) : (
+            <>🖨️ Imprimir</>
+          )}
         </button>
-        <span>/</span>
-        <span className="text-slate-300">{cliente.nome}</span>
+      </div>
+
+      {/* Cabeçalho de impressão — visível só no print */}
+      <div className="hidden print:block mb-4">
+        <p className="text-lg font-bold">Histórico do Cliente — {cliente.nome}</p>
+        <p className="text-sm text-slate-500">
+          Emitido em {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </p>
       </div>
 
       {/* Header card */}
@@ -192,7 +253,7 @@ export default function ClienteHistorico() {
             </div>
           )}
           <div>
-            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Compras ERP</p>
+            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Total em Compras</p>
             <p className="text-2xl font-bold text-green-400">
               {currency(vendas.reduce((s, v) => s + v.total, 0))}
             </p>
@@ -200,7 +261,7 @@ export default function ClienteHistorico() {
           </div>
           {os.length > 0 && (
             <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">OS do App</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Total em OS</p>
               <p className="text-2xl font-bold text-blue-400">
                 {currency(os.reduce((s, o) => s + o.total + o.laborAmount, 0))}
               </p>
@@ -216,7 +277,11 @@ export default function ClienteHistorico() {
           Compras no ERP
           <span className="ml-2 text-sm font-normal text-slate-500">({vendas.length})</span>
         </h2>
-        <p className="text-xs text-slate-500 mb-3">Clique em uma linha para ver os produtos da compra.</p>
+        {!printMode && (
+          <p className="text-xs text-slate-500 mb-3 no-print">
+            Clique em uma linha para ver os produtos da compra.
+          </p>
+        )}
         {vendas.length === 0 ? (
           <p className="text-slate-500 text-sm">Nenhuma compra registrada.</p>
         ) : (
@@ -232,7 +297,7 @@ export default function ClienteHistorico() {
               </thead>
               <tbody className="divide-y divide-slate-800">
                 {vendas.map(v => (
-                  <VendaRow key={v.controle} v={v} />
+                  <VendaRow key={v.controle} v={v} forceOpen={printMode || undefined} />
                 ))}
               </tbody>
             </table>
