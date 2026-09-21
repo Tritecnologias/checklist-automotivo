@@ -104,18 +104,24 @@ export function ItemRow({ item, onDeleteRequest, onQuantityChange, onLaborReques
         </View>
       </View>
 
-      {/* Linha de MO */}
+      {/* Linha de preço total do serviço (peça + instalação) */}
       <TouchableOpacity
         onPress={handleLabor}
         activeOpacity={0.7}
         className="flex-row items-center justify-between mx-4 mb-3 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/40"
       >
         <Text className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-          🔧 Mão de obra ✏️
+          🔧 Total c/ instalação ✏️
         </Text>
-        <Text className={`text-sm font-bold ${(item.laborPrice ?? 0) > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-slate-500'}`}>
-          {(item.laborPrice ?? 0) > 0 ? currency(item.laborPrice) : 'R$ 0,00'}
-        </Text>
+        {(item.laborPrice ?? 0) > 0 ? (
+          <Text className="text-sm font-bold text-blue-600 dark:text-blue-400">
+            {currency(item.total + item.laborPrice)}
+          </Text>
+        ) : (
+          <Text className="text-xs text-gray-400 dark:text-slate-500">
+            Toque para definir
+          </Text>
+        )}
       </TouchableOpacity>
     </View>
   );

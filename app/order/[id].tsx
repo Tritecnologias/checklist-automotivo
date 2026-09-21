@@ -112,11 +112,14 @@ export default function OrderScreen() {
   }, []);
 
   const handleLaborConfirm = useCallback(
-    (price: number) => {
+    (totalServicePrice: number) => {
       if (!laborItem) return;
       setLaborItem(null);
+      // O operador digita o preço total (peça + instalação).
+      // Internamente armazenamos só a MO = total - valor da peça.
+      const laborPrice = Math.max(0, totalServicePrice - (laborItem.total ?? 0));
       updateItemLabor(
-        { itemId: laborItem.id, laborPrice: price },
+        { itemId: laborItem.id, laborPrice },
         {
           onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
           onError:   () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
@@ -421,11 +424,16 @@ export default function OrderScreen() {
         />
       )}
 
-      {/* Modal de MO por item */}
+      {/* Modal de preço total do serviço por item */}
       <ServicePriceModal
         visible={laborItem !== null}
-        title={laborItem ? `M.O.: ${laborItem.description}` : 'Mão de Obra'}
-        initialValue={laborItem?.laborPrice ?? 0}
+        title={laborItem ? laborItem.description : 'Preço Total'}
+        description={laborItem
+          ? `Peça: ${currency(laborItem.total)} — Digite o preço total cobrado (peça + instalação)`
+          : undefined}
+        initialValue={laborItem
+          ? (laborItem.total ?? 0) + (laborItem.laborPrice ?? 0)
+          : 0}
         onConfirm={handleLaborConfirm}
         onCancel={() => setLaborItem(null)}
       />

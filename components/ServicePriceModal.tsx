@@ -75,7 +75,7 @@ export function ServicePriceModal({
 
           <View className="mt-6 mb-4">
             <Text className="text-xs text-gray-400 dark:text-slate-500 mb-2 text-center">
-              Valor cobrado (R$)
+              Valor total do serviço (R$)
             </Text>
             <TextInput
               value={value}
