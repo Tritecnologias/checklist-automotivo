@@ -4,13 +4,23 @@
     "slug": "checklist-automotivo",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "scheme": "checklist-automotivo",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f2744"
+    },
     "plugins": [
       "expo-router"
     ],
     "android": {
-      "package": "com.seudominio.checklistautomotivo"
+      "package": "com.seudominio.checklistautomotivo",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f2744"
+      }
     },
     "ios": {
       "supportsTablet": false,

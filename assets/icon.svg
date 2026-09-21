@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Fundo com gradiente azul escuro -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f2744;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1a4a8a;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="wrenchGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#cbd5e1;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="checkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#22c55e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#16a34a;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Fundo quadrado arredondado -->
+  <rect width="1024" height="1024" rx="220" ry="220" fill="url(#bg)"/>
+
+  <!-- Linha decorativa sutil no fundo -->
+  <circle cx="512" cy="512" r="380" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.06"/>
+  <circle cx="512" cy="512" r="300" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.04"/>
+
+  <!-- CHAVE INGLESA (wrench) centralizada e inclinada 45 graus -->
+  <g transform="translate(512,512) rotate(-45)" filter="url(#shadow)">
+    <!-- Cabo da chave -->
+    <rect x="-42" y="-30" width="84" height="300" rx="30" ry="30" fill="url(#wrenchGrad)"/>
+
+    <!-- Cabeça da chave (topo) -->
+    <ellipse cx="0" cy="-30" rx="90" ry="78" fill="url(#wrenchGrad)"/>
+    <!-- Abertura da cabeça -->
+    <ellipse cx="0" cy="-30" rx="46" ry="40" fill="#0f2744"/>
+
+    <!-- Pé da chave (parte inferior arredondada) -->
+    <ellipse cx="0" cy="270" rx="52" ry="52" fill="url(#wrenchGrad)"/>
+    <ellipse cx="0" cy="270" rx="28" ry="28" fill="#0f2744"/>
+  </g>
+
+  <!-- CÍRCULO VERDE COM CHECK no canto inferior direito -->
+  <circle cx="720" cy="720" r="145" fill="#0f2744"/>
+  <circle cx="720" cy="720" r="130" fill="url(#checkGrad)"/>
+
+  <!-- Checkmark -->
+  <polyline
+    points="650,720 700,775 795,665"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="52"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
