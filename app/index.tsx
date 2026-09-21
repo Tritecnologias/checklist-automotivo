@@ -33,6 +33,16 @@ export default function IdentificationScreen() {
   const [mileage, setMileage] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const hasContent = plate.length > 0 || model.length > 0 || mileage.length > 0;
+
+  function handleClear() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setPlate('');
+    setModel('');
+    setMileage('');
+    setErrors({});
+  }
+
   const { mutate: createOrder, isPending } = useMutation({
     mutationFn: api.createOrder,
     onSuccess: (order) => {
@@ -93,7 +103,18 @@ export default function IdentificationScreen() {
       >
         {/* Logo / título */}
         <View className="items-center mb-10">
-          <View className="w-full flex-row justify-end mb-2">
+          <View className="w-full flex-row justify-end items-center gap-2 mb-2">
+            {hasContent && (
+              <TouchableOpacity
+                onPress={handleClear}
+                className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 dark:bg-red-900/30"
+              >
+                <Text style={{ fontSize: 16 }}>🗑️</Text>
+                <Text className="text-sm font-semibold text-red-600 dark:text-red-400">
+                  Limpar
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               onPress={() => router.push('/orders')}
               className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-slate-800"
