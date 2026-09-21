@@ -68,6 +68,20 @@ export default function ErpLayout() {
 
       {/* Main */}
       <div className="flex-1 min-w-0 flex flex-col">
+        <header className="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-end px-6 gap-4 shrink-0">
+          <a href="/admin/products" className="text-xs text-slate-400 hover:text-white transition-colors">
+            ⚙️ Admin
+          </a>
+          <a href="/" className="text-xs text-slate-400 hover:text-white transition-colors">
+            🔩 OS
+          </a>
+          <button
+            onClick={handleLogout}
+            className="text-xs text-red-400 hover:text-red-300 transition-colors"
+          >
+            🚪 Sair
+          </button>
+        </header>
         <main className="flex-1 p-6 overflow-auto">
           <Outlet />
         </main>
