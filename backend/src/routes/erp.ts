@@ -558,21 +558,20 @@ router.get('/estoque', async (req, res) => {
   const where = 'WHERE ' + whereParts.join(' AND ');
 
   const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total FROM cad_produtos p
-     LEFT JOIN cad_grupo g ON g.id = p.id_grupo ${where}`, params
+    `SELECT COUNT(*) as total FROM cad_produtos ${where}`, params
   );
   const [rows] = await pool.query<any>(
-    `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.estoque, p.min_estoque,
-            p.vr_compra, p.vr_venda, COALESCE(g.nome_grupo,'') as grupo
-     FROM cad_produtos p
-     LEFT JOIN cad_grupo g ON g.id = p.id_grupo
-     ${where} ORDER BY p.nome_produto LIMIT ? OFFSET ?`,
+    `SELECT id, nome_produto, cod_barra, unidade, estoque, min_estoque,
+            vr_compra, vr_venda
+     FROM cad_produtos
+     ${where} ORDER BY nome_produto LIMIT ? OFFSET ?`,
     [...params, limit, offset]
   );
 
   res.json({
     data: rows.map((r: any) => ({
       ...r,
+      grupo: '',
       estoque: Number(r.estoque),
       min_estoque: Number(r.min_estoque),
       vr_compra: Number(r.vr_compra),
