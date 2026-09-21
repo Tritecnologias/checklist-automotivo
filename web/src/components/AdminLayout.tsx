@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 const nav = [
   { to: '/admin/products', label: '📦 Produtos' },
   { to: '/admin/clients',  label: '👥 Clientes'  },
+  { to: '/erp',            label: '🏪 ERP'       },
 ]
 
 export default function AdminLayout() {

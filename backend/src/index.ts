@@ -20,6 +20,15 @@ app.use('/erp',    erpRouter);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('[ERROR]', err?.message ?? err);
+  res.status(500).json({ message: err?.message ?? 'Erro interno' });
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[UnhandledRejection]', reason?.message ?? reason);
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`API 4Rodas rodando em http://0.0.0.0:${PORT}`);
 });

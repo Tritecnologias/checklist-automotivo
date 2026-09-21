@@ -82,9 +82,7 @@ router.get('/caixa', async (req, res) => {
 
   const [[{ total }]] = await pool.query<any>('SELECT COUNT(*) as total FROM mv_caixa');
   const [rows] = await pool.query<any>(
-    `SELECT c.*, l.nome_login
-     FROM mv_caixa c LEFT JOIN cad_login l ON l.id = c.id_login
-     ORDER BY c.id DESC LIMIT ? OFFSET ?`,
+    'SELECT * FROM mv_caixa ORDER BY id DESC LIMIT ? OFFSET ?',
     [limit, offset]
   );
 
@@ -93,9 +91,7 @@ router.get('/caixa', async (req, res) => {
 
 router.get('/caixa/status', async (_req, res) => {
   const [[row]] = await pool.query<any>(
-    `SELECT c.*, l.nome_login
-     FROM mv_caixa c LEFT JOIN cad_login l ON l.id = c.id_login
-     WHERE c.status_caixa = 'A' ORDER BY c.id DESC LIMIT 1`
+    "SELECT * FROM mv_caixa WHERE status_caixa = 'A' ORDER BY id DESC LIMIT 1"
   );
   res.json(row ?? null);
 });
