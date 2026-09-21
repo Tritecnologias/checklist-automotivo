@@ -75,6 +75,25 @@ router.delete('/products/:id', async (req, res) => {
   res.status(204).end();
 });
 
+// tipo: 'entrada' (+qty) | 'saida' (-qty) | 'ajuste' (valor absoluto)
+router.patch('/products/:id/estoque', async (req, res) => {
+  const { tipo, quantidade } = req.body as { tipo: string; quantidade: number };
+  if (!['entrada', 'saida', 'ajuste'].includes(tipo) || isNaN(Number(quantidade)) || Number(quantidade) < 0) {
+    res.status(400).json({ message: 'Parâmetros inválidos' });
+    return;
+  }
+  const qty = Number(quantidade);
+  if (tipo === 'ajuste') {
+    await pool.query('UPDATE cad_produtos SET estoque = ? WHERE id = ?', [qty, req.params.id]);
+  } else if (tipo === 'entrada') {
+    await pool.query('UPDATE cad_produtos SET estoque = estoque + ? WHERE id = ?', [qty, req.params.id]);
+  } else {
+    await pool.query('UPDATE cad_produtos SET estoque = GREATEST(0, estoque - ?) WHERE id = ?', [qty, req.params.id]);
+  }
+  const [[row]] = await pool.query<any>('SELECT estoque FROM cad_produtos WHERE id = ?', [req.params.id]);
+  res.json({ estoque: Number(row.estoque) });
+});
+
 // ── CLIENTES ─────────────────────────────────────────────────────────────────
 
 router.get('/clients', async (req, res) => {

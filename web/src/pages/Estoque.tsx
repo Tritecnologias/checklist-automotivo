@@ -1,20 +1,154 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { erpApi } from '../lib/api'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { erpApi, adminApi } from '../lib/api'
 import type { ProdutoEstoque } from '../types'
+import Modal from '../components/Modal'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 const FILTROS = [
-  { value: '',      label: 'Todos' },
-  { value: 'baixo', label: 'Estoque baixo' },
-  { value: 'zerado',label: 'Zerado' },
+  { value: '',       label: 'Todos' },
+  { value: 'baixo',  label: 'Estoque baixo' },
+  { value: 'zerado', label: 'Zerado' },
 ]
+
+type Tipo = 'entrada' | 'saida' | 'ajuste'
+
+const TIPOS: { value: Tipo; label: string; desc: string; cor: string }[] = [
+  { value: 'entrada', label: 'Entrada',           desc: 'Adiciona ao estoque atual',        cor: 'bg-green-600 hover:bg-green-500' },
+  { value: 'saida',   label: 'Saída',             desc: 'Subtrai do estoque atual',         cor: 'bg-red-600 hover:bg-red-500'   },
+  { value: 'ajuste',  label: 'Ajuste (inventário)',desc: 'Define o valor exato do estoque',  cor: 'bg-blue-600 hover:bg-blue-500' },
+]
+
+function AjusteModal({
+  produto,
+  onClose,
+}: {
+  produto: ProdutoEstoque
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [tipo, setTipo] = useState<Tipo>('entrada')
+  const [quantidade, setQuantidade] = useState('')
+
+  const mut = useMutation({
+    mutationFn: () =>
+      adminApi.ajustarEstoque(produto.id, tipo, Number(quantidade)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['estoque'] })
+      onClose()
+    },
+  })
+
+  const qty = Number(quantidade)
+  const novoEstoque =
+    tipo === 'ajuste'  ? qty :
+    tipo === 'entrada' ? produto.estoque + qty :
+    Math.max(0, produto.estoque - qty)
+
+  const tipoAtual = TIPOS.find(t => t.value === tipo)!
+  const invalido = !quantidade || isNaN(qty) || qty < 0 || (tipo !== 'ajuste' && qty === 0)
+
+  return (
+    <Modal title={`Ajuste de Estoque — ${produto.nome_produto}`} onClose={onClose}>
+      <div className="space-y-5">
+
+        {/* Estoque atual */}
+        <div className="flex items-center justify-between bg-slate-800 rounded-lg px-4 py-3">
+          <span className="text-sm text-slate-400">Estoque atual</span>
+          <span className={`text-xl font-bold ${
+            produto.estoque <= 0 ? 'text-red-400' :
+            produto.estoque <= produto.min_estoque ? 'text-amber-400' : 'text-emerald-400'
+          }`}>
+            {produto.estoque} {produto.unidade}
+          </span>
+        </div>
+
+        {/* Tipo de movimentação */}
+        <div>
+          <p className="text-xs text-slate-400 mb-2 uppercase tracking-wider">Tipo de movimentação</p>
+          <div className="grid grid-cols-3 gap-2">
+            {TIPOS.map(t => (
+              <button
+                key={t.value}
+                onClick={() => setTipo(t.value)}
+                className={`py-2 px-3 rounded-lg text-sm font-medium border-2 transition-colors ${
+                  tipo === t.value
+                    ? 'border-blue-500 bg-blue-600/20 text-blue-300'
+                    : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500 mt-1.5">{tipoAtual.desc}</p>
+        </div>
+
+        {/* Quantidade */}
+        <div>
+          <label className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">
+            {tipo === 'ajuste' ? 'Nova quantidade em estoque' : 'Quantidade'}
+          </label>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={quantidade}
+            onChange={e => setQuantidade(e.target.value)}
+            placeholder="0"
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white text-lg font-semibold focus:outline-none focus:border-blue-500"
+            autoFocus
+          />
+        </div>
+
+        {/* Preview do resultado */}
+        {quantidade !== '' && !isNaN(qty) && (
+          <div className="flex items-center justify-between bg-slate-800/60 border border-slate-700 rounded-lg px-4 py-3">
+            <span className="text-sm text-slate-400">Estoque após ajuste</span>
+            <span className={`text-xl font-bold ${
+              novoEstoque <= 0 ? 'text-red-400' :
+              novoEstoque <= produto.min_estoque ? 'text-amber-400' : 'text-emerald-400'
+            }`}>
+              {novoEstoque} {produto.unidade}
+            </span>
+          </div>
+        )}
+
+        {/* Botões */}
+        <div className="flex gap-3 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm rounded-lg transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => mut.mutate()}
+            disabled={invalido || mut.isPending}
+            className={`flex-1 px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 ${tipoAtual.cor}`}
+          >
+            {mut.isPending ? 'Salvando…' : 'Confirmar'}
+          </button>
+        </div>
+
+        {mut.isError && (
+          <p className="text-red-400 text-xs text-center">
+            Erro ao salvar. Tente novamente.
+          </p>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+// ── Página principal ──────────────────────────────────────────────────────────
 
 export default function Estoque() {
   const [search, setSearch] = useState('')
   const [filtro, setFiltro] = useState('')
   const [page, setPage] = useState(1)
+  const [ajustando, setAjustando] = useState<ProdutoEstoque | null>(null)
 
   const { data: res, isLoading } = useQuery({
     queryKey: ['estoque', search, filtro, page],
@@ -25,7 +159,12 @@ export default function Estoque() {
 
   return (
     <div className="space-y-4 max-w-5xl">
-      <h1 className="text-2xl font-bold text-white">Estoque</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-white">Estoque</h1>
+        {res && (
+          <span className="text-sm text-slate-500">{res.total} produtos</span>
+        )}
+      </div>
 
       <div className="flex gap-3 flex-wrap">
         <div className="flex rounded-lg overflow-hidden border border-slate-700">
@@ -67,6 +206,7 @@ export default function Estoque() {
                 <th className="px-4 py-3 text-right">Venda</th>
                 <th className="px-4 py-3 text-center">Mín.</th>
                 <th className="px-4 py-3 text-right">Estoque</th>
+                <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -93,6 +233,14 @@ export default function Estoque() {
                       {zerado && <span className="ml-1 text-xs text-red-500 font-normal">zerado</span>}
                       {baixo  && <span className="ml-1 text-xs text-amber-500 font-normal">baixo</span>}
                     </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => setAjustando(p)}
+                        className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors whitespace-nowrap"
+                      >
+                        ± Ajustar
+                      </button>
+                    </td>
                   </tr>
                 )
               })}
@@ -111,6 +259,10 @@ export default function Estoque() {
           </div>
         )}
       </div>
+
+      {ajustando && (
+        <AjusteModal produto={ajustando} onClose={() => setAjustando(null)} />
+      )}
     </div>
   )
 }

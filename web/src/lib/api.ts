@@ -110,6 +110,11 @@ export const adminApi = {
     adminRequest(`/admin/products/${id}/toggle`, { method: 'PATCH' }),
   deleteProduct: (id: number) =>
     adminRequest(`/admin/products/${id}`, { method: 'DELETE' }),
+  ajustarEstoque: (id: number, tipo: 'entrada' | 'saida' | 'ajuste', quantidade: number) =>
+    adminRequest<{ estoque: number }>(`/admin/products/${id}/estoque`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tipo, quantidade }),
+    }),
 
   listClients: (search: string, page: number) =>
     adminRequest<{ data: any[]; total: number; pages: number }>(
