@@ -6,7 +6,8 @@ const nav = [
   { to: '/erp/vendas',  label: 'Vendas',    icon: '📋' },
   { to: '/erp/contas',  label: 'Financeiro',icon: '💰' },
   { to: '/erp/estoque', label: 'Estoque',   icon: '📦' },
-  { to: '/erp/caixa',   label: 'Caixa',     icon: '🏦' },
+  { to: '/erp/caixa',     label: 'Caixa',     icon: '🏦' },
+  { to: '/erp/clientes', label: 'Clientes',  icon: '👥' },
 ]
 
 export default function ErpLayout() {

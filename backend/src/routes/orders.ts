@@ -47,11 +47,18 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
 
 // ── GET /orders ─────────────────────────────────────────────────────────────
 
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
+  const { search } = req.query as { search?: string };
   try {
-    const [rows] = await pool.execute(
-      'SELECT * FROM os_orders ORDER BY created_at DESC LIMIT 100',
-    );
+    let sql = 'SELECT * FROM os_orders';
+    const params: string[] = [];
+    if (search?.trim()) {
+      const clean = search.replace(/[-\s]/g, '').toUpperCase();
+      sql += " WHERE REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') LIKE ?";
+      params.push(`%${clean}%`);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT 200';
+    const [rows] = await pool.execute(sql, params);
     res.json(
       (rows as Record<string, unknown>[]).map((o) => ({
         id: o.id,

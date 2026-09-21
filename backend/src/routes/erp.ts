@@ -412,6 +412,130 @@ router.get('/busca/clientes', async (req, res) => {
   res.json(rows);
 });
 
+// ── CLIENTES ─────────────────────────────────────────────────────────────────
+
+const PLATE_RE = /\b([A-Z]{3})[\-\s]?([0-9][A-Z0-9][0-9]{2})\b/i;
+
+function extractPlate(nome: string): string | null {
+  const m = String(nome || '').match(PLATE_RE);
+  if (!m) return null;
+  return (m[1] + m[2]).toUpperCase();
+}
+
+function stripPlate(nome: string): string {
+  return String(nome || '').replace(PLATE_RE, '').replace(/\s+/g, ' ').trim();
+}
+
+router.get('/clientes', async (req, res) => {
+  const page   = Math.max(1, Number(req.query.page ?? 1));
+  const limit  = 30;
+  const offset = (page - 1) * limit;
+  const search = String(req.query.search ?? '');
+
+  const whereParts: string[] = ['c.inativo = 0'];
+  const params: any[] = [];
+
+  if (search.length >= 2) {
+    whereParts.push('(c.nome_cliente LIKE ? OR c.telefone LIKE ? OR c.celular LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  const where = 'WHERE ' + whereParts.join(' AND ');
+
+  const [[{ total }]] = await pool.query<any>(
+    `SELECT COUNT(*) as total FROM cad_clientes c ${where}`, params
+  );
+
+  const [rows] = await pool.query<any>(
+    `SELECT c.id, c.nome_cliente, c.telefone, c.celular, c.inf_adicional,
+            MAX(v.data_venda) as ultima_compra,
+            COALESCE(SUM(v.vr_total),0) as total_gasto,
+            COUNT(v.id) as qtd_compras
+     FROM cad_clientes c
+     LEFT JOIN mv_vendas v ON v.id_cliente = c.id
+     ${where}
+     GROUP BY c.id
+     ORDER BY ultima_compra IS NULL, ultima_compra DESC
+     LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
+  );
+
+  res.json({
+    data: rows.map((r: any) => ({
+      id: r.id,
+      nome: stripPlate(r.nome_cliente),
+      nome_original: r.nome_cliente,
+      placa: extractPlate(r.nome_cliente),
+      modelo: r.inf_adicional || null,
+      telefone: r.telefone || r.celular || null,
+      ultima_compra: r.ultima_compra,
+      total_gasto: Number(r.total_gasto),
+      qtd_compras: Number(r.qtd_compras),
+    })),
+    total: Number(total),
+    pages: Math.ceil(Number(total) / limit),
+  });
+});
+
+router.get('/clientes/:id/historico', async (req, res) => {
+  const [[cliente]] = await pool.query<any>(
+    'SELECT * FROM cad_clientes WHERE id = ?', [req.params.id]
+  );
+  if (!cliente) { res.status(404).json({ message: 'Cliente não encontrado' }); return; }
+
+  const placa = extractPlate(cliente.nome_cliente);
+
+  const [vendas] = await pool.query<any>(
+    `SELECT v.controle, v.data_venda, v.vr_total, v.vr_dinheiro,
+            v.vr_cartao, v.vr_carne, v.em_aberto
+     FROM mv_vendas v
+     WHERE v.id_cliente = ?
+     ORDER BY v.data_venda DESC, v.controle DESC
+     LIMIT 50`,
+    [req.params.id]
+  );
+
+  let os: any[] = [];
+  if (placa) {
+    const clean = placa.replace(/[-\s]/g, '');
+    const [osRows] = await pool.query<any>(
+      `SELECT id, plate, model, mileage, status, total_amount, labor_amount, created_at
+       FROM os_orders
+       WHERE REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') = ?
+       ORDER BY created_at DESC`,
+      [clean]
+    );
+    os = (osRows as any[]).map((o: any) => ({
+      id: o.id,
+      plate: o.plate,
+      model: o.model,
+      mileage: Number(o.mileage),
+      status: o.status,
+      total: Number(o.total_amount),
+      laborAmount: Number(o.labor_amount ?? 0),
+      createdAt: o.created_at,
+    }));
+  }
+
+  res.json({
+    cliente: {
+      id: cliente.id,
+      nome: stripPlate(cliente.nome_cliente),
+      placa,
+      modelo: cliente.inf_adicional || null,
+      telefone: cliente.telefone || cliente.celular || null,
+      cpf_cnpj: cliente.cpf_cnpj || null,
+    },
+    vendas: (vendas as any[]).map((v: any) => ({
+      controle: v.controle,
+      data: v.data_venda,
+      total: Number(v.vr_total),
+      em_aberto: Number(v.em_aberto),
+    })),
+    os,
+  });
+});
+
 // ── ESTOQUE ──────────────────────────────────────────────────────────────────
 
 router.get('/estoque', async (req, res) => {

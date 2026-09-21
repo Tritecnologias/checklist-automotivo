@@ -102,6 +102,47 @@ export interface ProdutoEstoque {
   vr_venda: number
 }
 
+// ── Clientes ERP ─────────────────────────────────────────────────────────────
+
+export interface ClienteErp {
+  id: number
+  nome: string
+  nome_original: string
+  placa: string | null
+  modelo: string | null
+  telefone: string | null
+  ultima_compra: string | null
+  total_gasto: number
+  qtd_compras: number
+}
+
+export interface ClienteHistorico {
+  cliente: {
+    id: number
+    nome: string
+    placa: string | null
+    modelo: string | null
+    telefone: string | null
+    cpf_cnpj: string | null
+  }
+  vendas: {
+    controle: string
+    data: string
+    total: number
+    em_aberto: number
+  }[]
+  os: {
+    id: string
+    plate: string
+    model: string
+    mileage: number
+    status: string
+    total: number
+    laborAmount: number
+    createdAt: string
+  }[]
+}
+
 // ── Checklist Types ───────────────────────────────────────────────────────────
 
 export interface Vehicle {

@@ -45,8 +45,9 @@ export const api = {
       }),
     }),
 
-  /** GET /orders — lista todas as OS ordenadas por data */
-  listOrders: () => request<Order[]>('/orders'),
+  /** GET /orders — lista todas as OS, opcionalmente filtrando por placa */
+  listOrders: (search?: string) =>
+    request<Order[]>(search ? `/orders?search=${encodeURIComponent(search)}` : '/orders'),
 
   /** Busca uma OS pelo ID (usado pelo useQuery da tela de comanda) */
   getOrder: (id: string) => request<Order>(`/orders/${id}`),

@@ -1,6 +1,6 @@
 import type {
   Order, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
-  ClientePdv, Lancamento, ProdutoEstoque,
+  ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -78,6 +78,15 @@ export const erpApi = {
 
   buscaProdutos: (q: string) => adminRequest<ProdutoPdv[]>(`/erp/busca/produtos?q=${encodeURIComponent(q)}`),
   buscaClientes: (q: string) => adminRequest<ClientePdv[]>(`/erp/busca/clientes?q=${encodeURIComponent(q)}`),
+
+  clientes: (params: { search?: string; page?: number }) => {
+    const q = new URLSearchParams()
+    if (params.search) q.set('search', params.search)
+    if (params.page)   q.set('page',   String(params.page))
+    return adminRequest<{ data: ClienteErp[]; total: number; pages: number }>(`/erp/clientes?${q}`)
+  },
+  clienteHistorico: (id: number) =>
+    adminRequest<ClienteHistorico>(`/erp/clientes/${id}/historico`),
 
   estoque: (params: { search?: string; filtro?: string; page?: number }) => {
     const q = new URLSearchParams()
