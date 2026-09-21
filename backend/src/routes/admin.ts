@@ -70,6 +70,11 @@ router.patch('/products/:id/toggle', async (req, res) => {
   res.json({ ok: true });
 });
 
+router.delete('/products/:id', async (req, res) => {
+  await pool.query('DELETE FROM cad_produtos WHERE id=?', [req.params.id]);
+  res.status(204).end();
+});
+
 // ── CLIENTES ─────────────────────────────────────────────────────────────────
 
 router.get('/clients', async (req, res) => {
@@ -128,6 +133,11 @@ router.patch('/clients/:id/toggle', async (req, res) => {
     [req.params.id]
   );
   res.json({ ok: true });
+});
+
+router.delete('/clients/:id', async (req, res) => {
+  await pool.query('DELETE FROM cad_clientes WHERE id=?', [req.params.id]);
+  res.status(204).end();
 });
 
 export default router;

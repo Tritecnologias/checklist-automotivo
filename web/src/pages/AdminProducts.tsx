@@ -27,9 +27,10 @@ export default function AdminProducts() {
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [page, setPage]     = useState(1)
-  const [editing, setEditing] = useState<Product | null>(null)
-  const [adding, setAdding]   = useState(false)
-  const [form, setForm]       = useState<Omit<Product, 'id'>>(empty)
+  const [editing, setEditing]     = useState<Product | null>(null)
+  const [adding, setAdding]       = useState(false)
+  const [form, setForm]           = useState<Omit<Product, 'id'>>(empty)
+  const [confirmDelete, setConfirmDelete] = useState<Product | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-products', search, page],
@@ -53,6 +54,14 @@ export default function AdminProducts() {
   const toggleMut = useMutation({
     mutationFn: (id: number) => adminApi.toggleProduct(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-products'] }),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: number) => adminApi.deleteProduct(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-products'] })
+      setConfirmDelete(null)
+    },
   })
 
   function onSearch(v: string) { setSearch(v); setPage(1) }
@@ -119,12 +128,20 @@ export default function AdminProducts() {
                       </button>
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => setEditing({ ...p })}
-                        className="text-blue-400 hover:text-blue-300 text-xs font-medium"
-                      >
-                        Editar
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setEditing({ ...p })}
+                          className="text-blue-400 hover:text-blue-300 text-xs font-medium"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(p)}
+                          className="text-red-400 hover:text-red-300 text-xs font-medium"
+                        >
+                          Excluir
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -175,6 +192,37 @@ export default function AdminProducts() {
             loading={createMut.isPending}
             label="Criar produto"
           />
+        </Modal>
+      )}
+
+      {confirmDelete && (
+        <Modal title="Excluir produto" onClose={() => setConfirmDelete(null)}>
+          <div className="space-y-4">
+            <p className="text-slate-300 text-sm">
+              Tem certeza que deseja excluir permanentemente o produto:
+            </p>
+            <p className="font-semibold text-white bg-slate-800 rounded-lg px-4 py-3">
+              {confirmDelete.nome_produto}
+            </p>
+            <p className="text-xs text-red-400">
+              Esta ação não pode ser desfeita. O produto será removido do banco de dados.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteMut.mutate(confirmDelete.id)}
+                disabled={deleteMut.isPending}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                {deleteMut.isPending ? 'Excluindo...' : 'Excluir definitivamente'}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

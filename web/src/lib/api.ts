@@ -108,6 +108,8 @@ export const adminApi = {
     adminRequest(`/admin/products`, { method: 'POST', body: JSON.stringify(data) }),
   toggleProduct: (id: number) =>
     adminRequest(`/admin/products/${id}/toggle`, { method: 'PATCH' }),
+  deleteProduct: (id: number) =>
+    adminRequest(`/admin/products/${id}`, { method: 'DELETE' }),
 
   listClients: (search: string, page: number) =>
     adminRequest<{ data: any[]; total: number; pages: number }>(
@@ -119,4 +121,6 @@ export const adminApi = {
     adminRequest(`/admin/clients`, { method: 'POST', body: JSON.stringify(data) }),
   toggleClient: (id: number) =>
     adminRequest(`/admin/clients/${id}/toggle`, { method: 'PATCH' }),
+  deleteClient: (id: number) =>
+    adminRequest(`/admin/clients/${id}`, { method: 'DELETE' }),
 }
