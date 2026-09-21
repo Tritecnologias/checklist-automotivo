@@ -30,6 +30,7 @@ export interface Venda {
   id: number
   controle: string
   data_venda: string
+  hora_venda: string
   vr_total: number
   vr_adicional: number
   vr_dinheiro: number
@@ -80,6 +81,9 @@ export interface Lancamento {
   vr_abatimentos: number
   vr_liquido: number
   status_lancamento: number
+  status: number
+  data_lancamento: string
+  valor: number
   id_cliente: number
   nome_cliente: string
   modo_lancamento: string
@@ -90,9 +94,11 @@ export interface ProdutoEstoque {
   nome_produto: string
   cod_barra: string
   unidade: string
+  grupo: string
   estoque: number
   min_estoque: number
   vr_compra: number
+  vr_custo: number
   vr_venda: number
 }
 

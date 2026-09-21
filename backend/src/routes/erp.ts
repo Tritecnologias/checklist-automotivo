@@ -183,6 +183,7 @@ router.get('/vendas', async (req, res) => {
   res.json({
     data: rows.map((r: any) => ({
       ...r,
+      hora_venda: String(r.controle).slice(8, 10) + ':' + String(r.controle).slice(10, 12),
       vr_total: Number(r.vr_total),
       vr_adicional: Number(r.vr_adicional),
       vr_dinheiro: Number(r.vr_dinheiro),
@@ -328,7 +329,8 @@ router.get('/contas', async (req, res) => {
   const page   = Math.max(1, Number(req.query.page ?? 1));
   const limit  = 30;
   const offset = (page - 1) * limit;
-  const status = req.query.status === 'pago' ? 1 : req.query.status === 'todos' ? null : 0;
+  const statusQ = req.query.status;
+  const status = statusQ === '1' || statusQ === 'pago' ? 1 : statusQ === '' || statusQ === 'todos' ? null : 0;
   const search = String(req.query.search ?? '');
 
   const whereParts: string[] = [];
@@ -363,6 +365,9 @@ router.get('/contas', async (req, res) => {
   res.json({
     data: rows.map((r: any) => ({
       ...r,
+      status: Number(r.status_lancamento),
+      data_lancamento: r.data_vencimento,
+      valor: Number(r.vr_parcela) - Number(r.vr_abatimentos),
       vr_parcela: Number(r.vr_parcela),
       vr_abatimentos: Number(r.vr_abatimentos),
       vr_liquido: Number(r.vr_parcela) - Number(r.vr_abatimentos),
@@ -433,11 +438,15 @@ router.get('/estoque', async (req, res) => {
   const where = 'WHERE ' + whereParts.join(' AND ');
 
   const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total FROM cad_produtos ${where}`, params
+    `SELECT COUNT(*) as total FROM cad_produtos p
+     LEFT JOIN cad_grupo g ON g.id = p.id_grupo ${where}`, params
   );
   const [rows] = await pool.query<any>(
-    `SELECT id, nome_produto, cod_barra, unidade, estoque, min_estoque, vr_compra, vr_venda
-     FROM cad_produtos ${where} ORDER BY nome_produto LIMIT ? OFFSET ?`,
+    `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.estoque, p.min_estoque,
+            p.vr_compra, p.vr_venda, COALESCE(g.nome_grupo,'') as grupo
+     FROM cad_produtos p
+     LEFT JOIN cad_grupo g ON g.id = p.id_grupo
+     ${where} ORDER BY p.nome_produto LIMIT ? OFFSET ?`,
     [...params, limit, offset]
   );
 
@@ -447,6 +456,7 @@ router.get('/estoque', async (req, res) => {
       estoque: Number(r.estoque),
       min_estoque: Number(r.min_estoque),
       vr_compra: Number(r.vr_compra),
+      vr_custo: Number(r.vr_compra),
       vr_venda: Number(r.vr_venda),
     })),
     total: Number(total),
