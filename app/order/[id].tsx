@@ -18,28 +18,25 @@ import { ServicePriceModal } from '@/components/ServicePriceModal';
 import {
   useAddItem,
   useRemoveItem,
+  useUpdateItemLabor,
   useUpdateQuantity,
 } from '@/hooks/useOrderMutations';
 import { useDebounce } from '@/hooks/useDebounce';
 import { api } from '@/lib/api';
 import type { CatalogItem, Order, OrderItem, PendingAction } from '@/types';
 
-// ─── Formatação de moeda ──────────────────────────────────────────────────────
-
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-// ─── Comanda de Serviços ──────────────────────────────────────────────────────
 
 export default function OrderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [search, setSearch] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
-  const [showLaborModal, setShowLaborModal] = useState(false);
+  const [laborItem, setLaborItem] = useState<OrderItem | null>(null);
   const debouncedSearch = useDebounce(search, 400);
 
-  // ─── Queries ────────────────────────────────────────────────────────────────
+  // ─── Queries ─────────────────────────────────────────────────────────────────
 
   const {
     data: order,
@@ -49,7 +46,7 @@ export default function OrderScreen() {
     queryKey: ['order', id],
     queryFn: () => api.getOrder(id),
     enabled: !!id,
-    refetchInterval: 15_000, // polling suave — WS cobre o resto
+    refetchInterval: 15_000,
   });
 
   const {
@@ -62,13 +59,14 @@ export default function OrderScreen() {
     placeholderData: (prev) => prev ?? [],
   });
 
-  // ─── Mutações ───────────────────────────────────────────────────────────────
+  // ─── Mutações ─────────────────────────────────────────────────────────────────
 
   const qc = useQueryClient();
 
   const { mutate: addItem, isPending: adding } = useAddItem(id);
   const { mutate: removeItem } = useRemoveItem(id);
   const { mutate: updateQty } = useUpdateQuantity(id);
+  const { mutate: updateItemLabor } = useUpdateItemLabor(id);
 
   const { mutate: closeOrder, isPending: closing } = useMutation({
     mutationFn: (status: string) => api.updateOrderStatus(id, status),
@@ -82,24 +80,14 @@ export default function OrderScreen() {
     },
   });
 
-  const { mutate: updateLabor } = useMutation({
-    mutationFn: (amount: number) => api.updateLaborAmount(id, amount),
-    onSuccess: (updated: Order) => {
-      qc.setQueryData(['order', id], updated);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    },
-    onError: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    },
-  });
-
-  // ─── Totais (calculados antes dos handlers para uso nas deps) ───────────────
+  // ─── Totais ───────────────────────────────────────────────────────────────────
 
   const items = order?.items ?? [];
-  const totalParts = items.reduce((acc, i) => acc + i.total, 0);
-  const laborAmount = order?.laborAmount ?? 0;
+  const totalParts  = items.reduce((acc, i) => acc + (i.total ?? 0), 0);
+  const totalLabor  = items.reduce((acc, i) => acc + (i.laborPrice ?? 0), 0);
+  const totalGeral  = totalParts + totalLabor;
 
-  // ─── Handlers ───────────────────────────────────────────────────────────────
+  // ─── Handlers ─────────────────────────────────────────────────────────────────
 
   const handleAddCatalogItem = useCallback(
     (item: CatalogItem) => {
@@ -119,12 +107,23 @@ export default function OrderScreen() {
     [addItem],
   );
 
+  const handleLaborRequest = useCallback((item: OrderItem) => {
+    setLaborItem(item);
+  }, []);
+
   const handleLaborConfirm = useCallback(
     (price: number) => {
-      setShowLaborModal(false);
-      updateLabor(price);
+      if (!laborItem) return;
+      setLaborItem(null);
+      updateItemLabor(
+        { itemId: laborItem.id, laborPrice: price },
+        {
+          onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+          onError:   () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+        },
+      );
     },
-    [updateLabor],
+    [laborItem, updateItemLabor],
   );
 
   const handleDeleteRequest = useCallback((item: OrderItem) => {
@@ -154,29 +153,26 @@ export default function OrderScreen() {
     ];
 
     if (order.items.length) {
-      lines.push('PEÇAS/SERVIÇOS:');
-      order.items.forEach((i) =>
-        lines.push(`  • ${i.description} x${i.quantity} = ${currency(i.total)}`),
-      );
+      lines.push('PEÇAS / SERVIÇOS:');
+      order.items.forEach((i) => {
+        lines.push(`  • ${i.description} x${i.quantity}`);
+        lines.push(`    Peça: ${currency(i.total)}${i.laborPrice > 0 ? `  |  M.O.: ${currency(i.laborPrice)}` : ''}`);
+      });
       lines.push('');
-    }
-    if (order.laborAmount > 0) {
-      lines.push(`Mão de obra:  ${currency(order.laborAmount)}`);
     }
 
     lines.push(`Total Peças:  ${currency(totalParts)}`);
-    lines.push(`Total M.O.:   ${currency(laborAmount)}`);
-    lines.push(`TOTAL GERAL:  ${currency(order.totalAmount)}`);
+    lines.push(`Total M.O.:   ${currency(totalLabor)}`);
+    lines.push(`TOTAL GERAL:  ${currency(totalGeral)}`);
 
     await Share.share({ message: lines.join('\n'), title: `OS ${order.vehicle.plate}` });
-  }, [order, totalParts, laborAmount]);
+  }, [order, totalParts, totalLabor, totalGeral]);
 
   const handleQuantityChange = useCallback(
     (item: OrderItem, delta: 1 | -1) => {
       const next = item.quantity + delta;
 
       if (next <= 0) {
-        // Redução a zero → trata como exclusão
         setPendingAction({
           type: 'delete',
           itemId: item.id,
@@ -195,7 +191,6 @@ export default function OrderScreen() {
         return;
       }
 
-      // Aumento direto — sem PIN
       updateQty({ itemId: item.id, quantity: next });
     },
     [updateQty],
@@ -206,18 +201,12 @@ export default function OrderScreen() {
 
     if (pendingAction.type === 'delete') {
       removeItem(pendingAction.itemId, {
-        onSuccess: () => {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        },
+        onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
       });
     } else if (pendingAction.type === 'reduce' && pendingAction.targetQuantity !== undefined) {
       updateQty(
         { itemId: pendingAction.itemId, quantity: pendingAction.targetQuantity },
-        {
-          onSuccess: () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          },
-        },
+        { onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success) },
       );
     } else if (pendingAction.type === 'close') {
       closeOrder('closed');
@@ -226,15 +215,13 @@ export default function OrderScreen() {
     setPendingAction(null);
   }, [pendingAction, removeItem, updateQty, closeOrder]);
 
-  // ─── Estados de carregamento / erro ─────────────────────────────────────────
+  // ─── Estados de carregamento / erro ──────────────────────────────────────────
 
   if (orderLoading) {
     return (
       <View className="flex-1 items-center justify-center bg-slate-50 dark:bg-slate-950">
         <ActivityIndicator size="large" color="#3b82f6" />
-        <Text className="mt-3 text-gray-500 dark:text-slate-400">
-          Carregando OS…
-        </Text>
+        <Text className="mt-3 text-gray-500 dark:text-slate-400">Carregando OS…</Text>
       </View>
     );
   }
@@ -255,7 +242,7 @@ export default function OrderScreen() {
 
   const showSearchResults = debouncedSearch.length >= 2;
 
-  // ─── Render ──────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <View className="flex-1 bg-slate-50 dark:bg-slate-950">
@@ -275,7 +262,6 @@ export default function OrderScreen() {
             </Text>
           </View>
 
-          {/* Status */}
           <View
             className={`px-3 py-1.5 rounded-full ${
               order.status === 'open'
@@ -345,6 +331,7 @@ export default function OrderScreen() {
               item={item}
               onDeleteRequest={handleDeleteRequest}
               onQuantityChange={handleQuantityChange}
+              onLaborRequest={handleLaborRequest}
             />
           )}
           ListEmptyComponent={
@@ -368,32 +355,34 @@ export default function OrderScreen() {
                 <Text className="text-sm font-semibold text-gray-500 dark:text-slate-400 mb-3">
                   Resumo
                 </Text>
+
+                {/* Total Peças */}
                 <View className="flex-row justify-between mb-2">
                   <Text className="text-sm text-gray-600 dark:text-slate-400">
-                    Peças
+                    Total Peças
                   </Text>
                   <Text className="text-sm font-medium text-amber-600 dark:text-amber-400">
                     {currency(totalParts)}
                   </Text>
                 </View>
-                <TouchableOpacity
-                  onPress={() => setShowLaborModal(true)}
-                  className="flex-row justify-between mb-3 py-1 -mx-1 px-1 rounded-lg active:bg-blue-50 dark:active:bg-blue-900/20"
-                  activeOpacity={0.7}
-                >
+
+                {/* Total MO */}
+                <View className="flex-row justify-between mb-3">
                   <Text className="text-sm text-gray-600 dark:text-slate-400">
-                    Mão de obra ✏️
+                    Total Mão de Obra
                   </Text>
-                  <Text className="text-sm font-medium text-blue-600 dark:text-blue-400">
-                    {currency(laborAmount)}
+                  <Text className={`text-sm font-medium ${totalLabor > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-slate-500'}`}>
+                    {currency(totalLabor)}
                   </Text>
-                </TouchableOpacity>
+                </View>
+
+                {/* Total Geral */}
                 <View className="border-t border-gray-100 dark:border-slate-700 pt-3 flex-row justify-between">
                   <Text className="text-base font-bold text-gray-900 dark:text-white">
-                    Total
+                    Total Geral
                   </Text>
                   <Text className="text-base font-bold text-green-600 dark:text-green-400">
-                    {currency(order.totalAmount)}
+                    {currency(totalGeral)}
                   </Text>
                 </View>
 
@@ -432,13 +421,13 @@ export default function OrderScreen() {
         />
       )}
 
-      {/* Modal de mão de obra */}
+      {/* Modal de MO por item */}
       <ServicePriceModal
-        visible={showLaborModal}
-        title="Mão de Obra"
-        initialValue={laborAmount}
+        visible={laborItem !== null}
+        title={laborItem ? `M.O.: ${laborItem.description}` : 'Mão de Obra'}
+        initialValue={laborItem?.laborPrice ?? 0}
         onConfirm={handleLaborConfirm}
-        onCancel={() => setShowLaborModal(false)}
+        onCancel={() => setLaborItem(null)}
       />
 
       {/* Modal de PIN */}

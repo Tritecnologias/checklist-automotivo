@@ -52,8 +52,9 @@ export default function OrderDetail() {
 
   const parts    = order.items.filter((i) => i.type === 'part')
   const services = order.items.filter((i) => i.type === 'service')
-  const totalParts    = parts.reduce((s, i) => s + i.total, 0)
-  const totalServices = services.reduce((s, i) => s + i.total, 0)
+  const totalParts  = order.items.reduce((s, i) => s + i.total, 0)
+  const totalLabor  = order.items.reduce((s, i) => s + (i.laborPrice ?? 0), 0)
+  const totalGeral  = totalParts + totalLabor
 
   return (
     <div className="space-y-6">
@@ -147,12 +148,12 @@ export default function OrderDetail() {
         <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Resumo</h3>
           <div className="space-y-2.5">
-            <SummaryRow label="Peças"       value={currency(totalParts)}    color="text-amber-400" />
-            <SummaryRow label="Mão de obra" value={currency(totalServices + (order.laborAmount ?? 0))} color="text-blue-400" />
+            <SummaryRow label="Total Peças"      value={currency(totalParts)} color="text-amber-400" />
+            <SummaryRow label="Total Mão de Obra" value={currency(totalLabor)} color="text-blue-400" />
             <div className="border-t border-slate-700 pt-3 mt-1">
               <SummaryRow
-                label="Total geral"
-                value={currency(order.totalAmount)}
+                label="Total Geral"
+                value={currency(totalGeral)}
                 color="text-green-400"
                 bold
               />
@@ -182,7 +183,8 @@ function ItemsTable({
               <th className="px-5 py-3">Descrição</th>
               <th className="px-5 py-3 text-right">Qtd</th>
               <th className="px-5 py-3 text-right">Unit.</th>
-              <th className="px-5 py-3 text-right">Total</th>
+              <th className="px-5 py-3 text-right">Total Peça</th>
+              <th className="px-5 py-3 text-right">M.O.</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
@@ -196,6 +198,9 @@ function ItemsTable({
                 </td>
                 <td className={`px-5 py-3 text-right font-semibold ${accentColor}`}>
                   {currency(item.total)}
+                </td>
+                <td className="px-5 py-3 text-right font-semibold text-blue-400">
+                  {(item.laborPrice ?? 0) > 0 ? currency(item.laborPrice) : '—'}
                 </td>
               </tr>
             ))}

@@ -117,6 +117,7 @@ export interface OrderItem {
   type: 'part' | 'service'
   quantity: number
   unitPrice: number
+  laborPrice: number
   total: number
 }
 

@@ -8,16 +8,17 @@ const router = Router();
 
 async function recalcTotal(orderId: string): Promise<number> {
   const [rows] = await pool.execute(
-    `SELECT COALESCE(SUM(i.total), 0) AS items_t, COALESCE(o.labor_amount, 0) AS labor_t
-     FROM os_orders o LEFT JOIN os_order_items i ON i.order_id = o.id
-     WHERE o.id = ? GROUP BY o.id`,
+    `SELECT COALESCE(SUM(total), 0) AS items_t, COALESCE(SUM(labor_price), 0) AS labor_t
+     FROM os_order_items WHERE order_id = ?`,
     [orderId],
   );
   const row = (rows as { items_t: string; labor_t: string }[])[0];
-  const total = row ? Number(row.items_t) + Number(row.labor_t) : 0;
+  const totalParts  = row ? Number(row.items_t) : 0;
+  const totalLabor  = row ? Number(row.labor_t) : 0;
+  const total       = totalParts + totalLabor;
   await pool.execute(
-    'UPDATE os_orders SET total_amount = ?, updated_at = NOW() WHERE id = ?',
-    [total, orderId],
+    'UPDATE os_orders SET labor_amount = ?, total_amount = ?, updated_at = NOW() WHERE id = ?',
+    [totalLabor, total, orderId],
   );
   return total;
 }
@@ -34,6 +35,7 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
       type: i.type,
       quantity: Number(i.quantity),
       unitPrice: Number(i.unit_price),
+      laborPrice: Number(i.labor_price ?? 0),
       total: Number(i.total),
     })),
     laborAmount: Number(order.labor_amount ?? 0),
@@ -129,10 +131,11 @@ router.get('/:id', async (req: Request, res: Response) => {
 // ── POST /orders/:id/items ──────────────────────────────────────────────────
 
 router.post('/:id/items', async (req: Request, res: Response) => {
-  const { catalogItemId, quantity = 1, unitPrice: overridePrice } = req.body as {
+  const { catalogItemId, quantity = 1, unitPrice: overridePrice, laborPrice = 0 } = req.body as {
     catalogItemId?: number | string;
     quantity?: number;
     unitPrice?: number;
+    laborPrice?: number;
   };
 
   if (!catalogItemId) {
@@ -162,11 +165,13 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       : Number(product.unit_price);
     const total     = qty * unitPrice;
 
+    const lp = Number(laborPrice) >= 0 ? Number(laborPrice) : 0;
+
     await pool.execute(
       `INSERT INTO os_order_items
-         (id, order_id, product_id, code, description, type, quantity, unit_price, total)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [itemId, req.params.id, product.id, product.code, product.description, product.type, qty, unitPrice, total],
+         (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [itemId, req.params.id, product.id, product.code, product.description, product.type, qty, unitPrice, lp, total],
     );
 
     await recalcTotal(req.params.id);
@@ -178,6 +183,7 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       type: product.type,
       quantity: qty,
       unitPrice,
+      laborPrice: lp,
       total,
     });
   } catch (err) {
@@ -294,6 +300,40 @@ router.patch('/:id/labor', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('PATCH /orders/:id/labor error:', err);
     res.status(500).json({ message: 'Erro ao atualizar mão de obra' });
+  }
+});
+
+// ── PATCH /orders/:id/items/:itemId/labor ──────────────────────────────────
+
+router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => {
+  const { laborPrice } = req.body as { laborPrice?: number };
+
+  if (laborPrice === undefined || Number(laborPrice) < 0) {
+    res.status(400).json({ message: 'laborPrice deve ser >= 0' });
+    return;
+  }
+
+  try {
+    await pool.execute(
+      'UPDATE os_order_items SET labor_price = ? WHERE id = ? AND order_id = ?',
+      [Number(laborPrice), req.params.itemId, req.params.id],
+    );
+
+    await recalcTotal(req.params.id);
+
+    const [orders] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (orders as Record<string, unknown>[])[0];
+    if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
+
+    const [items] = await pool.execute(
+      'SELECT * FROM os_order_items WHERE order_id = ? ORDER BY created_at',
+      [req.params.id],
+    );
+
+    res.json(formatOrder(order, items as Record<string, unknown>[]));
+  } catch (err) {
+    console.error('PATCH /orders/:id/items/:itemId/labor error:', err);
+    res.status(500).json({ message: 'Erro ao atualizar mão de obra do item' });
   }
 });
 

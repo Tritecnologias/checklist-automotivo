@@ -32,6 +32,7 @@ export interface OrderItem {
   type: ItemType;
   quantity: number;
   unitPrice: number;
+  laborPrice: number;
   total: number;
 }
 

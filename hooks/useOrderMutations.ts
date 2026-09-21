@@ -76,6 +76,44 @@ export function useUpdateQuantity(orderId: string) {
   });
 }
 
+// ─── Atualizar MO de um item ──────────────────────────────────────────────────
+
+export function useUpdateItemLabor(orderId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ itemId, laborPrice }: { itemId: string; laborPrice: number }) =>
+      api.updateItemLabor(orderId, itemId, laborPrice),
+    onMutate: async ({ itemId, laborPrice }) => {
+      await qc.cancelQueries({ queryKey: ['order', orderId] });
+      const snapshot = qc.getQueryData<Order>(['order', orderId]);
+      qc.setQueryData<Order>(['order', orderId], (prev) => {
+        if (!prev) return prev;
+        const newItems = prev.items.map((i) =>
+          i.id === itemId ? { ...i, laborPrice } : i,
+        );
+        const totalLabor = newItems.reduce((s, i) => s + (i.laborPrice ?? 0), 0);
+        const totalParts = newItems.reduce((s, i) => s + (i.total ?? 0), 0);
+        return {
+          ...prev,
+          items: newItems,
+          laborAmount: totalLabor,
+          totalAmount: totalParts + totalLabor,
+        };
+      });
+      return { snapshot };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.snapshot) qc.setQueryData(['order', orderId], ctx.snapshot);
+    },
+    onSuccess: (updated: Order) => {
+      qc.setQueryData(['order', orderId], updated);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['order', orderId] });
+    },
+  });
+}
+
 // ─── Verificar PIN de supervisor ──────────────────────────────────────────────
 
 export function useVerifyPin() {
