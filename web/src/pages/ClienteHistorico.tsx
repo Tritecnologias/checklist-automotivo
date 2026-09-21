@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
-import type { Venda } from '../types'
+import type { Venda, ClienteHistorico as ClienteHistoricoType } from '../types'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -20,6 +20,207 @@ const STATUS_CLASS: Record<string, string> = {
   open:        'bg-green-900/40 text-green-400',
   in_progress: 'bg-amber-900/40 text-amber-400',
   closed:      'bg-slate-700 text-slate-400',
+}
+
+// ── Geração do HTML de impressão ──────────────────────────────────────────────
+
+function buildPrintHtml(
+  data: ClienteHistoricoType,
+  detalhesPorControle: Record<string, Venda>,
+) {
+  const { cliente, vendas, os } = data
+  const now = new Date().toLocaleDateString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+
+  const totalCompras = vendas.reduce((s, v) => s + v.total, 0)
+  const totalOs      = os.reduce((s, o) => s + o.total + o.laborAmount, 0)
+
+  const vendasHtml = vendas.map(v => {
+    const det = detalhesPorControle[v.controle]
+    const itens = det?.itens ?? []
+    const itensHtml = itens.length
+      ? `<table class="sub-table">
+          <thead><tr>
+            <th style="text-align:left">Produto</th>
+            <th style="text-align:right">Qtd</th>
+            <th style="text-align:right">Unit.</th>
+            <th style="text-align:right">Subtotal</th>
+          </tr></thead>
+          <tbody>
+            ${itens.map(i => `
+              <tr>
+                <td>${i.nome_produto}</td>
+                <td style="text-align:right">${Number(i.quant).toLocaleString('pt-BR')}</td>
+                <td style="text-align:right">${currency(i.valor)}</td>
+                <td style="text-align:right">${currency(i.vr_total)}</td>
+              </tr>`).join('')}
+          </tbody>
+          <tfoot><tr>
+            <td colspan="3" style="text-align:left;color:#555">${itens.length} ${itens.length === 1 ? 'item' : 'itens'}</td>
+            <td style="text-align:right;font-weight:700">${currency(itens.reduce((s, i) => s + i.vr_total, 0))}</td>
+          </tr></tfoot>
+        </table>`
+      : ''
+
+    return `<tr class="venda-row">
+      <td class="mono">${v.controle}</td>
+      <td>${formatDate(v.data)}</td>
+      <td style="text-align:right;font-weight:600">${currency(v.total)}</td>
+      <td style="text-align:right">${v.em_aberto > 0 ? `<span class="aberto">${currency(v.em_aberto)}</span>` : '<span class="quitado">Quitado</span>'}</td>
+    </tr>
+    ${itensHtml ? `<tr><td colspan="4" style="padding:0">${itensHtml}</td></tr>` : ''}`
+  }).join('')
+
+  const osHtml = os.length
+    ? `<h2>Ordens de Serviço — App (${os.length})</h2>
+       <table>
+         <thead><tr>
+           <th style="text-align:left">OS / Placa</th>
+           <th style="text-align:left">Modelo</th>
+           <th style="text-align:left">Data</th>
+           <th style="text-align:left">Status</th>
+           <th style="text-align:right">Peças</th>
+           <th style="text-align:right">M.O.</th>
+           <th style="text-align:right">Total</th>
+         </tr></thead>
+         <tbody>
+           ${os.map(o => `<tr>
+             <td><span class="mono">#${o.id.split('-')[0].toUpperCase()}</span><br><span class="placa">${o.plate}</span></td>
+             <td>${o.model || '—'}</td>
+             <td>${formatDate(o.createdAt)}</td>
+             <td>${STATUS_LABEL[o.status] ?? o.status}</td>
+             <td style="text-align:right">${currency(o.total)}</td>
+             <td style="text-align:right">${currency(o.laborAmount)}</td>
+             <td style="text-align:right;font-weight:600">${currency(o.total + o.laborAmount)}</td>
+           </tr>`).join('')}
+         </tbody>
+       </table>`
+    : `<h2>Ordens de Serviço — App</h2>
+       <p style="color:#555">${cliente.placa
+         ? `Nenhuma OS encontrada para a placa ${cliente.placa}.`
+         : 'Placa não identificada — cruzamento de OS indisponível.'}</p>`
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Histórico — ${cliente.nome}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #000; background: #fff; padding: 24px; }
+
+    .header { border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 16px; }
+    .header h1 { font-size: 18px; font-weight: 700; }
+    .header p  { font-size: 11px; color: #555; margin-top: 2px; }
+
+    .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;
+                 border: 1px solid #ccc; border-radius: 6px; padding: 14px; margin-bottom: 20px; background: #f9f9f9; }
+    .info-block p.label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
+    .info-block p.value { font-size: 13px; font-weight: 700; }
+    .info-block p.sub   { font-size: 11px; color: #555; }
+    .placa-badge { display: inline-block; font-family: monospace; font-size: 13px; font-weight: 700;
+                   border: 1px solid #000; border-radius: 4px; padding: 1px 8px; letter-spacing: .1em; }
+
+    h2 { font-size: 14px; font-weight: 700; margin: 20px 0 8px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    th { background: #f0f0f0; font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+         padding: 6px 8px; border: 1px solid #ccc; }
+    td { padding: 6px 8px; border: 1px solid #e0e0e0; vertical-align: top; }
+    tr:nth-child(even) td { background: #fafafa; }
+    .venda-row td { background: #fff; font-weight: 500; border-top: 2px solid #ccc; }
+
+    .sub-table { margin: 4px 0 4px 24px; width: calc(100% - 24px); border-collapse: collapse; }
+    .sub-table th { font-size: 10px; background: #efefef; padding: 4px 6px; border: 1px solid #ddd; }
+    .sub-table td { font-size: 11px; padding: 4px 6px; border: 1px solid #e8e8e8; }
+    .sub-table tfoot td { font-size: 11px; background: #f5f5f5; border-top: 1px solid #ccc; }
+
+    .mono  { font-family: monospace; font-size: 11px; }
+    .placa { font-family: monospace; font-weight: 700; font-size: 11px; }
+    .aberto  { color: #c00; font-weight: 700; }
+    .quitado { color: #555; }
+
+    .totais { margin-top: 20px; border: 1px solid #ccc; border-radius: 6px; padding: 12px;
+              display: flex; gap: 32px; background: #f9f9f9; }
+    .totais .bloco p.t  { font-size: 10px; color: #888; text-transform: uppercase; }
+    .totais .bloco p.v  { font-size: 16px; font-weight: 700; }
+
+    .rodape { margin-top: 24px; border-top: 1px solid #ccc; padding-top: 8px;
+              font-size: 10px; color: #888; text-align: center; }
+
+    @media print { body { padding: 12px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Histórico do Cliente</h1>
+    <p>Emitido em ${now} &nbsp;|&nbsp; 4Rodas ERP</p>
+  </div>
+
+  <div class="info-grid">
+    <div class="info-block">
+      <p class="label">Cliente</p>
+      <p class="value">${cliente.nome}</p>
+      ${cliente.telefone ? `<p class="sub">${cliente.telefone}</p>` : ''}
+      ${cliente.cpf_cnpj ? `<p class="sub">${cliente.cpf_cnpj}</p>` : ''}
+    </div>
+    ${cliente.placa || cliente.modelo ? `
+    <div class="info-block">
+      <p class="label">Veículo</p>
+      ${cliente.placa ? `<p class="value"><span class="placa-badge">${cliente.placa}</span></p>` : ''}
+      ${cliente.modelo ? `<p class="sub" style="margin-top:4px">${cliente.modelo}</p>` : ''}
+    </div>` : ''}
+    <div class="info-block">
+      <p class="label">Total em Compras ERP</p>
+      <p class="value">${currency(totalCompras)}</p>
+      <p class="sub">${vendas.length} venda${vendas.length !== 1 ? 's' : ''}</p>
+    </div>
+    ${os.length > 0 ? `
+    <div class="info-block">
+      <p class="label">Total em OS App</p>
+      <p class="value">${currency(totalOs)}</p>
+      <p class="sub">${os.length} ordem${os.length !== 1 ? 's' : ''}</p>
+    </div>` : ''}
+  </div>
+
+  <h2>Compras no ERP (${vendas.length})</h2>
+  ${vendas.length === 0
+    ? '<p style="color:#555">Nenhuma compra registrada.</p>'
+    : `<table>
+        <thead><tr>
+          <th style="text-align:left">Controle</th>
+          <th style="text-align:left">Data</th>
+          <th style="text-align:right">Total</th>
+          <th style="text-align:right">Situação</th>
+        </tr></thead>
+        <tbody>${vendasHtml}</tbody>
+      </table>`}
+
+  ${osHtml}
+
+  <div class="totais">
+    <div class="bloco">
+      <p class="t">Total geral (ERP + OS)</p>
+      <p class="v">${currency(totalCompras + totalOs)}</p>
+    </div>
+    <div class="bloco">
+      <p class="t">Compras ERP</p>
+      <p class="v">${currency(totalCompras)}</p>
+    </div>
+    ${os.length > 0 ? `
+    <div class="bloco">
+      <p class="t">OS App</p>
+      <p class="v">${currency(totalOs)}</p>
+    </div>` : ''}
+  </div>
+
+  <div class="rodape">4Rodas ERP &nbsp;·&nbsp; ${now}</div>
+
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`
 }
 
 // ── Linha expansível de venda ─────────────────────────────────────────────────
@@ -129,7 +330,6 @@ export default function ClienteHistorico() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const [printMode, setPrintMode] = useState(false)
   const [printing, setPrinting] = useState(false)
 
   const { data, isLoading, isError } = useQuery({
@@ -142,10 +342,10 @@ export default function ClienteHistorico() {
     if (!data) return
     setPrinting(true)
 
-    // Pre-fetch all venda details so rows render fully before window.print()
-    await Promise.all(
+    // Busca todos os detalhes de venda em paralelo
+    const detalhes = await Promise.all(
       data.vendas.map(v =>
-        qc.fetchQuery({
+        qc.fetchQuery<Venda>({
           queryKey: ['venda-detail', v.controle],
           queryFn: () => erpApi.venda(v.controle),
           staleTime: Infinity,
@@ -153,14 +353,16 @@ export default function ClienteHistorico() {
       )
     )
 
-    setPrintMode(true)
+    const detalhesPorControle: Record<string, Venda> = {}
+    data.vendas.forEach((v, i) => { detalhesPorControle[v.controle] = detalhes[i] })
+
     setPrinting(false)
 
-    // Small delay to let React render the expanded rows
-    setTimeout(() => {
-      window.print()
-      setPrintMode(false)
-    }, 300)
+    // Abre janela limpa com HTML de impressão
+    const win = window.open('', '_blank', 'width=900,height=700')
+    if (!win) return
+    win.document.write(buildPrintHtml(data, detalhesPorControle))
+    win.document.close()
   }, [data, qc])
 
   if (isLoading) {
@@ -191,7 +393,7 @@ export default function ClienteHistorico() {
   return (
     <div className="max-w-5xl mx-auto space-y-8">
       {/* Breadcrumb + ações */}
-      <div className="flex items-center justify-between no-print">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <button
             onClick={() => navigate('/erp/clientes')}
@@ -216,14 +418,6 @@ export default function ClienteHistorico() {
             <>🖨️ Imprimir</>
           )}
         </button>
-      </div>
-
-      {/* Cabeçalho de impressão — visível só no print */}
-      <div className="hidden print:block mb-4">
-        <p className="text-lg font-bold">Histórico do Cliente — {cliente.nome}</p>
-        <p className="text-sm text-slate-500">
-          Emitido em {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-        </p>
       </div>
 
       {/* Header card */}
@@ -277,11 +471,9 @@ export default function ClienteHistorico() {
           Compras no ERP
           <span className="ml-2 text-sm font-normal text-slate-500">({vendas.length})</span>
         </h2>
-        {!printMode && (
-          <p className="text-xs text-slate-500 mb-3 no-print">
-            Clique em uma linha para ver os produtos da compra.
-          </p>
-        )}
+        <p className="text-xs text-slate-500 mb-3">
+          Clique em uma linha para ver os produtos da compra.
+        </p>
         {vendas.length === 0 ? (
           <p className="text-slate-500 text-sm">Nenhuma compra registrada.</p>
         ) : (
@@ -297,7 +489,7 @@ export default function ClienteHistorico() {
               </thead>
               <tbody className="divide-y divide-slate-800">
                 {vendas.map(v => (
-                  <VendaRow key={v.controle} v={v} forceOpen={printMode || undefined} />
+                  <VendaRow key={v.controle} v={v} />
                 ))}
               </tbody>
             </table>
