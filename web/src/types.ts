@@ -171,4 +171,5 @@ export interface Order {
   totalAmount: number
   createdAt: string
   updatedAt: string
+  closedAt: string | null
 }

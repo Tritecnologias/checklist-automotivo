@@ -19,6 +19,7 @@ export interface Order {
   totalAmount: number;
   createdAt: string;
   updatedAt: string;
+  closedAt: string | null;
 }
 
 // ─── Itens da Ordem ──────────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ export interface PinVerificationResult {
 
 // Ação pendente que aguarda aprovação de PIN
 export interface PendingAction {
-  type: 'delete' | 'reduce' | 'close';
+  type: 'delete' | 'reduce' | 'close' | 'reopen';
   itemId: string;
   /** Mensagem completa exibida no modal, ex: "Excluir: FILTRO DE AR" */
   itemDescription: string;

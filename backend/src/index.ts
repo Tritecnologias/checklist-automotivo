@@ -11,15 +11,28 @@ const app  = express();
 const PORT = Number(process.env.PORT ?? 3000);
 
 async function runMigrations() {
-  const [[{ cnt }]] = await pool.query<any>(
-    `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+  // labor_price em os_order_items
+  const [[{ cnt1 }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cnt1 FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_order_items' AND COLUMN_NAME = 'labor_price'`
   );
-  if (Number(cnt) === 0) {
+  if (Number(cnt1) === 0) {
     await pool.query(
       'ALTER TABLE os_order_items ADD COLUMN labor_price DECIMAL(10,2) NOT NULL DEFAULT 0'
     );
     console.log('[migration] os_order_items.labor_price adicionada');
+  }
+
+  // closed_at em os_orders
+  const [[{ cnt2 }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cnt2 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'closed_at'`
+  );
+  if (Number(cnt2) === 0) {
+    await pool.query(
+      'ALTER TABLE os_orders ADD COLUMN closed_at DATETIME NULL DEFAULT NULL'
+    );
+    console.log('[migration] os_orders.closed_at adicionada');
   }
 }
 

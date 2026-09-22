@@ -74,9 +74,16 @@ function OrderCard({ order }: { order: Order }) {
       </View>
 
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-slate-700">
-        <Text className="text-xs text-gray-400 dark:text-slate-500">
-          {formatDate(order.createdAt as unknown as string)}
-        </Text>
+        <View>
+          <Text className="text-xs text-gray-400 dark:text-slate-500">
+            Aberta: {formatDate(order.createdAt as unknown as string)}
+          </Text>
+          {order.status === 'closed' && order.closedAt && (
+            <Text className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+              Encerrada: {formatDate(order.closedAt as unknown as string)}
+            </Text>
+          )}
+        </View>
         <Text className="text-base font-bold text-green-600 dark:text-green-400">
           {currency(order.totalAmount)}
         </Text>

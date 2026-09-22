@@ -6,6 +6,32 @@ const router = Router();
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
+/**
+ * Verifica se a OS existe e está com status 'open' ou 'in_progress'.
+ * Retorna true se a operação pode prosseguir, ou já envia 422 e retorna false.
+ */
+async function assertOrderOpen(
+  orderId: string,
+  res: import('express').Response,
+): Promise<boolean> {
+  const [rows] = await pool.execute(
+    'SELECT status FROM os_orders WHERE id = ?',
+    [orderId],
+  );
+  const order = (rows as { status: string }[])[0];
+  if (!order) {
+    res.status(404).json({ message: 'OS não encontrada' });
+    return false;
+  }
+  if (order.status === 'closed') {
+    res.status(422).json({
+      message: 'OS encerrada. Reabra a OS para realizar alterações.',
+    });
+    return false;
+  }
+  return true;
+}
+
 async function recalcTotal(orderId: string): Promise<number> {
   const [rows] = await pool.execute(
     `SELECT COALESCE(SUM(total), 0) AS items_t, COALESCE(SUM(labor_price), 0) AS labor_t
@@ -42,6 +68,7 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
     totalAmount: Number(order.total_amount),
     createdAt: order.created_at,
     updatedAt: order.updated_at,
+    closedAt: order.closed_at ?? null,
   };
 }
 
@@ -151,6 +178,8 @@ router.post('/:id/items', async (req: Request, res: Response) => {
   }
 
   try {
+    if (!await assertOrderOpen(req.params.id, res)) return;
+
     const [products] = await pool.execute(
       `SELECT
          p.id,
@@ -210,6 +239,8 @@ router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
   }
 
   try {
+    if (!await assertOrderOpen(req.params.id, res)) return;
+
     const [rows] = await pool.execute(
       'SELECT * FROM os_order_items WHERE id = ? AND order_id = ?',
       [req.params.itemId, req.params.id],
@@ -255,10 +286,17 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
   }
 
   try {
-    await pool.execute(
-      'UPDATE os_orders SET status = ?, updated_at = NOW() WHERE id = ?',
-      [status, req.params.id],
-    );
+    if (status === 'closed') {
+      await pool.execute(
+        'UPDATE os_orders SET status = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?',
+        [status, req.params.id],
+      );
+    } else {
+      await pool.execute(
+        'UPDATE os_orders SET status = ?, updated_at = NOW(), closed_at = NULL WHERE id = ?',
+        [status, req.params.id],
+      );
+    }
 
     const [rows] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
     const order = (rows as Record<string, unknown>[])[0];
@@ -287,6 +325,8 @@ router.patch('/:id/labor', async (req: Request, res: Response) => {
   }
 
   try {
+    if (!await assertOrderOpen(req.params.id, res)) return;
+
     await pool.execute(
       'UPDATE os_orders SET labor_amount = ?, updated_at = NOW() WHERE id = ?',
       [Number(amount), req.params.id],
@@ -321,6 +361,8 @@ router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => 
   }
 
   try {
+    if (!await assertOrderOpen(req.params.id, res)) return;
+
     await pool.execute(
       'UPDATE os_order_items SET labor_price = ? WHERE id = ? AND order_id = ?',
       [Number(laborPrice), req.params.itemId, req.params.id],
@@ -348,6 +390,8 @@ router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => 
 
 router.delete('/:id/items/:itemId', async (req: Request, res: Response) => {
   try {
+    if (!await assertOrderOpen(req.params.id, res)) return;
+
     await pool.execute(
       'DELETE FROM os_order_items WHERE id = ? AND order_id = ?',
       [req.params.itemId, req.params.id],

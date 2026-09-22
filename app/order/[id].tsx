@@ -28,6 +28,14 @@ import type { CatalogItem, Order, OrderItem, PendingAction } from '@/types';
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+function fmtDate(iso: string | null | undefined) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
 export default function OrderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
@@ -281,6 +289,23 @@ export default function OrderScreen() {
           Esta OS está encerrada.{'\n'}Somente o Supervisor pode acessar o conteúdo.
         </Text>
 
+        <View className="mt-5 w-full bg-slate-100 dark:bg-slate-800 rounded-2xl p-4 gap-1.5">
+          <View className="flex-row justify-between">
+            <Text className="text-xs text-gray-400 dark:text-slate-500">Aberta em</Text>
+            <Text className="text-xs font-medium text-gray-600 dark:text-slate-300">
+              {fmtDate(order.createdAt as unknown as string)}
+            </Text>
+          </View>
+          {order.closedAt && (
+            <View className="flex-row justify-between">
+              <Text className="text-xs text-gray-400 dark:text-slate-500">Encerrada em</Text>
+              <Text className="text-xs font-medium text-red-500 dark:text-red-400">
+                {fmtDate(order.closedAt)}
+              </Text>
+            </View>
+          )}
+        </View>
+
         <TouchableOpacity
           onPress={() => setShowUnlockPin(true)}
           activeOpacity={0.8}
@@ -324,6 +349,12 @@ export default function OrderScreen() {
             </Text>
             <Text className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">
               {order.vehicle.model} · {order.vehicle.mileage.toLocaleString('pt-BR')} km
+            </Text>
+            <Text className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+              Aberta: {fmtDate(order.createdAt as unknown as string)}
+              {isClosed && order.closedAt
+                ? `  ·  Encerrada: ${fmtDate(order.closedAt)}`
+                : ''}
             </Text>
           </View>
 

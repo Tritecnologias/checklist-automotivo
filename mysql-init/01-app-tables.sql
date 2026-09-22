@@ -12,8 +12,10 @@ CREATE TABLE IF NOT EXISTS `os_orders` (
   `mileage`      INT UNSIGNED  NOT NULL,
   `status`       ENUM('open','in_progress','closed') NOT NULL DEFAULT 'open',
   `total_amount` DECIMAL(18,4) NOT NULL DEFAULT 0,
+  `labor_amount` DECIMAL(18,4) NOT NULL DEFAULT 0,
   `created_at`   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `closed_at`    DATETIME      NULL DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
