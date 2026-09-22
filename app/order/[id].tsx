@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { SearchBar } from '@/components/SearchBar';
@@ -34,6 +34,8 @@ export default function OrderScreen() {
   const [search, setSearch] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [laborItem, setLaborItem] = useState<OrderItem | null>(null);
+  const [pinVerified, setPinVerified] = useState(false);
+  const [showUnlockPin, setShowUnlockPin] = useState(false);
   const debouncedSearch = useDebounce(search, 400);
 
   // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -59,6 +61,9 @@ export default function OrderScreen() {
     placeholderData: (prev) => prev ?? [],
   });
 
+  // ─── Flag de OS encerrada ─────────────────────────────────────────────────────
+  const isClosed = order?.status === 'closed';
+
   // ─── Mutações ─────────────────────────────────────────────────────────────────
 
   const qc = useQueryClient();
@@ -68,7 +73,7 @@ export default function OrderScreen() {
   const { mutate: updateQty } = useUpdateQuantity(id);
   const { mutate: updateItemLabor } = useUpdateItemLabor(id);
 
-  const { mutate: closeOrder, isPending: closing } = useMutation({
+  const { mutate: changeOrderStatus, isPending: changingStatus } = useMutation({
     mutationFn: (status: string) => api.updateOrderStatus(id, status),
     onSuccess: (updated: Order) => {
       qc.setQueryData(['order', id], updated);
@@ -91,6 +96,7 @@ export default function OrderScreen() {
 
   const handleAddCatalogItem = useCallback(
     (item: CatalogItem) => {
+      if (isClosed) return; // guard extra no front
       addItem(
         { catalogItemId: item.id, quantity: 1 },
         {
@@ -104,12 +110,13 @@ export default function OrderScreen() {
         },
       );
     },
-    [addItem],
+    [addItem, isClosed],
   );
 
   const handleLaborRequest = useCallback((item: OrderItem) => {
+    if (isClosed) return;
     setLaborItem(item);
-  }, []);
+  }, [isClosed]);
 
   const handleLaborConfirm = useCallback(
     (totalServicePrice: number) => {
@@ -130,12 +137,13 @@ export default function OrderScreen() {
   );
 
   const handleDeleteRequest = useCallback((item: OrderItem) => {
+    if (isClosed) return;
     setPendingAction({
       type: 'delete',
       itemId: item.id,
       itemDescription: `Excluir: ${item.description}`,
     });
-  }, []);
+  }, [isClosed]);
 
   const handleCloseRequest = useCallback(() => {
     if (!order) return;
@@ -143,6 +151,15 @@ export default function OrderScreen() {
       type: 'close',
       itemId: order.id,
       itemDescription: `Encerrar OS: ${order.vehicle.plate}`,
+    });
+  }, [order]);
+
+  const handleReopenRequest = useCallback(() => {
+    if (!order) return;
+    setPendingAction({
+      type: 'reopen',
+      itemId: order.id,
+      itemDescription: `Reabrir OS: ${order.vehicle.plate}`,
     });
   }, [order]);
 
@@ -173,6 +190,7 @@ export default function OrderScreen() {
 
   const handleQuantityChange = useCallback(
     (item: OrderItem, delta: 1 | -1) => {
+      if (isClosed) return;
       const next = item.quantity + delta;
 
       if (next <= 0) {
@@ -196,7 +214,7 @@ export default function OrderScreen() {
 
       updateQty({ itemId: item.id, quantity: next });
     },
-    [updateQty],
+    [updateQty, isClosed],
   );
 
   const handlePinAuthorized = useCallback(() => {
@@ -212,11 +230,13 @@ export default function OrderScreen() {
         { onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success) },
       );
     } else if (pendingAction.type === 'close') {
-      closeOrder('closed');
+      changeOrderStatus('closed');
+    } else if (pendingAction.type === 'reopen') {
+      changeOrderStatus('open');
     }
 
     setPendingAction(null);
-  }, [pendingAction, removeItem, updateQty, closeOrder]);
+  }, [pendingAction, removeItem, updateQty, changeOrderStatus]);
 
   // ─── Estados de carregamento / erro ──────────────────────────────────────────
 
@@ -243,7 +263,49 @@ export default function OrderScreen() {
     );
   }
 
-  const showSearchResults = debouncedSearch.length >= 2;
+  const showSearchResults = !isClosed && debouncedSearch.length >= 2;
+
+  // ─── Tela de bloqueio para OS encerrada ───────────────────────────────────────
+
+  if (isClosed && !pinVerified) {
+    return (
+      <View className="flex-1 bg-slate-50 dark:bg-slate-950 items-center justify-center px-6">
+        <Text style={{ fontSize: 64 }}>🔒</Text>
+        <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-4 text-center">
+          OS Encerrada
+        </Text>
+        <Text className="text-base text-gray-500 dark:text-slate-400 text-center mt-1">
+          {order.vehicle.plate} — {order.vehicle.model}
+        </Text>
+        <Text className="text-sm text-gray-400 dark:text-slate-500 text-center mt-3 leading-5">
+          Esta OS está encerrada.{'\n'}Somente o Supervisor pode acessar o conteúdo.
+        </Text>
+
+        <TouchableOpacity
+          onPress={() => setShowUnlockPin(true)}
+          activeOpacity={0.8}
+          className="w-full mt-10 py-4 rounded-2xl bg-blue-600 items-center"
+        >
+          <Text className="text-white font-bold text-base">🔑 Entrar com PIN de Supervisor</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+          className="w-full mt-3 py-4 rounded-2xl bg-slate-200 dark:bg-slate-800 items-center"
+        >
+          <Text className="text-gray-600 dark:text-slate-400 font-medium text-base">Voltar</Text>
+        </TouchableOpacity>
+
+        <PinModal
+          visible={showUnlockPin}
+          itemDescription={`Acessar OS encerrada: ${order.vehicle.plate}`}
+          onAuthorized={() => { setPinVerified(true); setShowUnlockPin(false); }}
+          onCancel={() => setShowUnlockPin(false)}
+        />
+      </View>
+    );
+  }
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
@@ -291,6 +353,16 @@ export default function OrderScreen() {
             </Text>
           </View>
         </View>
+
+        {/* Banner somente-leitura */}
+        {isClosed && (
+          <View className="flex-row items-center gap-2 mt-3 px-3 py-2.5 rounded-xl bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700">
+            <Text style={{ fontSize: 14 }}>🔒</Text>
+            <Text className="flex-1 text-xs text-gray-500 dark:text-slate-400">
+              OS encerrada — somente leitura. Somente um administrador pode reabrir.
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Barra de busca */}
@@ -299,6 +371,7 @@ export default function OrderScreen() {
         onChangeText={setSearch}
         loading={searching || adding}
         placeholder="Buscar peça / serviço por código ou descrição…"
+        disabled={isClosed}
       />
 
       {/* Resultados de busca (overlay) */}
@@ -335,13 +408,16 @@ export default function OrderScreen() {
               onDeleteRequest={handleDeleteRequest}
               onQuantityChange={handleQuantityChange}
               onLaborRequest={handleLaborRequest}
+              readOnly={isClosed}
             />
           )}
           ListEmptyComponent={
             <View className="items-center py-16 px-8">
               <Text style={{ fontSize: 48 }}>🔩</Text>
               <Text className="text-gray-500 dark:text-slate-400 text-base text-center mt-3">
-                Nenhum item lançado ainda.{'\n'}Use a busca acima para adicionar.
+                {isClosed
+                  ? 'Nenhum item registrado nesta OS.'
+                  : 'Nenhum item lançado ainda.\nUse a busca acima para adicionar.'}
               </Text>
             </View>
           }
@@ -400,17 +476,31 @@ export default function OrderScreen() {
                     </Text>
                   </TouchableOpacity>
 
-                  {order.status !== 'closed' && (
+                  {!isClosed ? (
                     <TouchableOpacity
                       onPress={handleCloseRequest}
-                      disabled={closing}
+                      disabled={changingStatus}
                       className="flex-1 py-3 rounded-xl bg-red-50 dark:bg-red-900/30 items-center"
                     >
-                      {closing ? (
+                      {changingStatus ? (
                         <ActivityIndicator size="small" color="#dc2626" />
                       ) : (
                         <Text className="text-sm font-semibold text-red-600 dark:text-red-400">
                           🔒 Fechar OS
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={handleReopenRequest}
+                      disabled={changingStatus}
+                      className="flex-1 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/30 items-center"
+                    >
+                      {changingStatus ? (
+                        <ActivityIndicator size="small" color="#d97706" />
+                      ) : (
+                        <Text className="text-sm font-semibold text-amber-600 dark:text-amber-400">
+                          🔓 Reabrir OS
                         </Text>
                       )}
                     </TouchableOpacity>
@@ -438,7 +528,7 @@ export default function OrderScreen() {
         onCancel={() => setLaborItem(null)}
       />
 
-      {/* Modal de PIN */}
+      {/* Modal de PIN — para todas as ações que exigem supervisor */}
       <PinModal
         visible={pendingAction !== null}
         itemDescription={pendingAction?.itemDescription}
