@@ -34,6 +34,7 @@ export default function IdentificationScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const hasContent = plate.length > 0 || model.length > 0 || mileage.length > 0;
+  const plateValid = cleanPlate(plate).length >= 7;
 
   function handleClear() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -87,6 +88,8 @@ export default function IdentificationScreen() {
 
   const inputStyle =
     'bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-xl px-4 py-3.5 text-base border border-gray-200 dark:border-slate-700';
+  const inputErrorStyle =
+    'bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-xl px-4 py-3.5 text-base border-2 border-red-500 dark:border-red-400';
 
   const labelStyle = 'text-sm font-semibold text-gray-600 dark:text-slate-400 mb-1.5';
   const errorStyle = 'text-xs text-red-500 dark:text-red-400 mt-1';
@@ -141,9 +144,11 @@ export default function IdentificationScreen() {
 
           {/* Placa */}
           <View className="mb-5">
-            <Text className={labelStyle}>Placa</Text>
+            <Text className={labelStyle}>
+              Placa <Text className="text-red-500">*</Text>
+            </Text>
             <TextInput
-              className={inputStyle}
+              className={errors.plate ? inputErrorStyle : inputStyle}
               value={plate}
               onChangeText={handlePlateChange}
               placeholder="ABC-1234 ou ABC1D23"
@@ -152,8 +157,15 @@ export default function IdentificationScreen() {
               autoCorrect={false}
               maxLength={8}
               returnKeyType="next"
+              autoFocus
             />
-            {errors.plate ? <Text className={errorStyle}>{errors.plate}</Text> : null}
+            {errors.plate ? (
+              <Text className={errorStyle}>⚠ {errors.plate}</Text>
+            ) : plate.length > 0 && !plateValid ? (
+              <Text className="text-xs text-amber-500 dark:text-amber-400 mt-1">
+                Continue digitando… ({cleanPlate(plate).length}/7)
+              </Text>
+            ) : null}
           </View>
 
           {/* Modelo */}
@@ -206,10 +218,12 @@ export default function IdentificationScreen() {
         {/* CTA */}
         <TouchableOpacity
           onPress={handleSubmit}
-          disabled={isPending}
+          disabled={isPending || !plateValid}
           activeOpacity={0.8}
           className={`mt-6 py-4 rounded-2xl items-center ${
-            isPending ? 'bg-blue-400 dark:bg-blue-700' : 'bg-blue-600 dark:bg-blue-500'
+            isPending || !plateValid
+              ? 'bg-blue-300 dark:bg-blue-900'
+              : 'bg-blue-600 dark:bg-blue-500'
           }`}
         >
           {isPending ? (
