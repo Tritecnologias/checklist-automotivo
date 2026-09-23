@@ -198,20 +198,40 @@ export default function ImportarEstoque() {
     setLoadingClientes(true); setFaseClientes('parseando'); setErroClientes(''); setResultadoClientes(null)
     try {
       const sqlText  = await arquivoClientes.text()
-      const clientes = parseSqlClientes(sqlText)
+      const parsed   = parseSqlClientes(sqlText)
       setFaseClientes('enviando')
-      if (clientes.length === 0) {
+      if (parsed.length === 0) {
         setErroClientes('Nenhum cliente encontrado no arquivo. Verifique se é o backup correto.'); return
       }
-      const jwt = localStorage.getItem('erp_jwt_token') ?? ''
-      const res = await fetch('/api/erp/clientes/importar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'x-tenant-id': String(currentTenant.id) },
-        body: JSON.stringify({ clientes }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setErroClientes(data.message ?? `Erro ${res.status}`); return }
-      setResultadoClientes(data)
+
+      // Deduplicate by name before chunking
+      const byName = new Map<string, ClienteIn>()
+      for (const c of parsed) byName.set(c.nome_cliente.toUpperCase(), c)
+      const unique = [...byName.values()]
+
+      const jwt   = localStorage.getItem('erp_jwt_token') ?? ''
+      const hdrs  = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'x-tenant-id': String(currentTenant.id) }
+      const CHUNK = 500
+
+      let totalExistentes = 0
+      let totalCriados    = 0
+      let totalAssociados = 0
+
+      for (let i = 0; i < unique.length; i += CHUNK) {
+        const chunk = unique.slice(i, i + CHUNK)
+        const res   = await fetch('/api/erp/clientes/importar', {
+          method: 'POST',
+          headers: hdrs,
+          body: JSON.stringify({ clientes: chunk }),
+        })
+        const data = await res.json()
+        if (!res.ok) { setErroClientes(data.message ?? `Erro ${res.status}`); return }
+        totalExistentes += data.existentes
+        totalCriados    += data.criados
+        totalAssociados += data.associados
+      }
+
+      setResultadoClientes({ existentes: totalExistentes, criados: totalCriados, associados: totalAssociados })
     } catch (e: any) {
       setErroClientes(e.message ?? 'Erro de conexão')
     } finally {
