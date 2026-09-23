@@ -125,6 +125,15 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  // Tabela de associação cliente ↔ tenant (qual loja o cliente pertence)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`cliente_tenant\` (
+      \`cliente_id\` INT NOT NULL,
+      \`tenant_id\`  INT NOT NULL,
+      PRIMARY KEY (\`cliente_id\`, \`tenant_id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
   console.log('[migration] tabelas de multi-tenant OK');
 }
 

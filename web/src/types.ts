@@ -114,6 +114,7 @@ export interface ClienteErp {
   ultima_compra: string | null
   total_gasto: number
   qtd_compras: number
+  lojas: string | null
 }
 
 export interface ClienteHistorico {

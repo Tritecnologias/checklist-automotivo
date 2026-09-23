@@ -512,38 +512,60 @@ function stripPlate(nome: string): string {
   return String(nome || '').replace(PLATE_RE, '').replace(/\s+/g, ' ').trim();
 }
 
+function getClienteTenantId(req: Request): number | null {
+  const user = req.user as JwtPayload | undefined;
+  if (!user) return null;
+  if (user.role === 'owner') {
+    const h = Number(req.headers['x-tenant-id']);
+    return h > 0 ? h : null;
+  }
+  const h = Number(req.headers['x-tenant-id']);
+  return (h > 0 && user.tenantIds.includes(h)) ? h : (user.tenantIds[0] ?? null);
+}
+
 router.get('/clientes', requireManagerUp, async (req, res) => {
   const page   = Math.max(1, Number(req.query.page ?? 1));
   const limit  = 30;
   const offset = (page - 1) * limit;
   const search = String(req.query.search ?? '');
 
+  const filterTenantId = getClienteTenantId(req);
+  const tenantJoin = filterTenantId !== null
+    ? 'INNER JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id AND _ctf.tenant_id = ?'
+    : '';
+
   const whereParts: string[] = ['c.inativo = 0'];
-  const params: any[] = [];
+  const baseParams: any[] = filterTenantId !== null ? [filterTenantId] : [];
 
   if (search.length >= 2) {
     whereParts.push('(c.nome_cliente LIKE ? OR c.telefone LIKE ? OR c.celular LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    baseParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
 
   const where = 'WHERE ' + whereParts.join(' AND ');
 
   const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total FROM cad_clientes c ${where}`, params
+    `SELECT COUNT(*) as total FROM cad_clientes c ${tenantJoin} ${where}`,
+    baseParams
   );
 
   const [rows] = await pool.query<any>(
     `SELECT c.id, c.nome_cliente, c.telefone, c.celular, c.inf_adicional,
             MAX(v.data_venda) as ultima_compra,
             COALESCE(SUM(v.vr_total),0) as total_gasto,
-            COUNT(v.id) as qtd_compras
+            COUNT(v.id) as qtd_compras,
+            (SELECT GROUP_CONCAT(t2.nome ORDER BY t2.nome SEPARATOR ', ')
+             FROM cliente_tenant ct2
+             JOIN tenants t2 ON t2.id = ct2.tenant_id
+             WHERE ct2.cliente_id = c.id) AS lojas
      FROM cad_clientes c
+     ${tenantJoin}
      LEFT JOIN mv_vendas v ON v.id_cliente = c.id
      ${where}
      GROUP BY c.id
      ORDER BY ultima_compra IS NULL, ultima_compra DESC
      LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+    [...baseParams, limit, offset]
   );
 
   res.json({
@@ -557,6 +579,7 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
       ultima_compra: r.ultima_compra,
       total_gasto: Number(r.total_gasto),
       qtd_compras: Number(r.qtd_compras),
+      lojas: r.lojas || null,
     })),
     total: Number(total),
     pages: Math.ceil(Number(total) / limit),
@@ -777,6 +800,119 @@ router.post('/estoque/importar-sql', requireManagerUp, async (req, res) => {
     importados:      insertRows.length,
     nao_encontrados: pairs.length - insertRows.length,
   });
+});
+
+// ── IMPORTAÇÃO DE CLIENTES VIA JSON (parse feito no browser) ─────────────────
+router.post('/clientes/importar', requireManagerUp, async (req, res) => {
+  const user = req.user as JwtPayload | undefined;
+  if (user?.role === 'owner' && !(Number(req.headers['x-tenant-id']) > 0)) {
+    res.status(400).json({ message: 'Selecione uma loja antes de importar clientes.' }); return;
+  }
+  const tenantId = getErpWriteTenantId(req);
+
+  interface ClienteIn {
+    nome_cliente: string; telefone: string; celular: string;
+    cpf_cnpj: string; inf_adicional: string;
+  }
+  const { clientes } = req.body as { clientes: ClienteIn[] };
+  if (!Array.isArray(clientes) || clientes.length === 0) {
+    res.status(400).json({ message: 'Nenhum cliente recebido.' }); return;
+  }
+
+  const norm = clientes
+    .map(c => ({
+      nome:    String(c.nome_cliente  || '').trim(),
+      tel:     String(c.telefone      || '').trim(),
+      cel:     String(c.celular       || '').trim(),
+      cpf_raw: String(c.cpf_cnpj     || '').trim(),
+      cpf:     String(c.cpf_cnpj     || '').replace(/\D/g, ''),
+      inf:     String(c.inf_adicional || '').trim(),
+    }))
+    .filter(c => c.nome.length > 1);
+
+  if (norm.length === 0) {
+    res.status(400).json({ message: 'Nenhum cliente válido no arquivo.' }); return;
+  }
+
+  // Deduplicate by name
+  const byName = new Map<string, typeof norm[0]>();
+  for (const c of norm) byName.set(c.nome.toUpperCase(), c);
+  const unique = [...byName.values()];
+
+  const CHUNK = 500;
+
+  // Step 1 — Find existing by CPF
+  const cpfToId = new Map<string, number>();
+  const validCpfs = [...new Set(unique.filter(c => c.cpf.length === 11).map(c => c.cpf))];
+  for (let i = 0; i < validCpfs.length; i += CHUNK) {
+    const sl = validCpfs.slice(i, i + CHUNK);
+    const ph = sl.map(() => '?').join(',');
+    const [rows] = await pool.query<any>(
+      `SELECT id, REPLACE(REPLACE(REPLACE(cpf_cnpj,'.',''),'-',''),'/','') AS cpfn
+       FROM cad_clientes
+       WHERE REPLACE(REPLACE(REPLACE(cpf_cnpj,'.',''),'-',''),'/','') IN (${ph}) AND inativo = 0`,
+      sl
+    );
+    for (const row of rows) cpfToId.set(String(row.cpfn), row.id);
+  }
+
+  // Step 2 — Find remaining by name
+  const notFoundByCpf = unique.filter(c => !(c.cpf.length === 11 && cpfToId.has(c.cpf)));
+  const uniqueNames   = [...new Set(notFoundByCpf.map(c => c.nome.toUpperCase()))];
+  const nameToId      = new Map<string, number>();
+  for (let i = 0; i < uniqueNames.length; i += CHUNK) {
+    const sl = uniqueNames.slice(i, i + CHUNK);
+    const ph = sl.map(() => '?').join(',');
+    const [rows] = await pool.query<any>(
+      `SELECT id, TRIM(UPPER(nome_cliente)) AS nome_up FROM cad_clientes
+       WHERE TRIM(UPPER(nome_cliente)) IN (${ph}) AND inativo = 0`,
+      sl
+    );
+    for (const row of rows) nameToId.set(String(row.nome_up), row.id);
+  }
+
+  // Step 3 — Classify each client
+  const existingIds = new Set<number>();
+  const toInsert: typeof unique[0][] = [];
+  for (const c of unique) {
+    const id = (c.cpf.length === 11 && cpfToId.has(c.cpf))
+      ? cpfToId.get(c.cpf)!
+      : nameToId.get(c.nome.toUpperCase());
+    if (id !== undefined) existingIds.add(id);
+    else toInsert.push(c);
+  }
+  const existentes = existingIds.size;
+
+  // Step 4 — Bulk insert new clients and collect their IDs
+  const insertedIds: number[] = [];
+  for (let i = 0; i < toInsert.length; i += CHUNK) {
+    const sl   = toInsert.slice(i, i + CHUNK);
+    const rows = sl.map(c => [c.nome, c.tel, c.cel, c.cpf_raw, c.inf, 0]);
+    await pool.query(
+      `INSERT INTO cad_clientes (nome_cliente, telefone, celular, cpf_cnpj, inf_adicional, inativo) VALUES ?`,
+      [rows]
+    );
+    const names = sl.map(c => c.nome.toUpperCase());
+    const ph    = names.map(() => '?').join(',');
+    const [newRows] = await pool.query<any>(
+      `SELECT id FROM cad_clientes WHERE TRIM(UPPER(nome_cliente)) IN (${ph}) AND inativo = 0`,
+      names
+    );
+    for (const r of newRows) insertedIds.push(r.id);
+  }
+  const criados = insertedIds.length;
+
+  // Step 5 — Associate all clients with the current tenant
+  const allIds    = [...existingIds, ...insertedIds];
+  const assocRows = allIds.map(id => [id, tenantId]);
+  for (let i = 0; i < assocRows.length; i += CHUNK) {
+    await pool.query(
+      `INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) VALUES ?`,
+      [assocRows.slice(i, i + CHUNK)]
+    );
+  }
+
+  res.json({ existentes, criados, associados: allIds.length });
 });
 
 export default router;

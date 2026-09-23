@@ -22,6 +22,19 @@ function PlaceBadge({ plate }: { plate: string | null }) {
   )
 }
 
+function LojasBadge({ lojas }: { lojas: string | null }) {
+  if (!lojas) return <span className="text-slate-600 text-xs">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {lojas.split(', ').map(n => (
+        <span key={n} className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-800/40 whitespace-nowrap">
+          {n}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export default function Clientes() {
   const { currentTenant } = useAuth()
   const tid = currentTenant?.id ?? null
@@ -111,6 +124,7 @@ export default function Clientes() {
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Cliente</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Placa</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Veículo</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Lojas</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Compras</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Total Gasto</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Última Compra</th>
@@ -133,6 +147,7 @@ export default function Clientes() {
                     <PlaceBadge plate={c.placa} />
                   </td>
                   <td className="px-4 py-3 text-slate-400 text-xs">{c.modelo ?? '—'}</td>
+                  <td className="px-4 py-3"><LojasBadge lojas={c.lojas} /></td>
                   <td className="px-4 py-3 text-right text-slate-300">{c.qtd_compras}</td>
                   <td className="px-4 py-3 text-right font-semibold text-green-400">
                     {currency(c.total_gasto)}
