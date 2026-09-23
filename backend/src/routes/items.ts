@@ -20,13 +20,7 @@ router.get('/', async (req: Request, res: Response) => {
          CONVERT(p.nome_produto USING utf8mb4) AS description,
          CASE WHEN p.id_tipo IN (2, 9) THEN 'service' ELSE 'part' END AS type,
          CAST(p.vr_venda  AS DECIMAL(18,4)) AS unitPrice,
-         CAST(p.estoque   AS DECIMAL(18,4)) AS stock,
-         (
-           SELECT JSON_ARRAYAGG(JSON_OBJECT('id', i.id, 'sigla', i.sigla, 'nome', i.nome))
-           FROM produto_instalacao pi
-           JOIN instalacoes i ON i.id = pi.instalacao_id
-           WHERE pi.produto_id = p.id
-         ) AS instalacoes_json
+         CAST(p.estoque   AS DECIMAL(18,4)) AS stock
        FROM cad_produtos p
        WHERE p.inativo = 0
          AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
@@ -35,15 +29,44 @@ router.get('/', async (req: Request, res: Response) => {
       [like, like],
     );
 
-    const items = (rows as Record<string, unknown>[]).map(r => ({
-      id: r.id,
-      code: r.code,
-      description: r.description,
-      type: r.type,
+    const products = (rows as Record<string, unknown>[]).map(r => ({
+      id: r.id as number,
+      code: r.code as string,
+      description: r.description as string,
+      type: r.type as string,
       unitPrice: Number(r.unitPrice),
       stock: Number(r.stock),
-      instalacoes: r.instalacoes_json ? JSON.parse(r.instalacoes_json as string) : [],
     }));
+
+    // Buscar instalações separadamente para evitar problemas com JSON_ARRAYAGG
+    const instMap = new Map<number, { id: number; sigla: string; nome: string }[]>();
+    if (products.length > 0) {
+      const ids = products.map(p => p.id);
+      const placeholders = ids.map(() => '?').join(',');
+      const [instRows] = await pool.query<any>(
+        `SELECT pit.produto_id, i.id, i.sigla, i.nome
+         FROM produto_instalacao pit
+         JOIN instalacoes i ON i.id = pit.instalacao_id
+         WHERE pit.produto_id IN (${placeholders})
+         ORDER BY i.ordem`,
+        ids,
+      );
+      for (const row of instRows as Record<string, unknown>[]) {
+        const pid = row.produto_id as number;
+        if (!instMap.has(pid)) instMap.set(pid, []);
+        instMap.get(pid)!.push({
+          id: row.id as number,
+          sigla: row.sigla as string,
+          nome: row.nome as string,
+        });
+      }
+    }
+
+    const items = products.map(p => ({
+      ...p,
+      instalacoes: instMap.get(p.id) ?? [],
+    }));
+
     res.json(items);
   } catch (err) {
     console.error('GET /items error:', err);
