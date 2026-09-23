@@ -1,11 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export default function ErpDashboard() {
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
+
   const { data, isLoading } = useQuery({
-    queryKey: ['erp-dashboard'],
+    queryKey: ['erp-dashboard', tid],
     queryFn: erpApi.dashboard,
     refetchInterval: 30_000,
   })

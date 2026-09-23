@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { ProdutoEstoque } from '../types'
 import Modal from '../components/Modal'
+import { useAuth } from '../contexts/AuthContext'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -145,13 +146,15 @@ function AjusteModal({
 // ── Página principal ──────────────────────────────────────────────────────────
 
 export default function Estoque() {
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
   const [search, setSearch] = useState('')
   const [filtro, setFiltro] = useState('')
   const [page, setPage] = useState(1)
   const [ajustando, setAjustando] = useState<ProdutoEstoque | null>(null)
 
   const { data: res, isLoading } = useQuery({
-    queryKey: ['estoque', search, filtro, page],
+    queryKey: ['estoque', tid, search, filtro, page],
     queryFn: () => erpApi.estoque({ search, filtro, page }),
   })
 

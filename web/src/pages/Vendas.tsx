@@ -2,18 +2,21 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { Venda } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const today = () => new Date().toISOString().slice(0, 10)
 
 export default function Vendas() {
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
   const [data, setData] = useState(today())
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Venda | null>(null)
 
   const { data: res, isLoading } = useQuery({
-    queryKey: ['vendas', data, search, page],
+    queryKey: ['vendas', tid, data, search, page],
     queryFn: () => erpApi.vendas({ data, search, page }),
   })
 

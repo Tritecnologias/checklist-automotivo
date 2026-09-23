@@ -2,23 +2,26 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { CaixaSession } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR')
 
 export default function Caixa() {
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
   const qc = useQueryClient()
   const [vrAbertura, setVrAbertura] = useState('')
   const [vrFechamento, setVrFechamento] = useState('')
 
   const { data: status } = useQuery({
-    queryKey: ['caixa-status'],
+    queryKey: ['caixa-status', tid],
     queryFn: erpApi.caixaStatus,
     refetchInterval: 15_000,
   })
 
   const { data: hist, isLoading } = useQuery({
-    queryKey: ['caixa-hist'],
+    queryKey: ['caixa-hist', tid],
     queryFn: () => erpApi.caixaList(1),
   })
 

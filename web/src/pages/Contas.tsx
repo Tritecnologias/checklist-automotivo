@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { Lancamento } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR')
@@ -13,13 +14,15 @@ const STATUS_OPTS = [
 ]
 
 export default function Contas() {
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
   const qc = useQueryClient()
   const [status, setStatus] = useState('0')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
 
   const { data: res, isLoading } = useQuery({
-    queryKey: ['contas', status, search, page],
+    queryKey: ['contas', tid, status, search, page],
     queryFn: () => erpApi.contas({ status, search, page }),
   })
 

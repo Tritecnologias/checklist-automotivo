@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { ProdutoPdv, ClientePdv } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -22,6 +23,8 @@ interface Pagamento {
 const PAG_VAZIO: Pagamento = { dinheiro: '', cartao: '', cheque: '', carne: '', ticket: '' }
 
 export default function Pdv() {
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
   const qc = useQueryClient()
   const searchRef = useRef<HTMLInputElement>(null)
   const [busca, setBusca] = useState('')
@@ -34,19 +37,19 @@ export default function Pdv() {
   const [sucesso, setSucesso] = useState<string | null>(null)
 
   const { data: statusCaixa } = useQuery({
-    queryKey: ['caixa-status'],
+    queryKey: ['caixa-status', tid],
     queryFn: erpApi.caixaStatus,
   })
 
   const { data: produtos, isFetching: buscando } = useQuery({
-    queryKey: ['pdv-produtos', busca],
+    queryKey: ['pdv-produtos', tid, busca],
     queryFn: () => erpApi.buscaProdutos(busca),
     enabled: busca.length >= 2,
     placeholderData: [],
   })
 
   const { data: clientes } = useQuery({
-    queryKey: ['pdv-clientes', buscaCliente],
+    queryKey: ['pdv-clientes', tid, buscaCliente],
     queryFn: () => erpApi.buscaClientes(buscaCliente),
     enabled: buscaCliente.length >= 2,
     placeholderData: [],

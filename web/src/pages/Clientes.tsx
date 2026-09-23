@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { ClienteErp } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -22,13 +23,15 @@ function PlaceBadge({ plate }: { plate: string | null }) {
 }
 
 export default function Clientes() {
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [inputVal, setInputVal] = useState('')
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['erp-clientes', search, page],
+    queryKey: ['erp-clientes', tid, search, page],
     queryFn: () => erpApi.clientes({ search: search || undefined, page }),
     staleTime: 30_000,
   })
