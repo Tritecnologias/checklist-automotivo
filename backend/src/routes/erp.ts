@@ -88,13 +88,13 @@ router.get('/dashboard', async (req, res) => {
      GROUP BY m.id_produto ORDER BY total DESC LIMIT 5`
   );
   const [estoque_baixo] = await pool.query<any>(
-    `SELECT p.id, p.nome_produto, COALESCE(pst.saldo, p.estoque) AS estoque, p.min_estoque
+    `SELECT p.id, p.nome_produto, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque, p.min_estoque
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
      WHERE p.inativo = 0 AND p.min_estoque > 0
      HAVING estoque <= p.min_estoque
      ORDER BY estoque ASC LIMIT 8`,
-    [tenantId]
+    [tenantId, tenantId]
   );
   const { clause: caixaTenantClause, params: caixaTenantParams } = getErpTenantFilter(req, true);
   const [[caixa]] = await pool.query<any>(
@@ -375,12 +375,12 @@ router.post('/vendas', async (req, res) => {
     const tenantId = getErpWriteTenantId(req);
     await pool.query(
       `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
-       SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, p.estoque) - ?)
+       SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) - ?)
        FROM cad_produtos p
        LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
        WHERE p.id = ?
        ON DUPLICATE KEY UPDATE saldo = GREATEST(0, saldo - ?)`,
-      [tenantId, item.quant, tenantId, item.id_produto, item.quant]
+      [tenantId, tenantId, item.quant, tenantId, item.id_produto, item.quant]
     );
   }
 
@@ -474,12 +474,12 @@ router.get('/busca/produtos', async (req, res) => {
 
   const [rows] = await pool.query<any>(
     `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.vr_venda,
-            COALESCE(pst.saldo, p.estoque) AS estoque
+            COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
      WHERE p.inativo = 0 AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
      ORDER BY p.nome_produto LIMIT 20`,
-    [tenantId, `%${q}%`, `%${q}%`]
+    [tenantId, tenantId, `%${q}%`, `%${q}%`]
   );
   res.json(rows.map((r: any) => ({ ...r, vr_venda: Number(r.vr_venda), estoque: Number(r.estoque) })));
 });
@@ -652,21 +652,24 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
     LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
     ${where}`;
 
+  // tenantId = 1 (Veneza/loja-principal) usa fallback do legado; lojas novas começam em 0
+  const saldoExpr = `COALESCE(pst.saldo, IF(? = 1, p.estoque, 0))`;
+
   const [[{ total }]] = await pool.query<any>(
     `SELECT COUNT(*) as total FROM (
-       SELECT COALESCE(pst.saldo, p.estoque) AS estoque, p.min_estoque
+       SELECT ${saldoExpr} AS estoque, p.min_estoque
        ${baseSelect} ${having}
      ) AS sub`,
-    baseParams
+    [tenantId, ...baseParams]
   );
 
   const [rows] = await pool.query<any>(
     `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade,
-            COALESCE(pst.saldo, p.estoque) AS estoque,
+            ${saldoExpr} AS estoque,
             p.min_estoque, p.vr_compra, p.vr_venda
      ${baseSelect} ${having}
      ORDER BY p.nome_produto LIMIT ? OFFSET ?`,
-    [...baseParams, limit, offset]
+    [tenantId, ...baseParams, limit, offset]
   );
 
   res.json({
@@ -700,11 +703,11 @@ router.patch('/estoque/:id/ajustar', requireManagerUp, async (req, res) => {
   }
 
   const [[row]] = await pool.query<any>(
-    `SELECT COALESCE(pst.saldo, p.estoque) AS saldo
+    `SELECT COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS saldo
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
      WHERE p.id = ?`,
-    [tenantId, prodId]
+    [tenantId, tenantId, prodId]
   );
   if (!row) { res.status(404).json({ message: 'Produto não encontrado' }); return; }
 
