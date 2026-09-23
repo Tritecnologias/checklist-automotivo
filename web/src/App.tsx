@@ -3,6 +3,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import Layout       from './components/Layout'
 import AdminLayout  from './components/AdminLayout'
 import AuthGuard    from './components/AuthGuard'
+import ErpGuard     from './components/ErpGuard'
 import ErpLayout    from './components/ErpLayout'
 import Login        from './pages/Login'
 import AdminLogin   from './pages/AdminLogin'
@@ -33,8 +34,8 @@ export default function App() {
           {/* Login legado de admin (mantido por compatibilidade) */}
           <Route path="/admin/login" element={<AdminLogin />} />
 
-          {/* ERP + Admin — exige JWT */}
-          <Route element={<AuthGuard />}>
+          {/* ERP + Admin — exige JWT e role != operator */}
+          <Route element={<ErpGuard />}>
             <Route element={<AdminLayout />}>
               <Route path="/admin/products" element={<AdminProducts />} />
               <Route path="/admin/clients"  element={<AdminClients />} />

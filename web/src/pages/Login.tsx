@@ -37,17 +37,19 @@ export default function Login() {
         tenants: Tenant[]
       }
 
+      const destination = user.role === 'operator' ? '/' : '/erp'
+
       // Owner sem nenhum tenant cadastrado: entra direto no ERP sem filtro de loja
       if (user.role === 'owner' && tenants.length === 0) {
         login(token, user, [])
-        navigate('/erp')
+        navigate(destination)
         return
       }
 
-      // Apenas 1 tenant: entra direto
+      // Apenas 1 tenant (ou operator): entra direto
       if (tenants.length <= 1) {
         login(token, user, tenants)
-        navigate('/erp')
+        navigate(destination)
         return
       }
 
@@ -65,10 +67,8 @@ export default function Login() {
   function handleSelectTenant(tenant: Tenant) {
     if (!pendingToken || !pendingUser) return
     login(pendingToken, pendingUser, pendingTenants)
-    // O AuthContext já seleciona o primeiro tenant; precisamos garantir que selecionou o escolhido
-    // Fazemos via login + switchTenant logo após
     localStorage.setItem('erp_current_tenant', JSON.stringify(tenant))
-    navigate('/erp')
+    navigate(pendingUser.role === 'operator' ? '/' : '/erp')
   }
 
   // ── Seletor de tenant ────────────────────────────────────────────────────────
