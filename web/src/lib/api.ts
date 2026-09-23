@@ -24,13 +24,32 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
+  reopenOrder: (id: string) =>
+    request<Order>(`/orders/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'open' }),
+    }),
+  verifySupervisorPin: (pin: string) =>
+    request<{ authorized: boolean; supervisorName?: string }>('/auth/verify-supervisor-pin', {
+      method: 'POST',
+      body: JSON.stringify({ pin }),
+    }),
 }
 
 function adminRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('admin_token') ?? ''
+  const jwt        = localStorage.getItem('erp_jwt_token')
+  const adminToken = localStorage.getItem('admin_token') ?? ''
+  const tenantRaw  = localStorage.getItem('erp_current_tenant')
+  const tenantId   = tenantRaw ? (JSON.parse(tenantRaw) as { id: number }).id : undefined
+
   return request<T>(path, {
     ...options,
-    headers: { 'x-admin-token': token, ...options?.headers },
+    headers: {
+      // JWT tem prioridade; mantém x-admin-token para compatibilidade com admin.ts
+      ...(jwt        ? { Authorization: `Bearer ${jwt}` } : { 'x-admin-token': adminToken }),
+      ...(tenantId   ? { 'x-tenant-id': String(tenantId) } : {}),
+      ...options?.headers,
+    },
   })
 }
 

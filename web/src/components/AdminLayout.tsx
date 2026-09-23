@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 
 const nav = [
   { to: '/admin/products', label: '📦 Produtos' },
@@ -8,10 +9,11 @@ const nav = [
 
 export default function AdminLayout() {
   const navigate = useNavigate()
+  const { logout, user } = useAuth()
 
   function handleLogout() {
-    localStorage.removeItem('admin_token')
-    navigate('/admin/login')
+    logout()
+    navigate('/login')
   }
 
   return (
@@ -37,6 +39,7 @@ export default function AdminLayout() {
             ))}
           </nav>
           <div className="flex items-center gap-4">
+            {user && <span className="text-xs text-slate-500">{user.nome}</span>}
             <NavLink to="/" className="text-sm text-slate-400 hover:text-white transition-colors">
               ← Dashboard
             </NavLink>

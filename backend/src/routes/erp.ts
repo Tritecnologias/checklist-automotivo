@@ -1,15 +1,28 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 import { pool } from '../db';
+import { JWT_SECRET, type JwtPayload } from '../middleware/auth';
 
 const router = Router();
 const ADMIN_TOKEN = process.env.ADMIN_PASSWORD ?? 'admin@2026';
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (req.headers['x-admin-token'] !== ADMIN_TOKEN) {
-    res.status(401).json({ message: 'Não autorizado' });
+  const authHeader = req.headers['authorization'];
+  if (authHeader?.startsWith('Bearer ')) {
+    try {
+      const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as JwtPayload;
+      if (payload.role === 'owner' || payload.role === 'manager') {
+        req.user = payload;
+        next();
+        return;
+      }
+    } catch { /* tenta legado */ }
+  }
+  if (req.headers['x-admin-token'] === ADMIN_TOKEN) {
+    next();
     return;
   }
-  next();
+  res.status(401).json({ message: 'Não autorizado' });
 }
 router.use(requireAdmin);
 
