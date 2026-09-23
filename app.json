@@ -13,8 +13,15 @@
       "backgroundColor": "#0f2744"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-updates"
     ],
+    "updates": {
+      "url": "https://u.expo.dev/ea1f840c-fd6a-4859-9798-eb21cee9c56e"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "android": {
       "package": "com.seudominio.checklistautomotivo",
       "adaptiveIcon": {

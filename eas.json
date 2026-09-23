@@ -4,6 +4,7 @@
   },
   "build": {
     "preview": {
+      "channel": "preview",
       "android": {
         "buildType": "apk"
       },
@@ -12,9 +13,16 @@
       }
     },
     "production": {
+      "channel": "production",
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://4rodas.tritecnologias.com.br/api"
       }
     }
+  },
+  "submit": {
+    "production": {}
   }
 }
