@@ -120,6 +120,7 @@ export default function Lojas() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-700">
+                <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3">ID</th>
                 <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3">Nome</th>
                 <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3">Slug</th>
                 <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3">Status</th>
@@ -129,6 +130,9 @@ export default function Lojas() {
             <tbody>
               {lojas.map((l, i) => (
                 <tr key={l.id} className={i < lojas.length - 1 ? 'border-b border-slate-700/50' : ''}>
+                  <td className="px-5 py-3.5">
+                    <code className="text-xs font-mono font-bold text-slate-300 bg-slate-900 px-2 py-0.5 rounded">{l.id}</code>
+                  </td>
                   <td className="px-5 py-3.5">
                     {editing?.id === l.id ? (
                       <div className="flex items-center gap-2">
@@ -177,7 +181,7 @@ export default function Lojas() {
                 </tr>
               ))}
               {lojas.length === 0 && (
-                <tr><td colSpan={4} className="px-5 py-8 text-center text-slate-500 text-sm">Nenhuma loja cadastrada</td></tr>
+                <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-500 text-sm">Nenhuma loja cadastrada</td></tr>
               )}
             </tbody>
           </table>
