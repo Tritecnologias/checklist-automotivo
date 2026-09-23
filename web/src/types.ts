@@ -170,6 +170,7 @@ export interface UserAdmin {
   role: 'owner' | 'manager' | 'operator' | 'caixa'
   tenant_id: number | null
   tenant_nome: string | null
+  tenant_count: number
   ativo: number
 }
 

@@ -137,12 +137,14 @@ export const tenantsApi = {
 
 export const usersApi = {
   list: () => adminRequest<UserAdmin[]>('/auth/users'),
+  getTenants: (id: number) => adminRequest<number[]>(`/auth/users/${id}/tenants`),
   create: (data: {
     nome: string; email: string; password: string
     role: string; tenant_id?: number | null; tenant_ids?: number[]
   }) => adminRequest<{ id: number }>('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: number, data: {
-    nome?: string; role?: string; tenant_id?: number | null; ativo?: boolean; password?: string
+    nome?: string; role?: string; tenant_id?: number | null
+    tenant_ids?: number[]; ativo?: boolean; password?: string
   }) => adminRequest('/auth/users/' + id, { method: 'PATCH', body: JSON.stringify(data) }),
 }
 

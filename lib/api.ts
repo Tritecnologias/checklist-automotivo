@@ -64,6 +64,12 @@ export const authApi = {
     }),
 
   me: () => request<{ user: LoginResult['user']; tenants: LoginResult['tenants'] }>('/auth/me'),
+
+  selectTenant: (tenantId: number) =>
+    request<{ token: string }>('/auth/select-tenant', {
+      method: 'POST',
+      body: JSON.stringify({ tenantId }),
+    }),
 };
 
 // ─── Ordens ──────────────────────────────────────────────────────────────────

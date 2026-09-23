@@ -28,7 +28,7 @@ function ListIcon() {
 export default function IdentificationScreen() {
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const { logout, user } = useAuth();
+  const { logout, user, tenants, activeTenant } = useAuth();
 
   const [plate, setPlate] = useState('');
   const [model, setModel] = useState('');
@@ -109,12 +109,19 @@ export default function IdentificationScreen() {
         {/* Logo / título */}
         <View className="items-center mb-10">
           <View className="w-full flex-row justify-between items-center mb-2">
-            {/* Nome do usuário logado */}
-            {user && (
-              <Text className="text-xs text-slate-500 dark:text-slate-400 flex-shrink">
-                👤 {user.nome}
-              </Text>
-            )}
+            {/* Nome do usuário + loja ativa */}
+            <View className="flex-shrink">
+              {user && (
+                <Text className="text-xs text-slate-500 dark:text-slate-400">
+                  👤 {user.nome}
+                </Text>
+              )}
+              {activeTenant && (
+                <Text className="text-xs font-semibold text-blue-500 dark:text-blue-400 mt-0.5">
+                  🏪 {activeTenant.nome}
+                </Text>
+              )}
+            </View>
             <View className="flex-row items-center gap-2 ml-auto">
               {hasContent && (
                 <TouchableOpacity
@@ -124,6 +131,17 @@ export default function IdentificationScreen() {
                   <Text style={{ fontSize: 16 }}>🗑️</Text>
                   <Text className="text-sm font-semibold text-red-600 dark:text-red-400">
                     Limpar
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {tenants.length > 1 && (
+                <TouchableOpacity
+                  onPress={() => router.push('/select-tenant')}
+                  className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800"
+                >
+                  <Text style={{ fontSize: 14 }}>🏪</Text>
+                  <Text className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                    Trocar loja
                   </Text>
                 </TouchableOpacity>
               )}

@@ -9,19 +9,23 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { queryClient } from '@/lib/queryClient';
 
 function AuthGate() {
-  const { token, isLoading } = useAuth();
+  const { token, needsTenantSelection, isLoading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
     if (isLoading) return;
-    const inLoginScreen = segments[0] === 'login';
-    if (!token && !inLoginScreen) {
-      router.replace('/login');
-    } else if (token && inLoginScreen) {
-      router.replace('/');
+    const inLogin = segments[0] === 'login';
+    const inTenantSelect = segments[0] === 'select-tenant';
+
+    if (!token) {
+      if (!inLogin) router.replace('/login');
+    } else if (needsTenantSelection) {
+      if (!inTenantSelect) router.replace('/select-tenant');
+    } else {
+      if (inLogin || inTenantSelect) router.replace('/');
     }
-  }, [token, isLoading, segments]);
+  }, [token, needsTenantSelection, isLoading, segments]);
 
   return null;
 }
@@ -50,6 +54,10 @@ function RootLayout() {
           <Stack.Screen
             name="login"
             options={{ title: 'Login', headerShown: false }}
+          />
+          <Stack.Screen
+            name="select-tenant"
+            options={{ title: 'Selecionar Loja', headerShown: false }}
           />
           <Stack.Screen
             name="index"

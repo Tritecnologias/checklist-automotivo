@@ -4,6 +4,8 @@ import { tenantsApi, usersApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import type { UserAdmin } from '../types'
 
+const MULTI_TENANT_ROLES = ['manager', 'operator', 'caixa']
+
 const ROLE_OPTS = [
   { value: 'owner',    label: 'Proprietário' },
   { value: 'manager',  label: 'Gerente' },
@@ -35,7 +37,7 @@ export default function Usuarios() {
   const [formError, setFormError] = useState('')
 
   const [editing, setEditing] = useState<UserAdmin | null>(null)
-  const [editData, setEditData] = useState({ nome: '', role: '', tenant_id: '' as string | number, ativo: true, password: '' })
+  const [editData, setEditData] = useState({ nome: '', role: '', tenant_id: '' as string | number, tenant_ids: [] as number[], ativo: true, password: '' })
   const [editError, setEditError] = useState('')
 
   const createMut = useMutation({
@@ -65,15 +67,22 @@ export default function Usuarios() {
     const payload: Parameters<typeof usersApi.create>[0] = {
       nome: nome.trim(), email: email.trim(), password, role,
     }
-    if (role === 'operator' && tenant_id) payload.tenant_id = Number(tenant_id)
-    if (role === 'manager' && form.tenant_ids.length > 0) payload.tenant_ids = form.tenant_ids
+    if (MULTI_TENANT_ROLES.includes(role) && form.tenant_ids.length > 1) {
+      payload.tenant_ids = form.tenant_ids
+    } else if (tenant_id) {
+      payload.tenant_id = Number(tenant_id)
+    }
     createMut.mutate(payload)
   }
 
   function startEdit(u: UserAdmin) {
     setEditing(u)
-    setEditData({ nome: u.nome, role: u.role, tenant_id: u.tenant_id ?? '', ativo: !!u.ativo, password: '' })
+    setEditData({ nome: u.nome, role: u.role, tenant_id: u.tenant_id ?? '', tenant_ids: [], ativo: !!u.ativo, password: '' })
     setEditError('')
+    // Carregar lojas atuais do usuário
+    if (u.tenant_count > 0) {
+      usersApi.getTenants(u.id).then(ids => setEditData(d => ({ ...d, tenant_ids: ids })))
+    }
   }
 
   function saveEdit() {
@@ -83,7 +92,13 @@ export default function Usuarios() {
     if (editData.nome.trim()) payload.nome = editData.nome.trim()
     if (isOwner) {
       payload.role = editData.role
-      payload.tenant_id = editData.tenant_id !== '' ? Number(editData.tenant_id) : null
+      if (editData.tenant_ids.length > 0) {
+        payload.tenant_ids = editData.tenant_ids
+        payload.tenant_id = editData.tenant_ids[0]
+      } else {
+        payload.tenant_id = editData.tenant_id !== '' ? Number(editData.tenant_id) : null
+        payload.tenant_ids = []
+      }
       payload.ativo = editData.ativo
     }
     if (editData.password) payload.password = editData.password
@@ -157,25 +172,13 @@ export default function Usuarios() {
               </select>
             </div>
 
-            {/* Operador → uma loja */}
-            {form.role === 'operator' && isOwner && (
+            {/* Loja(s) — para todos os perfis exceto owner */}
+            {MULTI_TENANT_ROLES.includes(form.role) && isOwner && lojas.length > 0 && (
               <div className="col-span-2">
-                <label className="block text-xs text-slate-400 mb-1.5">Loja</label>
-                <select
-                  className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  value={form.tenant_id}
-                  onChange={e => setForm(f => ({ ...f, tenant_id: e.target.value }))}
-                >
-                  <option value="">— Selecione uma loja —</option>
-                  {lojas.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
-                </select>
-              </div>
-            )}
-
-            {/* Gerente → múltiplas lojas (checkboxes) */}
-            {form.role === 'manager' && isOwner && lojas.length > 0 && (
-              <div className="col-span-2">
-                <label className="block text-xs text-slate-400 mb-2">Lojas com acesso</label>
+                <label className="block text-xs text-slate-400 mb-2">
+                  Lojas com acesso
+                  <span className="ml-1 text-slate-500">(marque uma ou mais)</span>
+                </label>
                 <div className="flex flex-wrap gap-3">
                   {lojas.map(l => (
                     <label key={l.id} className="flex items-center gap-2 cursor-pointer select-none">
@@ -185,6 +188,7 @@ export default function Usuarios() {
                         checked={form.tenant_ids.includes(l.id)}
                         onChange={e => setForm(f => ({
                           ...f,
+                          tenant_id: '',
                           tenant_ids: e.target.checked
                             ? [...f.tenant_ids, l.id]
                             : f.tenant_ids.filter(id => id !== l.id),
@@ -246,17 +250,30 @@ export default function Usuarios() {
                 </select>
               </div>
             )}
-            {isOwner && editData.role === 'operator' && (
-              <div>
-                <label className="block text-xs text-slate-400 mb-1.5">Loja</label>
-                <select
-                  className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  value={editData.tenant_id}
-                  onChange={e => setEditData(d => ({ ...d, tenant_id: e.target.value }))}
-                >
-                  <option value="">— Sem loja —</option>
-                  {lojas.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
-                </select>
+            {isOwner && MULTI_TENANT_ROLES.includes(editData.role) && lojas.length > 0 && (
+              <div className="col-span-2">
+                <label className="block text-xs text-slate-400 mb-2">
+                  Lojas com acesso
+                  <span className="ml-1 text-slate-500">(marque uma ou mais)</span>
+                </label>
+                <div className="flex flex-wrap gap-3">
+                  {lojas.map(l => (
+                    <label key={l.id} className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 accent-blue-500"
+                        checked={editData.tenant_ids.includes(l.id)}
+                        onChange={e => setEditData(d => ({
+                          ...d,
+                          tenant_ids: e.target.checked
+                            ? [...d.tenant_ids, l.id]
+                            : d.tenant_ids.filter(id => id !== l.id),
+                        }))}
+                      />
+                      <span className="text-sm text-slate-300">{l.nome}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
             <div>
@@ -330,7 +347,15 @@ export default function Usuarios() {
                     </span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <span className="text-sm text-slate-300">{u.tenant_nome ?? (u.role === 'owner' ? 'Todas' : '—')}</span>
+                    {u.role === 'owner' ? (
+                      <span className="text-sm text-slate-300">Todas</span>
+                    ) : u.tenant_count > 1 ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300">
+                        🏪 {u.tenant_count} lojas
+                      </span>
+                    ) : (
+                      <span className="text-sm text-slate-300">{u.tenant_nome ?? '—'}</span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5">
                     <span className={`inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full ${
