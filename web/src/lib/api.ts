@@ -1,7 +1,7 @@
 import type {
   Order, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
-  TenantAdmin, UserAdmin,
+  TenantAdmin, UserAdmin, Instalacao,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -177,4 +177,16 @@ export const adminApi = {
     adminRequest(`/admin/clients/${id}/toggle`, { method: 'PATCH' }),
   deleteClient: (id: number) =>
     adminRequest(`/admin/clients/${id}`, { method: 'DELETE' }),
+
+  // Instalações
+  getInstalacoes: () =>
+    adminRequest<Instalacao[]>('/admin/instalacoes'),
+  createInstalacao: (data: { nome: string; sigla: string; ordem?: number }) =>
+    adminRequest<Instalacao>('/admin/instalacoes', { method: 'POST', body: JSON.stringify(data) }),
+  deleteInstalacao: (id: number) =>
+    adminRequest(`/admin/instalacoes/${id}`, { method: 'DELETE' }),
+  getProductInstalacoes: (id: number) =>
+    adminRequest<number[]>(`/admin/products/${id}/instalacoes`),
+  setProductInstalacoes: (id: number, ids: number[]) =>
+    adminRequest(`/admin/products/${id}/instalacoes`, { method: 'PUT', body: JSON.stringify({ ids }) }),
 }

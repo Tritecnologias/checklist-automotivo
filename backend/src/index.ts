@@ -134,6 +134,30 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  // Tabela de instalações configuráveis (LD, LE, D, T, etc.)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`instalacoes\` (
+      \`id\`    INT AUTO_INCREMENT PRIMARY KEY,
+      \`nome\`  VARCHAR(50)  NOT NULL,
+      \`sigla\` VARCHAR(10)  NOT NULL,
+      \`ordem\` INT          NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`produto_instalacao\` (
+      \`produto_id\`    INT NOT NULL,
+      \`instalacao_id\` INT NOT NULL,
+      PRIMARY KEY (\`produto_id\`, \`instalacao_id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await pool.query(`
+    INSERT IGNORE INTO instalacoes (id, nome, sigla, ordem) VALUES
+    (1, 'Lado Direito',  'LD', 1),
+    (2, 'Lado Esquerdo', 'LE', 2),
+    (3, 'Dianteiro',     'D',  3),
+    (4, 'Traseiro',      'T',  4)
+  `);
+
   console.log('[migration] tabelas de multi-tenant OK');
 }
 

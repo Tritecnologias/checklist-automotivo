@@ -173,4 +173,51 @@ router.delete('/clients/:id', async (req, res) => {
   res.status(204).end();
 });
 
+// ── INSTALAÇÕES ──────────────────────────────────────────────────────────────
+
+router.get('/instalacoes', async (_req, res) => {
+  const [rows] = await pool.query<any>(
+    'SELECT id, nome, sigla, ordem FROM instalacoes ORDER BY ordem, id'
+  );
+  res.json(rows);
+});
+
+router.post('/instalacoes', async (req, res) => {
+  const { nome, sigla, ordem } = req.body as { nome: string; sigla: string; ordem?: number };
+  if (!nome?.trim() || !sigla?.trim()) {
+    res.status(400).json({ message: 'Nome e sigla são obrigatórios' });
+    return;
+  }
+  const [result] = await pool.query<any>(
+    'INSERT INTO instalacoes (nome, sigla, ordem) VALUES (?, ?, ?)',
+    [nome.trim(), sigla.trim().toUpperCase(), ordem ?? 0]
+  );
+  res.status(201).json({ id: result.insertId, nome: nome.trim(), sigla: sigla.trim().toUpperCase(), ordem: ordem ?? 0 });
+});
+
+router.delete('/instalacoes/:id', async (req, res) => {
+  await pool.query('DELETE FROM produto_instalacao WHERE instalacao_id = ?', [req.params.id]);
+  await pool.query('DELETE FROM instalacoes WHERE id = ?', [req.params.id]);
+  res.status(204).end();
+});
+
+router.get('/products/:id/instalacoes', async (req, res) => {
+  const [rows] = await pool.query<any>(
+    'SELECT instalacao_id FROM produto_instalacao WHERE produto_id = ?',
+    [req.params.id]
+  );
+  res.json((rows as any[]).map((r: any) => r.instalacao_id as number));
+});
+
+router.put('/products/:id/instalacoes', async (req, res) => {
+  const { ids } = req.body as { ids: number[] };
+  const prodId = Number(req.params.id);
+  await pool.query('DELETE FROM produto_instalacao WHERE produto_id = ?', [prodId]);
+  if (Array.isArray(ids) && ids.length > 0) {
+    const values = ids.map(iid => [prodId, iid]);
+    await pool.query('INSERT INTO produto_instalacao (produto_id, instalacao_id) VALUES ?', [values]);
+  }
+  res.status(204).end();
+});
+
 export default router;

@@ -144,6 +144,15 @@ export interface ClienteHistorico {
   }[]
 }
 
+// ── Instalações ──────────────────────────────────────────────────────────────
+
+export interface Instalacao {
+  id: number
+  nome: string
+  sigla: string
+  ordem: number
+}
+
 // ── Admin Types ──────────────────────────────────────────────────────────────
 
 export interface TenantAdmin {

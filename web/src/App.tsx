@@ -23,6 +23,7 @@ import ClienteHistorico from './pages/ClienteHistorico'
 import Lojas             from './pages/Lojas'
 import Usuarios          from './pages/Usuarios'
 import ImportarEstoque   from './pages/ImportarEstoque'
+import ConfigInstalacoes from './pages/ConfigInstalacoes'
 
 export default function App() {
   return (
@@ -54,7 +55,8 @@ export default function App() {
               <Route path="/erp/clientes/:id" element={<ClienteHistorico />} />
               <Route path="/erp/lojas"        element={<Lojas />} />
               <Route path="/erp/usuarios"     element={<Usuarios />} />
-              <Route path="/erp/importar"     element={<ImportarEstoque />} />
+              <Route path="/erp/importar"           element={<ImportarEstoque />} />
+              <Route path="/erp/config/instalacoes" element={<ConfigInstalacoes />} />
             </Route>
           </Route>
 

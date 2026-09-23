@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { adminApi } from '../lib/api'
 import Modal from '../components/Modal'
+import type { Instalacao } from '../types'
 
 type Product = {
   id: number
@@ -31,23 +32,46 @@ export default function AdminProducts() {
   const [adding, setAdding]       = useState(false)
   const [form, setForm]           = useState<Omit<Product, 'id'>>(empty)
   const [confirmDelete, setConfirmDelete] = useState<Product | null>(null)
+  const [editingInstIds, setEditingInstIds] = useState<number[]>([])
+  const [addingInstIds, setAddingInstIds]   = useState<number[]>([])
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-products', search, page],
     queryFn: () => adminApi.listProducts(search, page),
   })
 
+  const { data: todasInstalacoes = [] } = useQuery<Instalacao[]>({
+    queryKey: ['instalacoes'],
+    queryFn: () => adminApi.getInstalacoes(),
+  })
+
+  useEffect(() => {
+    if (!editing) { setEditingInstIds([]); return }
+    adminApi.getProductInstalacoes(editing.id)
+      .then(setEditingInstIds)
+      .catch(() => setEditingInstIds([]))
+  }, [editing?.id])
+
   const updateMut = useMutation({
-    mutationFn: (p: Product) => adminApi.updateProduct(p.id, p),
+    mutationFn: async (p: Product) => {
+      await adminApi.updateProduct(p.id, p)
+      await adminApi.setProductInstalacoes(p.id, editingInstIds)
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-products'] }); setEditing(null) },
   })
 
   const createMut = useMutation({
-    mutationFn: () => adminApi.createProduct(form),
+    mutationFn: async () => {
+      const res = await adminApi.createProduct(form) as { id: number }
+      if (res.id && addingInstIds.length > 0) {
+        await adminApi.setProductInstalacoes(res.id, addingInstIds)
+      }
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-products'] })
       setAdding(false)
       setForm(empty)
+      setAddingInstIds([])
     },
   })
 
@@ -179,6 +203,9 @@ export default function AdminProducts() {
             onSubmit={() => updateMut.mutate(editing)}
             loading={updateMut.isPending}
             label="Salvar alterações"
+            todasInstalacoes={todasInstalacoes}
+            selectedInstIds={editingInstIds}
+            onInstChange={setEditingInstIds}
           />
         </Modal>
       )}
@@ -191,6 +218,9 @@ export default function AdminProducts() {
             onSubmit={() => createMut.mutate()}
             loading={createMut.isPending}
             label="Criar produto"
+            todasInstalacoes={todasInstalacoes}
+            selectedInstIds={addingInstIds}
+            onInstChange={setAddingInstIds}
           />
         </Modal>
       )}
@@ -231,15 +261,27 @@ export default function AdminProducts() {
 
 function ProductForm({
   value, onChange, onSubmit, loading, label,
+  todasInstalacoes, selectedInstIds, onInstChange,
 }: {
   value: Omit<Product, 'id'>
   onChange: (v: Omit<Product, 'id'>) => void
   onSubmit: () => void
   loading: boolean
   label: string
+  todasInstalacoes: Instalacao[]
+  selectedInstIds: number[]
+  onInstChange: (ids: number[]) => void
 }) {
   const set = (field: keyof Omit<Product, 'id'>) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...value, [field]: e.target.value })
+
+  function toggleInst(id: number) {
+    onInstChange(
+      selectedInstIds.includes(id)
+        ? selectedInstIds.filter(x => x !== id)
+        : [...selectedInstIds, id]
+    )
+  }
 
   return (
     <div className="space-y-3">
@@ -275,6 +317,34 @@ function ProductForm({
       <Field label="Estoque">
         <input type="number" step="1" value={value.estoque} onChange={set('estoque')} className={input} />
       </Field>
+      {todasInstalacoes.length > 0 && (
+        <Field label="Instalações">
+          <div className="flex flex-wrap gap-2 pt-1">
+            {todasInstalacoes.map(inst => {
+              const checked = selectedInstIds.includes(inst.id)
+              return (
+                <button
+                  key={inst.id}
+                  type="button"
+                  onClick={() => toggleInst(inst.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                    checked
+                      ? 'bg-blue-600 border-blue-500 text-white'
+                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'
+                  }`}
+                >
+                  {inst.sigla}
+                  {inst.nome !== inst.sigla && (
+                    <span className={`ml-1 font-normal ${checked ? 'text-blue-200' : 'text-slate-500'}`}>
+                      {inst.nome}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </Field>
+      )}
       <button
         onClick={onSubmit}
         disabled={loading || !value.nome_produto}
