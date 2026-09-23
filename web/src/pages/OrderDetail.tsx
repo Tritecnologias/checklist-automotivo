@@ -18,7 +18,13 @@ export default function OrderDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const [confirmClose, setConfirmClose] = useState(false)
+
+  // ── estado de modais ──────────────────────────────────────────────────────
+  const [confirmClose, setConfirmClose]   = useState(false)
+  const [showReopenPin, setShowReopenPin] = useState(false)
+  const [pin, setPin]                     = useState('')
+  const [pinError, setPinError]           = useState('')
+  const [verifying, setVerifying]         = useState(false)
 
   const { data: order, isLoading, isError } = useQuery({
     queryKey: ['order', id],
@@ -26,6 +32,7 @@ export default function OrderDetail() {
     enabled: !!id,
   })
 
+  // ── Encerrar OS ──────────────────────────────────────────────────────────
   const { mutate: closeOrder, isPending: closing } = useMutation({
     mutationFn: () => api.updateOrderStatus(id!, 'closed'),
     onSuccess: (updated) => {
@@ -34,6 +41,47 @@ export default function OrderDetail() {
       setConfirmClose(false)
     },
   })
+
+  // ── Reabrir OS ───────────────────────────────────────────────────────────
+  const { mutate: reopenOrder, isPending: reopening } = useMutation({
+    mutationFn: () => api.reopenOrder(id!),
+    onSuccess: (updated) => {
+      qc.setQueryData(['order', id], updated)
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      setShowReopenPin(false)
+      setPin('')
+      setPinError('')
+    },
+  })
+
+  const handleReopenClick = () => {
+    setPin('')
+    setPinError('')
+    setShowReopenPin(true)
+  }
+
+  const handlePinSubmit = async () => {
+    if (!/^\d{4}$/.test(pin)) {
+      setPinError('PIN deve ter exatamente 4 dígitos.')
+      return
+    }
+    setVerifying(true)
+    setPinError('')
+    try {
+      const result = await api.verifySupervisorPin(pin)
+      if (result.authorized) {
+        reopenOrder()
+      } else {
+        setPinError('PIN inválido. Somente administradores podem reabrir uma OS.')
+      }
+    } catch {
+      setPinError('Erro ao verificar PIN. Tente novamente.')
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  // ── Renderização ─────────────────────────────────────────────────────────
 
   if (isLoading) {
     return <div className="py-32 text-center text-slate-500">Carregando OS…</div>
@@ -50,6 +98,7 @@ export default function OrderDetail() {
     )
   }
 
+  const isClosed = order.status === 'closed'
   const parts    = order.items.filter((i) => i.type === 'part')
   const services = order.items.filter((i) => i.type === 'service')
   const totalParts  = order.items.reduce((s, i) => s + i.total, 0)
@@ -64,6 +113,19 @@ export default function OrderDetail() {
         <span>/</span>
         <span className="font-mono text-slate-300">#{order.id.split('-')[0].toUpperCase()}</span>
       </div>
+
+      {/* Banner somente-leitura */}
+      {isClosed && (
+        <div className="flex items-center gap-3 bg-slate-800/60 border border-slate-700 rounded-xl px-5 py-3">
+          <span className="text-slate-400 text-lg">🔒</span>
+          <div>
+            <p className="text-sm font-semibold text-slate-300">OS Encerrada — Somente leitura</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Nenhuma alteração pode ser feita. Solicite a reabertura a um administrador.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Header card */}
       <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
@@ -85,26 +147,34 @@ export default function OrderDetail() {
           </div>
 
           <div className="flex items-center gap-3">
-            {order.status !== 'closed' && (
+            {!isClosed ? (
               <button
                 onClick={() => setConfirmClose(true)}
                 className="px-4 py-2 bg-red-900/40 hover:bg-red-900/60 text-red-400 rounded-xl text-sm font-semibold border border-red-800/50 transition-colors"
               >
-                Encerrar OS
+                🔒 Encerrar OS
+              </button>
+            ) : (
+              <button
+                onClick={handleReopenClick}
+                disabled={reopening}
+                className="px-4 py-2 bg-amber-900/40 hover:bg-amber-900/60 text-amber-400 rounded-xl text-sm font-semibold border border-amber-800/50 transition-colors disabled:opacity-50"
+              >
+                🔓 Reabrir OS
               </button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Confirm close dialog */}
+      {/* Modal — Confirmar Encerramento */}
       {confirmClose && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
           <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-sm">
             <h2 className="text-lg font-bold text-white mb-2">Encerrar OS?</h2>
             <p className="text-slate-400 text-sm mb-6">
               A OS <strong className="text-white">{order.vehicle.plate}</strong> será marcada como encerrada.
-              Esta ação não pode ser desfeita por aqui.
+              Para editar novamente, um administrador precisará reabri-la.
             </p>
             <div className="flex gap-3">
               <button
@@ -125,6 +195,54 @@ export default function OrderDetail() {
         </div>
       )}
 
+      {/* Modal — PIN de Reabertura */}
+      {showReopenPin && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-sm">
+            <h2 className="text-lg font-bold text-white mb-1">🔓 Reabrir OS</h2>
+            <p className="text-slate-400 text-sm mb-5">
+              Insira o PIN de administrador para reabrir a OS{' '}
+              <strong className="text-white">{order.vehicle.plate}</strong>.
+            </p>
+
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={pin}
+              onChange={(e) => {
+                setPin(e.target.value.replace(/\D/g, '').slice(0, 4))
+                setPinError('')
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && handlePinSubmit()}
+              placeholder="••••"
+              className="w-full bg-slate-800 border border-slate-700 text-white text-center text-2xl tracking-[0.5em] placeholder-slate-600 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-amber-500 mb-2"
+              autoFocus
+            />
+
+            {pinError && (
+              <p className="text-red-400 text-xs mb-3">{pinError}</p>
+            )}
+
+            <div className="flex gap-3 mt-3">
+              <button
+                onClick={() => { setShowReopenPin(false); setPin(''); setPinError('') }}
+                className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handlePinSubmit}
+                disabled={verifying || reopening || pin.length < 4}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold disabled:opacity-50"
+              >
+                {verifying || reopening ? 'Verificando…' : 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Items */}
       {order.items.length === 0 ? (
         <div className="bg-slate-900 rounded-2xl border border-slate-800 py-16 text-center text-slate-500">
@@ -132,11 +250,9 @@ export default function OrderDetail() {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Parts */}
           {parts.length > 0 && (
             <ItemsTable title="Peças" items={parts} accentColor="text-amber-400" />
           )}
-          {/* Services */}
           {services.length > 0 && (
             <ItemsTable title="Mão de Obra" items={services} accentColor="text-blue-400" />
           )}

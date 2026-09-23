@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   Share,
   Text,
   TouchableOpacity,
@@ -41,7 +42,11 @@ export default function OrderScreen() {
 
   const [search, setSearch] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
-  const [laborItem, setLaborItem] = useState<OrderItem | null>(null);
+  const [priceModalTarget, setPriceModalTarget] = useState<
+    | { mode: 'catalog'; item: CatalogItem }
+    | { mode: 'orderItem'; item: OrderItem }
+    | null
+  >(null);
   const [pinVerified, setPinVerified] = useState(false);
   const [showUnlockPin, setShowUnlockPin] = useState(false);
   const debouncedSearch = useDebounce(search, 400);
@@ -102,46 +107,57 @@ export default function OrderScreen() {
 
   // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-  const handleAddCatalogItem = useCallback(
+  const handleSelectCatalogItem = useCallback(
     (item: CatalogItem) => {
-      if (isClosed) return; // guard extra no front
-      addItem(
-        { catalogItemId: item.id, quantity: 1 },
-        {
-          onSuccess: () => {
-            setSearch('');
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          },
-          onError: () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          },
-        },
-      );
+      if (isClosed) return;
+      Keyboard.dismiss();
+      setPriceModalTarget({ mode: 'catalog', item });
     },
-    [addItem, isClosed],
+    [isClosed],
   );
 
-  const handleLaborRequest = useCallback((item: OrderItem) => {
-    if (isClosed) return;
-    setLaborItem(item);
-  }, [isClosed]);
-
-  const handleLaborConfirm = useCallback(
-    (totalServicePrice: number) => {
-      if (!laborItem) return;
-      setLaborItem(null);
-      // O operador digita o preço total (peça + instalação).
-      // Internamente armazenamos só a MO = total - valor da peça.
-      const laborPrice = Math.max(0, totalServicePrice - (laborItem.total ?? 0));
-      updateItemLabor(
-        { itemId: laborItem.id, laborPrice },
-        {
-          onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-          onError:   () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-        },
-      );
+  const handleLaborRequest = useCallback(
+    (item: OrderItem) => {
+      if (isClosed) return;
+      setPriceModalTarget({ mode: 'orderItem', item });
     },
-    [laborItem, updateItemLabor],
+    [isClosed],
+  );
+
+  const handlePriceConfirm = useCallback(
+    (totalServicePrice: number) => {
+      if (!priceModalTarget) return;
+
+      if (priceModalTarget.mode === 'catalog') {
+        const { item } = priceModalTarget;
+        const laborPrice = Math.max(0, totalServicePrice - (item.unitPrice ?? 0));
+        setPriceModalTarget(null);
+        setSearch('');
+        addItem(
+          { catalogItemId: item.id, quantity: 1, laborPrice },
+          {
+            onSuccess: () => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            },
+            onError: () => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            },
+          },
+        );
+      } else {
+        const { item } = priceModalTarget;
+        const laborPrice = Math.max(0, totalServicePrice - (item.total ?? 0));
+        setPriceModalTarget(null);
+        updateItemLabor(
+          { itemId: item.id, laborPrice },
+          {
+            onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+            onError:   () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+          },
+        );
+      }
+    },
+    [priceModalTarget, addItem, updateItemLabor],
   );
 
   const handleDeleteRequest = useCallback((item: OrderItem) => {
@@ -419,7 +435,7 @@ export default function OrderScreen() {
               data={searchResults ?? []}
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
-                <SearchResultItem item={item} onPress={handleAddCatalogItem} />
+                <SearchResultItem item={item} onPress={handleSelectCatalogItem} />
               )}
               style={{ maxHeight: 300 }}
               keyboardShouldPersistTaps="handled"
@@ -547,16 +563,22 @@ export default function OrderScreen() {
 
       {/* Modal de preço total do serviço por item */}
       <ServicePriceModal
-        visible={laborItem !== null}
-        title={laborItem ? laborItem.description : 'Preço Total'}
-        description={laborItem
-          ? `Peça: ${currency(laborItem.total)} — Digite o preço total cobrado (peça + instalação)`
+        visible={priceModalTarget !== null}
+        title={priceModalTarget ? priceModalTarget.item.description : 'Preço Total'}
+        description={priceModalTarget
+          ? `${priceModalTarget.item.type === 'service' ? 'Serviço' : 'Peça'}: ${currency(
+              priceModalTarget.mode === 'catalog'
+                ? priceModalTarget.item.unitPrice
+                : priceModalTarget.item.total
+            )} — Digite o preço total cobrado (peça + instalação)`
           : undefined}
-        initialValue={laborItem
-          ? (laborItem.total ?? 0) + (laborItem.laborPrice ?? 0)
+        initialValue={priceModalTarget
+          ? priceModalTarget.mode === 'catalog'
+            ? priceModalTarget.item.unitPrice
+            : (priceModalTarget.item.total ?? 0) + (priceModalTarget.item.laborPrice ?? 0)
           : 0}
-        onConfirm={handleLaborConfirm}
-        onCancel={() => setLaborItem(null)}
+        onConfirm={handlePriceConfirm}
+        onCancel={() => setPriceModalTarget(null)}
       />
 
       {/* Modal de PIN — para todas as ações que exigem supervisor */}

@@ -20,6 +20,7 @@ ios/
 # Environment variables
 .env.local
 .env*.local
+backend/.env
 
 # Database backup (dados sensíveis da empresa — restaurar manualmente na VPS)
 mysql-init/00-backup.sql
