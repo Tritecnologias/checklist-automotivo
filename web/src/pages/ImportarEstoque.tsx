@@ -219,38 +219,6 @@ export default function ImportarEstoque() {
     }
   }
 
-  // ── Shared sub-components ────────────────────────────────────────────────
-
-  function FilePicker({ fileRef, arquivo, onFile }: {
-    fileRef: React.RefObject<HTMLInputElement | null>
-    arquivo: File | null
-    onFile: (f: File | null) => void
-  }) {
-    const mb = arquivo ? (arquivo.size / 1024 / 1024).toFixed(1) : null
-    return (
-      <div
-        className="bg-slate-900 border-2 border-dashed border-slate-700 hover:border-blue-600 rounded-2xl p-8 text-center transition-colors cursor-pointer"
-        onClick={() => fileRef.current?.click()}
-      >
-        <input ref={fileRef} type="file" accept=".sql" className="hidden"
-          onChange={e => { onFile(e.target.files?.[0] ?? null) }} />
-        {arquivo ? (
-          <div className="space-y-1">
-            <p className="text-2xl">📄</p>
-            <p className="text-white font-semibold text-sm">{arquivo.name}</p>
-            <p className="text-slate-400 text-xs">{mb} MB — clique para trocar</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-3xl">⬆️</p>
-            <p className="text-slate-300 text-sm font-medium">Clique para selecionar o arquivo .sql</p>
-            <p className="text-slate-500 text-xs">Backup completo do banco da loja</p>
-          </div>
-        )}
-      </div>
-    )
-  }
-
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -296,11 +264,26 @@ export default function ImportarEstoque() {
             Importa os saldos de estoque a partir da tabela <code className="text-slate-400">cad_produtos</code> do backup.
           </p>
 
-          <FilePicker
-            fileRef={fileRefEstoque}
-            arquivo={arquivoEstoque}
-            onFile={f => { setArquivoEstoque(f); setResultadoEstoque(null); setErroEstoque('') }}
-          />
+          <div
+            className="bg-slate-900 border-2 border-dashed border-slate-700 hover:border-blue-600 rounded-2xl p-8 text-center transition-colors cursor-pointer"
+            onClick={() => fileRefEstoque.current?.click()}
+          >
+            <input ref={fileRefEstoque} type="file" accept=".sql" className="hidden"
+              onChange={e => { setArquivoEstoque(e.target.files?.[0] ?? null); setResultadoEstoque(null); setErroEstoque('') }} />
+            {arquivoEstoque ? (
+              <div className="space-y-1">
+                <p className="text-2xl">📄</p>
+                <p className="text-white font-semibold text-sm">{arquivoEstoque.name}</p>
+                <p className="text-slate-400 text-xs">{(arquivoEstoque.size / 1024 / 1024).toFixed(1)} MB — clique para trocar</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-3xl">⬆️</p>
+                <p className="text-slate-300 text-sm font-medium">Clique para selecionar o arquivo .sql</p>
+                <p className="text-slate-500 text-xs">Backup completo do banco da loja</p>
+              </div>
+            )}
+          </div>
 
           <button
             onClick={handleImportarEstoque}
@@ -350,11 +333,26 @@ export default function ImportarEstoque() {
             Importa clientes da tabela <code className="text-slate-400">cad_clientes</code> do backup. Clientes já existentes (por CPF ou nome) são mantidos; apenas os novos são criados. Todos ficam associados à loja selecionada.
           </p>
 
-          <FilePicker
-            fileRef={fileRefClientes}
-            arquivo={arquivoClientes}
-            onFile={f => { setArquivoClientes(f); setResultadoClientes(null); setErroClientes('') }}
-          />
+          <div
+            className="bg-slate-900 border-2 border-dashed border-slate-700 hover:border-blue-600 rounded-2xl p-8 text-center transition-colors cursor-pointer"
+            onClick={() => fileRefClientes.current?.click()}
+          >
+            <input ref={fileRefClientes} type="file" accept=".sql" className="hidden"
+              onChange={e => { setArquivoClientes(e.target.files?.[0] ?? null); setResultadoClientes(null); setErroClientes('') }} />
+            {arquivoClientes ? (
+              <div className="space-y-1">
+                <p className="text-2xl">📄</p>
+                <p className="text-white font-semibold text-sm">{arquivoClientes.name}</p>
+                <p className="text-slate-400 text-xs">{(arquivoClientes.size / 1024 / 1024).toFixed(1)} MB — clique para trocar</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-3xl">⬆️</p>
+                <p className="text-slate-300 text-sm font-medium">Clique para selecionar o arquivo .sql</p>
+                <p className="text-slate-500 text-xs">Backup completo do banco da loja</p>
+              </div>
+            )}
+          </div>
 
           <button
             onClick={handleImportarClientes}
