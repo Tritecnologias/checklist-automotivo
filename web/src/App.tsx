@@ -55,12 +55,14 @@ export default function App() {
             </Route>
           </Route>
 
-          {/* App principal (OS/Checklist) — público */}
-          <Route element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="orders"     element={<Orders />} />
-            <Route path="orders/:id" element={<OrderDetail />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+          {/* App principal (OS/Checklist) — exige JWT (multi-tenant) */}
+          <Route element={<AuthGuard />}>
+            <Route element={<Layout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="orders"     element={<Orders />} />
+              <Route path="orders/:id" element={<OrderDetail />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
           </Route>
         </Routes>
       </BrowserRouter>
