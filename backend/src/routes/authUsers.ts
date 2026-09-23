@@ -42,6 +42,7 @@ router.post('/login', async (req, res) => {
       );
       tenantIds = tRows.map((r: any) => r.tenant_id);
     } else {
+      // operator e caixa: tenant_id único
       tenantIds = user.tenant_id ? [user.tenant_id] : [];
     }
 
@@ -101,7 +102,7 @@ router.get('/me', requireAuth, async (req, res) => {
       } else {
         tenantsQuery += ' AND 1=0';
       }
-    } else if (user.role === 'operator') {
+    } else if (user.role === 'operator' || user.role === 'caixa') {
       if (user.tenant_id) {
         tenantsQuery += ' AND id = ?';
         tenantsParams.push(user.tenant_id);
@@ -129,13 +130,13 @@ router.post('/users', requireAuth, requireRole('owner', 'manager'), async (req, 
     res.status(400).json({ message: 'nome, email, password e role são obrigatórios' });
     return;
   }
-  if (!['owner', 'manager', 'operator'].includes(role)) {
+  if (!['owner', 'manager', 'operator', 'caixa'].includes(role)) {
     res.status(400).json({ message: 'role inválida' });
     return;
   }
-  // manager só pode criar operator
-  if (req.user!.role === 'manager' && role !== 'operator') {
-    res.status(403).json({ message: 'Manager só pode criar operadores' });
+  // manager só pode criar operator e caixa
+  if (req.user!.role === 'manager' && !['operator', 'caixa'].includes(role)) {
+    res.status(403).json({ message: 'Manager só pode criar operadores e caixas' });
     return;
   }
 

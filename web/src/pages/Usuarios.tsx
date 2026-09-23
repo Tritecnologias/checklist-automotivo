@@ -8,12 +8,14 @@ const ROLE_OPTS = [
   { value: 'owner',    label: 'Proprietário' },
   { value: 'manager',  label: 'Gerente' },
   { value: 'operator', label: 'Operador' },
+  { value: 'caixa',    label: 'Caixa' },
 ]
 
 const ROLE_COLOR: Record<string, string> = {
   owner:    'bg-amber-500/20 text-amber-300',
   manager:  'bg-blue-500/20 text-blue-300',
   operator: 'bg-slate-500/20 text-slate-300',
+  caixa:    'bg-green-500/20 text-green-300',
 }
 
 const EMPTY_FORM = {

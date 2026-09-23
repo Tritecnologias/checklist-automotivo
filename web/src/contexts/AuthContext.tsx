@@ -10,7 +10,7 @@ export interface AuthUser {
   id: number
   nome: string
   email: string
-  role: 'owner' | 'manager' | 'operator'
+  role: 'owner' | 'manager' | 'operator' | 'caixa'
 }
 
 interface AuthState {

@@ -110,6 +110,11 @@ async function runMigrations() {
     console.log('[migration] mv_caixa.tenant_id adicionada (registros existentes → tenant 1)');
   }
 
+  // Adiciona role 'caixa' ao ENUM se ainda não existir
+  await pool.query(
+    `ALTER TABLE users MODIFY COLUMN role ENUM('owner','manager','operator','caixa') NOT NULL DEFAULT 'operator'`
+  ).catch(() => {}); // ignora se já existe
+
   // Tabela de saldo de estoque por tenant
   await pool.query(`
     CREATE TABLE IF NOT EXISTS \`produto_saldo_tenant\` (

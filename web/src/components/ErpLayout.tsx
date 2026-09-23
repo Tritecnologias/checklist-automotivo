@@ -3,25 +3,29 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import type { Tenant } from '../contexts/AuthContext'
 
-const nav = [
+type NavItem = { to: string; label: string; icon: string; end?: boolean; roles?: string[] }
+
+const nav: NavItem[] = [
   { to: '/erp',           label: 'Dashboard',  icon: '📊', end: true },
   { to: '/erp/pdv',       label: 'PDV',         icon: '🛒' },
-  { to: '/erp/vendas',    label: 'Vendas',      icon: '📋' },
-  { to: '/erp/contas',    label: 'Financeiro',  icon: '💰' },
-  { to: '/erp/estoque',   label: 'Estoque',     icon: '📦' },
   { to: '/erp/caixa',     label: 'Caixa',       icon: '🏦' },
-  { to: '/erp/clientes',  label: 'Clientes',    icon: '👥' },
+  { to: '/erp/vendas',    label: 'Vendas',      icon: '📋', roles: ['owner', 'manager'] },
+  { to: '/erp/contas',    label: 'Financeiro',  icon: '💰', roles: ['owner', 'manager'] },
+  { to: '/erp/estoque',   label: 'Estoque',     icon: '📦', roles: ['owner', 'manager'] },
+  { to: '/erp/clientes',  label: 'Clientes',    icon: '👥', roles: ['owner', 'manager'] },
 ]
 
 const ROLE_LABEL: Record<string, string> = {
   owner:    'Proprietário',
   manager:  'Gerente',
   operator: 'Operador',
+  caixa:    'Caixa',
 }
 const ROLE_COLOR: Record<string, string> = {
   owner:    'bg-amber-500/20 text-amber-300',
   manager:  'bg-blue-500/20 text-blue-300',
   operator: 'bg-slate-500/20 text-slate-300',
+  caixa:    'bg-green-500/20 text-green-300',
 }
 
 function TenantSwitcher({ tenants, current, onSwitch }: {
@@ -76,6 +80,7 @@ function TenantSwitcher({ tenants, current, onSwitch }: {
 export default function ErpLayout() {
   const navigate = useNavigate()
   const { user, tenants, currentTenant, switchTenant, logout, isOwner } = useAuth()
+  const visibleNav = nav.filter(item => !item.roles || item.roles.includes(user?.role ?? ''))
 
   function handleLogout() {
     logout()
@@ -115,7 +120,7 @@ export default function ErpLayout() {
 
         {/* Navegação */}
         <nav className="flex-1 px-3 py-4 space-y-0.5">
-          {nav.map(({ to, label, icon, end }) => (
+          {visibleNav.map(({ to, label, icon, end }) => (
             <NavLink
               key={to}
               to={to}

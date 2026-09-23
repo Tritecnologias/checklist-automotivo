@@ -157,7 +157,7 @@ export interface UserAdmin {
   id: number
   nome: string
   email: string
-  role: 'owner' | 'manager' | 'operator'
+  role: 'owner' | 'manager' | 'operator' | 'caixa'
   tenant_id: number | null
   tenant_nome: string | null
   ativo: number

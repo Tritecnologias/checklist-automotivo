@@ -38,7 +38,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (authHeader?.startsWith('Bearer ')) {
     try {
       const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as JwtPayload;
-      if (payload.role === 'owner' || payload.role === 'manager') {
+      if (['owner', 'manager', 'operator', 'caixa'].includes(payload.role)) {
         req.user = payload;
         next();
         return;
@@ -51,6 +51,17 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   }
   res.status(401).json({ message: 'Não autorizado' });
 }
+
+// Rotas restritas a owner/manager — caixa não tem acesso
+function requireManagerUp(req: Request, res: Response, next: NextFunction) {
+  const role = (req.user as JwtPayload | undefined)?.role;
+  if (role !== 'owner' && role !== 'manager') {
+    res.status(403).json({ message: 'Permissão insuficiente' });
+    return;
+  }
+  next();
+}
+
 router.use(requireAdmin);
 
 // ── DASHBOARD ────────────────────────────────────────────────────────────────
@@ -393,7 +404,7 @@ router.post('/vendas', async (req, res) => {
 
 // ── CONTAS / FINANCEIRO ──────────────────────────────────────────────────────
 
-router.get('/contas', async (req, res) => {
+router.get('/contas', requireManagerUp, async (req, res) => {
   const page   = Math.max(1, Number(req.query.page ?? 1));
   const limit  = 30;
   const offset = (page - 1) * limit;
@@ -445,7 +456,7 @@ router.get('/contas', async (req, res) => {
   });
 });
 
-router.patch('/contas/:id/receber', async (req, res) => {
+router.patch('/contas/:id/receber', requireManagerUp, async (req, res) => {
   const data_confirmacao = new Date().toISOString().slice(0, 10);
   await pool.query(
     'UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=? WHERE id=?',
@@ -501,7 +512,7 @@ function stripPlate(nome: string): string {
   return String(nome || '').replace(PLATE_RE, '').replace(/\s+/g, ' ').trim();
 }
 
-router.get('/clientes', async (req, res) => {
+router.get('/clientes', requireManagerUp, async (req, res) => {
   const page   = Math.max(1, Number(req.query.page ?? 1));
   const limit  = 30;
   const offset = (page - 1) * limit;
@@ -552,7 +563,7 @@ router.get('/clientes', async (req, res) => {
   });
 });
 
-router.get('/clientes/:id/historico', async (req, res) => {
+router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
   const [[cliente]] = await pool.query<any>(
     'SELECT * FROM cad_clientes WHERE id = ?', [req.params.id]
   );
@@ -613,7 +624,7 @@ router.get('/clientes/:id/historico', async (req, res) => {
 
 // ── ESTOQUE ──────────────────────────────────────────────────────────────────
 
-router.get('/estoque', async (req, res) => {
+router.get('/estoque', requireManagerUp, async (req, res) => {
   const tenantId = getErpWriteTenantId(req);
   const page   = Math.max(1, Number(req.query.page ?? 1));
   const limit  = 50;
@@ -675,7 +686,7 @@ router.get('/estoque', async (req, res) => {
 
 // ── AJUSTE DE ESTOQUE POR TENANT ─────────────────────────────────────────────
 
-router.patch('/estoque/:id/ajustar', async (req, res) => {
+router.patch('/estoque/:id/ajustar', requireManagerUp, async (req, res) => {
   const tenantId = getErpWriteTenantId(req);
   const prodId   = Number(req.params.id);
   const { tipo, quantidade } = req.body as {
