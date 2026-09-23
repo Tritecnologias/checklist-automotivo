@@ -109,19 +109,12 @@ export default function IdentificationScreen() {
         {/* Logo / título */}
         <View className="items-center mb-10">
           <View className="w-full flex-row justify-between items-center mb-2">
-            {/* Nome do usuário + loja ativa */}
-            <View className="flex-shrink">
-              {user && (
-                <Text className="text-xs text-slate-500 dark:text-slate-400">
-                  👤 {user.nome}
-                </Text>
-              )}
-              {activeTenant && (
-                <Text className="text-xs font-semibold text-blue-500 dark:text-blue-400 mt-0.5">
-                  🏪 {activeTenant.nome}
-                </Text>
-              )}
-            </View>
+            {/* Nome do usuário logado */}
+            {user && (
+              <Text className="text-xs text-slate-500 dark:text-slate-400 flex-shrink">
+                👤 {user.nome}
+              </Text>
+            )}
             <View className="flex-row items-center gap-2 ml-auto">
               {hasContent && (
                 <TouchableOpacity
@@ -171,6 +164,37 @@ export default function IdentificationScreen() {
           <View className="w-16 h-16 rounded-2xl bg-blue-600 items-center justify-center mb-4">
             <Text style={{ fontSize: 32 }}>🔧</Text>
           </View>
+
+          {/* Lojas do usuário — exibe acima do título */}
+          {tenants.length > 0 && (
+            <View className="flex-row flex-wrap justify-center gap-2 mb-3">
+              {[...tenants]
+                .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+                .map(t => {
+                  const isActive = activeTenant?.id === t.id;
+                  return (
+                    <View
+                      key={t.id}
+                      className={`flex-row items-center gap-1.5 px-3 py-1 rounded-full ${
+                        isActive
+                          ? 'bg-blue-600'
+                          : 'bg-slate-200 dark:bg-slate-700'
+                      }`}
+                    >
+                      <Text style={{ fontSize: 12 }}>🏪</Text>
+                      <Text className={`text-xs font-semibold ${
+                        isActive
+                          ? 'text-white'
+                          : 'text-slate-500 dark:text-slate-400'
+                      }`}>
+                        {t.nome}
+                      </Text>
+                    </View>
+                  );
+                })}
+            </View>
+          )}
+
           <Text className="text-3xl font-bold text-gray-900 dark:text-white">
             Ordem de Serviço
           </Text>
