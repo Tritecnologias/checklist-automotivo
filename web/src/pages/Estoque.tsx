@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { erpApi, adminApi } from '../lib/api'
+import { erpApi } from '../lib/api'
 import type { ProdutoEstoque } from '../types'
 import Modal from '../components/Modal'
 
@@ -33,7 +33,7 @@ function AjusteModal({
 
   const mut = useMutation({
     mutationFn: () =>
-      adminApi.ajustarEstoque(produto.id, tipo, Number(quantidade)),
+      erpApi.ajustarEstoque(produto.id, tipo, Number(quantidade)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['estoque'] })
       onClose()

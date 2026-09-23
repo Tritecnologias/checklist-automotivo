@@ -56,6 +56,7 @@ router.use(requireAdmin);
 // ── DASHBOARD ────────────────────────────────────────────────────────────────
 
 router.get('/dashboard', async (req, res) => {
+  const tenantId = getErpWriteTenantId(req);
   const [[hoje]] = await pool.query<any>(
     `SELECT COUNT(*) as count_vendas, COALESCE(SUM(vr_total),0) as total_dia
      FROM mv_vendas WHERE data_venda = CURDATE()`
@@ -76,10 +77,13 @@ router.get('/dashboard', async (req, res) => {
      GROUP BY m.id_produto ORDER BY total DESC LIMIT 5`
   );
   const [estoque_baixo] = await pool.query<any>(
-    `SELECT id, nome_produto, estoque, min_estoque
-     FROM cad_produtos
-     WHERE estoque <= min_estoque AND min_estoque > 0 AND inativo = 0
-     ORDER BY estoque ASC LIMIT 8`
+    `SELECT p.id, p.nome_produto, COALESCE(pst.saldo, p.estoque) AS estoque, p.min_estoque
+     FROM cad_produtos p
+     LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+     WHERE p.inativo = 0 AND p.min_estoque > 0
+     HAVING estoque <= p.min_estoque
+     ORDER BY estoque ASC LIMIT 8`,
+    [tenantId]
   );
   const { clause: caixaTenantClause, params: caixaTenantParams } = getErpTenantFilter(req, true);
   const [[caixa]] = await pool.query<any>(
@@ -357,9 +361,15 @@ router.post('/vendas', async (req, res) => {
       [data_venda, controle, codLancamento, id_login, id_cliente,
        item.id_produto, terminal, turno, item.valor, item.quant, item_total]
     );
+    const tenantId = getErpWriteTenantId(req);
     await pool.query(
-      'UPDATE cad_produtos SET estoque = estoque - ? WHERE id = ?',
-      [item.quant, item.id_produto]
+      `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
+       SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, p.estoque) - ?)
+       FROM cad_produtos p
+       LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+       WHERE p.id = ?
+       ON DUPLICATE KEY UPDATE saldo = GREATEST(0, saldo - ?)`,
+      [tenantId, item.quant, tenantId, item.id_produto, item.quant]
     );
   }
 
@@ -449,13 +459,16 @@ router.patch('/contas/:id/receber', async (req, res) => {
 router.get('/busca/produtos', async (req, res) => {
   const q = String(req.query.q ?? '');
   if (q.length < 2) { res.json([]); return; }
+  const tenantId = getErpWriteTenantId(req);
 
   const [rows] = await pool.query<any>(
-    `SELECT id, nome_produto, cod_barra, unidade, vr_venda, estoque
-     FROM cad_produtos
-     WHERE inativo = 0 AND (nome_produto LIKE ? OR cod_barra LIKE ?)
-     ORDER BY nome_produto LIMIT 20`,
-    [`%${q}%`, `%${q}%`]
+    `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.vr_venda,
+            COALESCE(pst.saldo, p.estoque) AS estoque
+     FROM cad_produtos p
+     LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+     WHERE p.inativo = 0 AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
+     ORDER BY p.nome_produto LIMIT 20`,
+    [tenantId, `%${q}%`, `%${q}%`]
   );
   res.json(rows.map((r: any) => ({ ...r, vr_venda: Number(r.vr_venda), estoque: Number(r.estoque) })));
 });
@@ -601,33 +614,48 @@ router.get('/clientes/:id/historico', async (req, res) => {
 // ── ESTOQUE ──────────────────────────────────────────────────────────────────
 
 router.get('/estoque', async (req, res) => {
+  const tenantId = getErpWriteTenantId(req);
   const page   = Math.max(1, Number(req.query.page ?? 1));
   const limit  = 50;
   const offset = (page - 1) * limit;
   const search = String(req.query.search ?? '');
-  const filtro = req.query.filtro; // 'baixo' | 'zerado' | undefined
+  const filtro = req.query.filtro;
 
-  const whereParts: string[] = ['inativo = 0'];
-  const params: any[] = [];
+  const whereParts: string[] = ['p.inativo = 0'];
+  const baseParams: any[] = [tenantId];
 
   if (search.length >= 2) {
-    whereParts.push('(nome_produto LIKE ? OR cod_barra LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`);
+    whereParts.push('(p.nome_produto LIKE ? OR p.cod_barra LIKE ?)');
+    baseParams.push(`%${search}%`, `%${search}%`);
   }
-  if (filtro === 'baixo')   whereParts.push('estoque <= min_estoque AND min_estoque > 0');
-  if (filtro === 'zerado')  whereParts.push('estoque <= 0');
 
   const where = 'WHERE ' + whereParts.join(' AND ');
 
+  const havingParts: string[] = [];
+  if (filtro === 'baixo')  havingParts.push('estoque <= p.min_estoque AND p.min_estoque > 0');
+  if (filtro === 'zerado') havingParts.push('estoque <= 0');
+  const having = havingParts.length ? 'HAVING ' + havingParts.join(' AND ') : '';
+
+  const baseSelect = `
+    FROM cad_produtos p
+    LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+    ${where}`;
+
   const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total FROM cad_produtos ${where}`, params
+    `SELECT COUNT(*) as total FROM (
+       SELECT COALESCE(pst.saldo, p.estoque) AS estoque, p.min_estoque
+       ${baseSelect} ${having}
+     ) AS sub`,
+    baseParams
   );
+
   const [rows] = await pool.query<any>(
-    `SELECT id, nome_produto, cod_barra, unidade, estoque, min_estoque,
-            vr_compra, vr_venda
-     FROM cad_produtos
-     ${where} ORDER BY nome_produto LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+    `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade,
+            COALESCE(pst.saldo, p.estoque) AS estoque,
+            p.min_estoque, p.vr_compra, p.vr_venda
+     ${baseSelect} ${having}
+     ORDER BY p.nome_produto LIMIT ? OFFSET ?`,
+    [...baseParams, limit, offset]
   );
 
   res.json({
@@ -643,6 +671,45 @@ router.get('/estoque', async (req, res) => {
     total: Number(total),
     pages: Math.ceil(total / limit),
   });
+});
+
+// ── AJUSTE DE ESTOQUE POR TENANT ─────────────────────────────────────────────
+
+router.patch('/estoque/:id/ajustar', async (req, res) => {
+  const tenantId = getErpWriteTenantId(req);
+  const prodId   = Number(req.params.id);
+  const { tipo, quantidade } = req.body as {
+    tipo: 'entrada' | 'saida' | 'ajuste';
+    quantidade: number;
+  };
+
+  if (!['entrada', 'saida', 'ajuste'].includes(tipo) || isNaN(quantidade) || quantidade < 0) {
+    res.status(400).json({ message: 'Parâmetros inválidos' });
+    return;
+  }
+
+  const [[row]] = await pool.query<any>(
+    `SELECT COALESCE(pst.saldo, p.estoque) AS saldo
+     FROM cad_produtos p
+     LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+     WHERE p.id = ?`,
+    [tenantId, prodId]
+  );
+  if (!row) { res.status(404).json({ message: 'Produto não encontrado' }); return; }
+
+  const atual = Number(row.saldo);
+  const novoSaldo =
+    tipo === 'ajuste'  ? quantidade :
+    tipo === 'entrada' ? atual + quantidade :
+    Math.max(0, atual - quantidade);
+
+  await pool.query(
+    `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)`,
+    [prodId, tenantId, novoSaldo]
+  );
+
+  res.json({ estoque: novoSaldo });
 });
 
 export default router;

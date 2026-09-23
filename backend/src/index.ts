@@ -110,6 +110,16 @@ async function runMigrations() {
     console.log('[migration] mv_caixa.tenant_id adicionada (registros existentes → tenant 1)');
   }
 
+  // Tabela de saldo de estoque por tenant
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`produto_saldo_tenant\` (
+      \`produto_id\` INT NOT NULL,
+      \`tenant_id\`  INT NOT NULL,
+      \`saldo\`      DECIMAL(10,2) NOT NULL DEFAULT 0,
+      PRIMARY KEY (\`produto_id\`, \`tenant_id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
   console.log('[migration] tabelas de multi-tenant OK');
 }
 

@@ -120,6 +120,11 @@ export const erpApi = {
     if (params.page)   q.set('page',   String(params.page))
     return adminRequest<{ data: ProdutoEstoque[]; total: number; pages: number }>(`/erp/estoque?${q}`)
   },
+  ajustarEstoque: (id: number, tipo: 'entrada' | 'saida' | 'ajuste', quantidade: number) =>
+    adminRequest<{ estoque: number }>(`/erp/estoque/${id}/ajustar`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tipo, quantidade }),
+    }),
 }
 
 export const tenantsApi = {
