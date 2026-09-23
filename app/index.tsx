@@ -15,6 +15,7 @@ import * as Haptics from 'expo-haptics';
 import { useColorScheme } from 'nativewind';
 import { api } from '@/lib/api';
 import { formatPlate, cleanPlate } from '@/hooks/usePlateMask';
+import { useAuth } from '@/lib/AuthContext';
 
 function ListIcon() {
   return (
@@ -27,6 +28,7 @@ function ListIcon() {
 export default function IdentificationScreen() {
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { logout, user } = useAuth();
 
   const [plate, setPlate] = useState('');
   const [model, setModel] = useState('');
@@ -106,27 +108,47 @@ export default function IdentificationScreen() {
       >
         {/* Logo / título */}
         <View className="items-center mb-10">
-          <View className="w-full flex-row justify-end items-center gap-2 mb-2">
-            {hasContent && (
+          <View className="w-full flex-row justify-between items-center mb-2">
+            {/* Nome do usuário logado */}
+            {user && (
+              <Text className="text-xs text-slate-500 dark:text-slate-400 flex-shrink">
+                👤 {user.nome}
+              </Text>
+            )}
+            <View className="flex-row items-center gap-2 ml-auto">
+              {hasContent && (
+                <TouchableOpacity
+                  onPress={handleClear}
+                  className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 dark:bg-red-900/30"
+                >
+                  <Text style={{ fontSize: 16 }}>🗑️</Text>
+                  <Text className="text-sm font-semibold text-red-600 dark:text-red-400">
+                    Limpar
+                  </Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
-                onPress={handleClear}
-                className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 dark:bg-red-900/30"
+                onPress={() => router.push('/orders')}
+                className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-slate-800"
               >
-                <Text style={{ fontSize: 16 }}>🗑️</Text>
-                <Text className="text-sm font-semibold text-red-600 dark:text-red-400">
-                  Limpar
+                <ListIcon />
+                <Text className="text-sm font-semibold text-gray-700 dark:text-slate-200">
+                  Ver OS
                 </Text>
               </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              onPress={() => router.push('/orders')}
-              className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-slate-800"
-            >
-              <ListIcon />
-              <Text className="text-sm font-semibold text-gray-700 dark:text-slate-200">
-                Ver OS
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                onPress={async () => {
+                  await logout();
+                  router.replace('/login');
+                }}
+                className="flex-row items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800"
+              >
+                <Text style={{ fontSize: 14 }}>🚪</Text>
+                <Text className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                  Sair
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
           <View className="w-16 h-16 rounded-2xl bg-blue-600 items-center justify-center mb-4">
             <Text style={{ fontSize: 32 }}>🔧</Text>
