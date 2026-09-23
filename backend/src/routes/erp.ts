@@ -632,8 +632,9 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
   const search = String(req.query.search ?? '');
   const filtro = req.query.filtro;
 
-  const whereParts: string[] = ['p.inativo = 0'];
-  const baseParams: any[] = [tenantId];
+  // Para lojas novas (tenant != 1), só exibe produtos que já têm linha em produto_saldo_tenant
+  const whereParts: string[] = ['p.inativo = 0', '(? = 1 OR pst.produto_id IS NOT NULL)'];
+  const baseParams: any[] = [tenantId, tenantId];
 
   if (search.length >= 2) {
     whereParts.push('(p.nome_produto LIKE ? OR p.cod_barra LIKE ?)');
