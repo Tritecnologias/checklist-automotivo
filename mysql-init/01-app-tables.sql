@@ -5,6 +5,41 @@
 
 USE `4rodas`;
 
+-- ── Tenants (lojas) ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tenants` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `nome`       VARCHAR(100) NOT NULL,
+  `slug`       VARCHAR(50)  NOT NULL,
+  `ativo`      TINYINT(1)   NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `slug` (`slug`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ── Usuários ──────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `users` (
+  `id`          INT AUTO_INCREMENT PRIMARY KEY,
+  `nome`        VARCHAR(100) NOT NULL,
+  `email`       VARCHAR(150) NOT NULL,
+  `senha_hash`  VARCHAR(255) NOT NULL,
+  `role`        ENUM('owner','manager','operator') NOT NULL DEFAULT 'operator',
+  `tenant_id`   INT          NULL,
+  `ativo`       TINYINT(1)   NOT NULL DEFAULT 1,
+  `created_at`  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `email` (`email`),
+  KEY `tenant_id` (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ── Acesso a múltiplos tenants (para role=manager) ────────────────────────────
+CREATE TABLE IF NOT EXISTS `user_tenants` (
+  `user_id`   INT NOT NULL,
+  `tenant_id` INT NOT NULL,
+  PRIMARY KEY (`user_id`, `tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Loja padrão (migração de dados existentes)
+INSERT IGNORE INTO `tenants` (id, nome, slug) VALUES (1, 'Loja Principal', 'loja-principal');
+
+
 CREATE TABLE IF NOT EXISTS `os_orders` (
   `id`           CHAR(36)      NOT NULL,
   `plate`        VARCHAR(8)    NOT NULL,
