@@ -727,88 +727,56 @@ router.patch('/estoque/:id/ajustar', requireManagerUp, async (req, res) => {
   res.json({ estoque: novoSaldo });
 });
 
-// ── IMPORTAÇÃO DE ESTOQUE VIA SQL DE BACKUP ──────────────────────────────────
-
-function parseSqlEstoque(sql: string): Array<{ codBarra: string; saldo: number }> {
-  const result: Array<{ codBarra: string; saldo: number }> = [];
-
-  // Encontra o bloco INSERT de cad_produtos
-  const blockMatch = sql.match(/INSERT INTO [`"]?cad_produtos[`"]?\s*\([^)]+\)\s*VALUES\s*([\s\S]*?)(?=UNLOCK TABLES|;\s*\n\s*(?:DROP|CREATE|LOCK|\/\*))/i);
-  if (!blockMatch) return result;
-
-  const lines = blockMatch[1].split('\n');
-  // colunas: id(0) nome(1) cod_barra(2) unidade(3) inf_adicional(4) pontos(5) id_moeda(6)
-  //           modo_estoque(7) grade(8) kit(9) id_tipo(10) vr_compra(11) vr_venda(12)
-  //           vr_venda_2(13) min_estoque(14) estoque(15) inativo(16)
-  const rowRe = /^\s*\(\d+,\s*'[^']*',\s*'([^']*)',\s*(?:'[^']*'|[^,]*),\s*(?:'[^']*'|[^,]*),\s*\d+,\s*\d+,\s*\d+,\s*\d+,\s*\d+,\s*\d+,\s*[\d.]+,\s*[\d.]+,\s*[\d.]+,\s*[\d.]+,\s*([\d.]+)/;
-
-  for (const line of lines) {
-    const m = line.match(rowRe);
-    if (!m) continue;
-    const codBarra = m[1].trim();
-    const saldo    = parseFloat(m[2]);
-    if (codBarra && saldo > 0) {
-      result.push({ codBarra, saldo });
-    }
-  }
-
-  return result;
-}
+// ── IMPORTAÇÃO DE ESTOQUE VIA PARES cod_barra/saldo (parse feito no browser) ─
 
 router.post('/estoque/importar-sql', requireManagerUp, async (req, res) => {
-    const tenantId = getErpWriteTenantId(req);
-    if (!tenantId) { res.status(400).json({ message: 'Selecione uma loja antes de importar' }); return; }
+  const tenantId = getErpWriteTenantId(req);
+  if (!tenantId) { res.status(400).json({ message: 'Selecione uma loja antes de importar' }); return; }
 
-    // Lê o body como stream (frontend envia text/plain)
-    const chunks: Buffer[] = [];
-    await new Promise<void>((resolve, reject) => {
-      req.on('data', (c: Buffer) => chunks.push(c));
-      req.on('end', resolve);
-      req.on('error', reject);
-    });
-    const sqlContent = Buffer.concat(chunks).toString('utf8');
-    if (!sqlContent) { res.status(400).json({ message: 'Arquivo SQL vazio ou inválido' }); return; }
-
-    const pairs = parseSqlEstoque(sqlContent);
-    if (pairs.length === 0) {
-      res.status(400).json({ message: 'Nenhum produto com estoque encontrado no arquivo. Verifique se é o backup correto.' });
-      return;
-    }
-
-    // Busca produto_ids pelo cod_barra
-    const codBarras = pairs.map(p => p.codBarra.trim());
-    const placeholders = codBarras.map(() => '?').join(',');
-    const [dbProds] = await pool.query<any>(
-      `SELECT id, TRIM(cod_barra) AS cb FROM cad_produtos WHERE TRIM(cod_barra) IN (${placeholders})`,
-      codBarras
-    );
-
-    const cbMap = new Map<string, number>(dbProds.map((r: any) => [r.cb.trim(), r.id]));
-    const saldoMap = new Map<string, number>(pairs.map(p => [p.codBarra.trim(), p.saldo]));
-
-    const insertRows: [number, number, number][] = [];
-    for (const [cb, prodId] of cbMap.entries()) {
-      const saldo = saldoMap.get(cb);
-      if (saldo !== undefined) insertRows.push([prodId, tenantId, saldo]);
-    }
-
-    if (insertRows.length === 0) {
-      res.json({ importados: 0, parseados: pairs.length, nao_encontrados: pairs.length, message: 'Nenhum produto do arquivo encontrado na base principal (cod_barra não coincide).' });
-      return;
-    }
-
-    await pool.query(
-      `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo) VALUES ?
-       ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)`,
-      [insertRows]
-    );
-
-    res.json({
-      importados:      insertRows.length,
-      parseados:       pairs.length,
-      nao_encontrados: pairs.length - insertRows.length,
-    });
+  // Frontend parseia o SQL e envia só os pares { codBarra, saldo }
+  const { pairs } = req.body as { pairs: Array<{ codBarra: string; saldo: number }> };
+  if (!Array.isArray(pairs) || pairs.length === 0) {
+    res.status(400).json({ message: 'Nenhum par cod_barra/saldo recebido.' });
+    return;
   }
-);
+
+  // Busca produto_ids pelo cod_barra (em lotes de 500 para evitar query gigante)
+  const codBarras = pairs.map(p => String(p.codBarra).trim()).filter(Boolean);
+  const saldoMap  = new Map<string, number>(pairs.map(p => [String(p.codBarra).trim(), Number(p.saldo)]));
+
+  const allProds: Array<{ id: number; cb: string }> = [];
+  const CHUNK = 500;
+  for (let i = 0; i < codBarras.length; i += CHUNK) {
+    const slice = codBarras.slice(i, i + CHUNK);
+    const ph    = slice.map(() => '?').join(',');
+    const [rows] = await pool.query<any>(
+      `SELECT id, TRIM(cod_barra) AS cb FROM cad_produtos WHERE TRIM(cod_barra) IN (${ph})`,
+      slice
+    );
+    allProds.push(...rows);
+  }
+
+  const insertRows: [number, number, number][] = [];
+  for (const row of allProds) {
+    const saldo = saldoMap.get(row.cb.trim());
+    if (saldo !== undefined) insertRows.push([row.id, tenantId, saldo]);
+  }
+
+  if (insertRows.length === 0) {
+    res.json({ importados: 0, nao_encontrados: pairs.length });
+    return;
+  }
+
+  await pool.query(
+    `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo) VALUES ?
+     ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)`,
+    [insertRows]
+  );
+
+  res.json({
+    importados:      insertRows.length,
+    nao_encontrados: pairs.length - insertRows.length,
+  });
+});
 
 export default router;

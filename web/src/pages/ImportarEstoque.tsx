@@ -8,11 +8,33 @@ interface Resultado {
   message?: string
 }
 
+interface Par { codBarra: string; saldo: number }
+
+function parseSqlEstoque(sql: string): Par[] {
+  const result: Par[] = []
+  const blockMatch = sql.match(
+    /INSERT INTO [`"]?cad_produtos[`"]?\s*\([^)]+\)\s*VALUES\s*([\s\S]*?)(?=UNLOCK TABLES)/i
+  )
+  if (!blockMatch) return result
+
+  const rowRe = /^\s*\(\d+,\s*'[^']*',\s*'([^']*)',\s*(?:'[^']*'|[^,]*),\s*(?:'[^']*'|[^,]*),\s*\d+,\s*\d+,\s*\d+,\s*\d+,\s*\d+,\s*\d+,\s*[\d.]+,\s*[\d.]+,\s*[\d.]+,\s*[\d.]+,\s*([\d.]+)/
+
+  for (const line of blockMatch[1].split('\n')) {
+    const m = line.match(rowRe)
+    if (!m) continue
+    const codBarra = m[1].trim()
+    const saldo    = parseFloat(m[2])
+    if (codBarra && saldo > 0) result.push({ codBarra, saldo })
+  }
+  return result
+}
+
 export default function ImportarEstoque() {
   const { currentTenant, isOwner } = useAuth()
   const fileRef = useRef<HTMLInputElement>(null)
   const [arquivo, setArquivo] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
+  const [fase, setFase] = useState<'parseando' | 'enviando' | null>(null)
   const [resultado, setResultado] = useState<Resultado | null>(null)
   const [erro, setErro] = useState('')
 
@@ -39,31 +61,41 @@ export default function ImportarEstoque() {
     }
 
     setLoading(true)
+    setFase('parseando')
     setErro('')
     setResultado(null)
 
     try {
-      const text = await arquivo.text()
-      const jwt      = localStorage.getItem('erp_jwt_token') ?? ''
-      const tenantId = currentTenant.id
+      // Parseia o SQL no browser — envia só os pares (cod_barra, saldo) como JSON
+      const sqlText = await arquivo.text()
+      const pairs   = parseSqlEstoque(sqlText)
+      setFase('enviando')
+
+      if (pairs.length === 0) {
+        setErro('Nenhum produto com estoque encontrado no arquivo. Verifique se é o backup correto.')
+        return
+      }
+
+      const jwt = localStorage.getItem('erp_jwt_token') ?? ''
 
       const res = await fetch('/api/erp/estoque/importar-sql', {
         method: 'POST',
         headers: {
-          'Content-Type': 'text/plain',
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${jwt}`,
-          'x-tenant-id': String(tenantId),
+          'x-tenant-id': String(currentTenant.id),
         },
-        body: text,
+        body: JSON.stringify({ pairs }),
       })
 
       const data = await res.json()
       if (!res.ok) { setErro(data.message ?? `Erro ${res.status}`); return }
-      setResultado(data)
+      setResultado({ ...data, parseados: pairs.length })
     } catch (e: any) {
       setErro(e.message ?? 'Erro de conexão')
     } finally {
       setLoading(false)
+      setFase(null)
     }
   }
 
@@ -119,7 +151,7 @@ export default function ImportarEstoque() {
         disabled={!arquivo || !currentTenant || loading}
         className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-semibold rounded-xl transition-colors"
       >
-        {loading ? 'Importando… aguarde' : 'Importar estoque'}
+        {fase === 'parseando' ? 'Lendo arquivo…' : fase === 'enviando' ? 'Enviando ao servidor…' : 'Importar estoque'}
       </button>
 
       {/* Erro */}
