@@ -3,6 +3,33 @@ import jwt from 'jsonwebtoken';
 import { pool } from '../db';
 import { JWT_SECRET, type JwtPayload } from '../middleware/auth';
 
+// ── Tenant helpers ────────────────────────────────────────────────────────────
+
+function getErpWriteTenantId(req: Request): number {
+  const user = req.user as JwtPayload | undefined;
+  if (!user) return 1;
+  if (user.role === 'owner') {
+    const h = Number(req.headers['x-tenant-id']);
+    return h > 0 ? h : 1;
+  }
+  const h = Number(req.headers['x-tenant-id']);
+  return (h > 0 && user.tenantIds.includes(h)) ? h : (user.tenantIds[0] ?? 1);
+}
+
+function getErpTenantFilter(req: Request, existingWhere = false): { clause: string; params: any[] } {
+  const user = req.user as JwtPayload | undefined;
+  if (!user) return { clause: '', params: [] };
+  const prefix = existingWhere ? ' AND ' : ' WHERE ';
+  if (user.role === 'owner') {
+    const h = Number(req.headers['x-tenant-id']);
+    if (h > 0) return { clause: `${prefix}tenant_id = ?`, params: [h] };
+    return { clause: '', params: [] };
+  }
+  const h = Number(req.headers['x-tenant-id']);
+  const tid = (h > 0 && user.tenantIds.includes(h)) ? h : (user.tenantIds[0] ?? 1);
+  return { clause: `${prefix}tenant_id = ?`, params: [tid] };
+}
+
 const router = Router();
 const ADMIN_TOKEN = process.env.ADMIN_PASSWORD ?? 'admin@2026';
 
@@ -28,7 +55,7 @@ router.use(requireAdmin);
 
 // ── DASHBOARD ────────────────────────────────────────────────────────────────
 
-router.get('/dashboard', async (_req, res) => {
+router.get('/dashboard', async (req, res) => {
   const [[hoje]] = await pool.query<any>(
     `SELECT COUNT(*) as count_vendas, COALESCE(SUM(vr_total),0) as total_dia
      FROM mv_vendas WHERE data_venda = CURDATE()`
@@ -54,9 +81,11 @@ router.get('/dashboard', async (_req, res) => {
      WHERE estoque <= min_estoque AND min_estoque > 0 AND inativo = 0
      ORDER BY estoque ASC LIMIT 8`
   );
+  const { clause: caixaTenantClause, params: caixaTenantParams } = getErpTenantFilter(req, true);
   const [[caixa]] = await pool.query<any>(
     `SELECT id, status_caixa, turno, terminal, hora_abertura, vr_abertura
-     FROM mv_caixa WHERE status_caixa = 'A' ORDER BY id DESC LIMIT 1`
+     FROM mv_caixa WHERE status_caixa = 'A'${caixaTenantClause} ORDER BY id DESC LIMIT 1`,
+    caixaTenantParams
   );
   const [[contas_pendentes]] = await pool.query<any>(
     `SELECT COUNT(*) as count_pendentes, COALESCE(SUM(vr_parcela - vr_abatimentos),0) as vr_pendente
@@ -92,31 +121,39 @@ router.get('/caixa', async (req, res) => {
   const page  = Math.max(1, Number(req.query.page ?? 1));
   const limit = 20;
   const offset = (page - 1) * limit;
+  const { clause: tf, params: tp } = getErpTenantFilter(req);
 
-  const [[{ total }]] = await pool.query<any>('SELECT COUNT(*) as total FROM mv_caixa');
+  const [[{ total }]] = await pool.query<any>(
+    `SELECT COUNT(*) as total FROM mv_caixa${tf}`, tp
+  );
   const [rows] = await pool.query<any>(
-    'SELECT * FROM mv_caixa ORDER BY id DESC LIMIT ? OFFSET ?',
-    [limit, offset]
+    `SELECT * FROM mv_caixa${tf} ORDER BY id DESC LIMIT ? OFFSET ?`,
+    [...tp, limit, offset]
   );
 
   res.json({ data: rows, total: Number(total), pages: Math.ceil(total / limit) });
 });
 
-router.get('/caixa/status', async (_req, res) => {
+router.get('/caixa/status', async (req, res) => {
+  const { clause: tf, params: tp } = getErpTenantFilter(req, true);
   const [[row]] = await pool.query<any>(
-    "SELECT * FROM mv_caixa WHERE status_caixa = 'A' ORDER BY id DESC LIMIT 1"
+    `SELECT * FROM mv_caixa WHERE status_caixa = 'A'${tf} ORDER BY id DESC LIMIT 1`,
+    tp
   );
   res.json(row ?? null);
 });
 
 router.post('/caixa/abrir', async (req, res) => {
   const { vr_abertura = 0, terminal = '01', turno = '1', id_login = 1 } = req.body;
+  const tenantId = getErpWriteTenantId(req);
+  const { clause: tf, params: tp } = getErpTenantFilter(req, true);
 
   const [existing] = await pool.query<any>(
-    "SELECT id FROM mv_caixa WHERE status_caixa = 'A' LIMIT 1"
+    `SELECT id FROM mv_caixa WHERE status_caixa = 'A'${tf} LIMIT 1`,
+    tp
   );
   if ((existing as any[]).length > 0) {
-    res.status(409).json({ message: 'Já existe um caixa aberto' });
+    res.status(409).json({ message: 'Já existe um caixa aberto para esta loja' });
     return;
   }
 
@@ -126,15 +163,27 @@ router.post('/caixa/abrir', async (req, res) => {
 
   const [result] = await pool.query<any>(
     `INSERT INTO mv_caixa (hora_abertura, data_abertura, vr_abertura, vr_fechamento,
-      vr_fechado_turno, id_login, turno, terminal, status_caixa)
-     VALUES (?,?,?,0,0,?,?,?,'A')`,
-    [hora, data, vr_abertura, id_login, turno, terminal]
+      vr_fechado_turno, id_login, turno, terminal, status_caixa, tenant_id)
+     VALUES (?,?,?,0,0,?,?,?,'A',?)`,
+    [hora, data, vr_abertura, id_login, turno, terminal, tenantId]
   );
   res.status(201).json({ id: result.insertId });
 });
 
 router.patch('/caixa/:id/fechar', async (req, res) => {
   const { vr_fechamento = 0 } = req.body;
+  const { clause: tf, params: tp } = getErpTenantFilter(req, true);
+
+  // garante que o caixa pertence ao tenant do usuário logado
+  const [[caixaRow]] = await pool.query<any>(
+    `SELECT id FROM mv_caixa WHERE id = ?${tf} LIMIT 1`,
+    [req.params.id, ...tp]
+  );
+  if (!caixaRow) {
+    res.status(403).json({ message: 'Caixa não encontrado para esta loja' });
+    return;
+  }
+
   const now = new Date();
   const hora = now.toTimeString().slice(0, 8);
   const data = now.toISOString().slice(0, 10);

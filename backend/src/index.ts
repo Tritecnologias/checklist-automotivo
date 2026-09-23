@@ -99,6 +99,16 @@ async function runMigrations() {
     );
     console.log('[seed] Owner padrão criado: admin@4rodas.com / Admin@2026');
   }
+  // tenant_id em mv_caixa
+  const [[{ cnt4 }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cnt4 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_caixa' AND COLUMN_NAME = 'tenant_id'`
+  );
+  if (Number(cnt4) === 0) {
+    await pool.query('ALTER TABLE mv_caixa ADD COLUMN tenant_id INT NOT NULL DEFAULT 1');
+    console.log('[migration] mv_caixa.tenant_id adicionada (registros existentes → tenant 1)');
+  }
+
   console.log('[migration] tabelas de multi-tenant OK');
 }
 
