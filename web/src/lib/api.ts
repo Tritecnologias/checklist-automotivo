@@ -5,9 +5,14 @@ import type {
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const jwt = localStorage.getItem('erp_jwt_token')
   const res = await fetch(`/api${path}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+      ...options?.headers,
+    },
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
