@@ -36,9 +36,17 @@ export interface OrderItem {
   unitPrice: number;
   laborPrice: number;
   total: number;
+  instalacaoId: number | null;
+  instalacaoSigla: string | null;
 }
 
 // ─── Catálogo ────────────────────────────────────────────────────────────────
+
+export interface InstItem {
+  id: number;
+  sigla: string;
+  nome: string;
+}
 
 export interface CatalogItem {
   id: string;
@@ -47,6 +55,7 @@ export interface CatalogItem {
   type: ItemType;
   unitPrice: number;
   stock?: number;
+  instalacoes: InstItem[];
 }
 
 // ─── Mutações ────────────────────────────────────────────────────────────────
@@ -56,6 +65,7 @@ export interface AddItemPayload {
   quantity: number;
   unitPrice?: number;
   laborPrice?: number;
+  instalacaoId?: number;
 }
 
 export interface UpdateQuantityPayload {

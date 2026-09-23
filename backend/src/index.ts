@@ -134,6 +134,16 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  // instalacao_id em os_order_items
+  const [[{ cntInstCol }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntInstCol FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_order_items' AND COLUMN_NAME = 'instalacao_id'`
+  );
+  if (Number(cntInstCol) === 0) {
+    await pool.query('ALTER TABLE os_order_items ADD COLUMN instalacao_id INT NULL');
+    console.log('[migration] os_order_items.instalacao_id adicionada');
+  }
+
   // Tabela de instalações configuráveis (LD, LE, D, T, etc.)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS \`instalacoes\` (

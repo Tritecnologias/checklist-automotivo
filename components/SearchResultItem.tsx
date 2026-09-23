@@ -51,11 +51,18 @@ export function SearchResultItem({ item, onPress }: SearchResultItemProps) {
         >
           {item.description}
         </Text>
-        {item.stock !== undefined && (
-          <Text className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">
-            Estoque: {item.stock} un
-          </Text>
-        )}
+        <View className="flex-row items-center gap-1.5 mt-0.5 flex-wrap">
+          {item.stock !== undefined && (
+            <Text className="text-xs text-gray-400 dark:text-slate-500">
+              Estoque: {item.stock} un
+            </Text>
+          )}
+          {item.instalacoes.length > 0 && (
+            <Text className="text-[10px] font-semibold text-blue-500 dark:text-blue-400">
+              🔩 {item.instalacoes.map(i => i.sigla).join(' / ')}
+            </Text>
+          )}
+        </View>
       </View>
 
       <Text className="text-sm font-bold text-green-600 dark:text-green-400 ml-3">

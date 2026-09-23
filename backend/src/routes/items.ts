@@ -20,7 +20,13 @@ router.get('/', async (req: Request, res: Response) => {
          CONVERT(p.nome_produto USING utf8mb4) AS description,
          CASE WHEN p.id_tipo IN (2, 9) THEN 'service' ELSE 'part' END AS type,
          CAST(p.vr_venda  AS DECIMAL(18,4)) AS unitPrice,
-         CAST(p.estoque   AS DECIMAL(18,4)) AS stock
+         CAST(p.estoque   AS DECIMAL(18,4)) AS stock,
+         (
+           SELECT JSON_ARRAYAGG(JSON_OBJECT('id', i.id, 'sigla', i.sigla, 'nome', i.nome))
+           FROM produto_instalacao pi
+           JOIN instalacoes i ON i.id = pi.instalacao_id
+           WHERE pi.produto_id = p.id
+         ) AS instalacoes_json
        FROM cad_produtos p
        WHERE p.inativo = 0
          AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
@@ -30,9 +36,13 @@ router.get('/', async (req: Request, res: Response) => {
     );
 
     const items = (rows as Record<string, unknown>[]).map(r => ({
-      ...r,
+      id: r.id,
+      code: r.code,
+      description: r.description,
+      type: r.type,
       unitPrice: Number(r.unitPrice),
       stock: Number(r.stock),
+      instalacoes: r.instalacoes_json ? JSON.parse(r.instalacoes_json as string) : [],
     }));
     res.json(items);
   } catch (err) {

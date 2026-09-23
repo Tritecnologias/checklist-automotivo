@@ -106,6 +106,18 @@ async function recalcTotal(orderId: string): Promise<number> {
   return total;
 }
 
+async function fetchItems(orderId: string): Promise<Record<string, unknown>[]> {
+  const [rows] = await pool.execute(
+    `SELECT oi.*, inst.sigla AS instalacao_sigla
+     FROM os_order_items oi
+     LEFT JOIN instalacoes inst ON inst.id = oi.instalacao_id
+     WHERE oi.order_id = ?
+     ORDER BY oi.created_at`,
+    [orderId],
+  );
+  return rows as Record<string, unknown>[];
+}
+
 function formatOrder(order: Record<string, unknown>, items: Record<string, unknown>[]) {
   return {
     id: order.id,
@@ -121,6 +133,8 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
       unitPrice: Number(i.unit_price),
       laborPrice: Number(i.labor_price ?? 0),
       total: Number(i.total),
+      instalacaoId: i.instalacao_id ? Number(i.instalacao_id) : null,
+      instalacaoSigla: (i.instalacao_sigla as string | null) ?? null,
     })),
     laborAmount: Number(order.labor_amount ?? 0),
     totalAmount: Number(order.total_amount),
@@ -235,12 +249,9 @@ router.get('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    const [items] = await pool.execute(
-      'SELECT * FROM os_order_items WHERE order_id = ? ORDER BY created_at',
-      [req.params.id],
-    );
+    const items = await fetchItems(req.params.id);
 
-    res.json(formatOrder(order, items as Record<string, unknown>[]));
+    res.json(formatOrder(order, items));
   } catch (err) {
     console.error('GET /orders/:id error:', err);
     res.status(500).json({ message: 'Erro ao buscar OS' });
@@ -250,11 +261,12 @@ router.get('/:id', async (req: Request, res: Response) => {
 // ── POST /orders/:id/items ──────────────────────────────────────────────────
 
 router.post('/:id/items', async (req: Request, res: Response) => {
-  const { catalogItemId, quantity = 1, unitPrice: overridePrice, laborPrice = 0 } = req.body as {
+  const { catalogItemId, quantity = 1, unitPrice: overridePrice, laborPrice = 0, instalacaoId } = req.body as {
     catalogItemId?: number | string;
     quantity?: number;
     unitPrice?: number;
     laborPrice?: number;
+    instalacaoId?: number;
   };
 
   if (!catalogItemId) {
@@ -279,6 +291,21 @@ router.post('/:id/items', async (req: Request, res: Response) => {
     const product = (products as Record<string, unknown>[])[0];
     if (!product) { res.status(404).json({ message: 'Produto não encontrado no catálogo' }); return; }
 
+    // Verifica instalações obrigatórias
+    const [instRows] = await pool.execute(
+      'SELECT instalacao_id FROM produto_instalacao WHERE produto_id = ?',
+      [product.id],
+    );
+    const validInstIds = (instRows as { instalacao_id: number }[]).map(r => r.instalacao_id);
+    if (validInstIds.length > 0 && !instalacaoId) {
+      res.status(400).json({ message: 'Selecione uma instalação para este produto' });
+      return;
+    }
+    if (instalacaoId && !validInstIds.includes(Number(instalacaoId))) {
+      res.status(400).json({ message: 'Instalação inválida para este produto' });
+      return;
+    }
+
     const itemId    = crypto.randomUUID();
     const qty       = Number(quantity);
     const unitPrice = (overridePrice !== undefined && Number(overridePrice) > 0)
@@ -286,12 +313,22 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       : Number(product.unit_price);
     const total     = qty * unitPrice;
     const lp        = Number(laborPrice) >= 0 ? Number(laborPrice) : 0;
+    const instId    = instalacaoId ?? null;
+
+    // Busca a sigla da instalação selecionada (se houver)
+    let instalacaoSigla: string | null = null;
+    if (instId) {
+      const [[instRow]] = await pool.execute<any>(
+        'SELECT sigla FROM instalacoes WHERE id = ?', [instId]
+      );
+      instalacaoSigla = instRow?.sigla ?? null;
+    }
 
     await pool.execute(
       `INSERT INTO os_order_items
-         (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [itemId, req.params.id, product.id, product.code, product.description, product.type, qty, unitPrice, lp, total],
+         (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total, instalacao_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [itemId, req.params.id, product.id, product.code, product.description, product.type, qty, unitPrice, lp, total, instId],
     );
 
     await recalcTotal(req.params.id);
@@ -305,6 +342,8 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       unitPrice,
       laborPrice: lp,
       total,
+      instalacaoId: instId,
+      instalacaoSigla,
     });
   } catch (err) {
     console.error('POST /orders/:id/items error:', err);
@@ -388,12 +427,9 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
     const updated = (updRows as Record<string, unknown>[])[0];
     if (!updated) { res.status(404).json({ message: 'OS não encontrada' }); return; }
 
-    const [items] = await pool.execute(
-      'SELECT * FROM os_order_items WHERE order_id = ? ORDER BY created_at',
-      [req.params.id],
-    );
+    const items = await fetchItems(req.params.id);
 
-    res.json(formatOrder(updated, items as Record<string, unknown>[]));
+    res.json(formatOrder(updated, items));
   } catch (err) {
     console.error('PATCH /orders/:id/status error:', err);
     res.status(500).json({ message: 'Erro ao atualizar status da OS' });
@@ -424,12 +460,9 @@ router.patch('/:id/labor', async (req: Request, res: Response) => {
     const order = (orders as Record<string, unknown>[])[0];
     if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
 
-    const [items] = await pool.execute(
-      'SELECT * FROM os_order_items WHERE order_id = ? ORDER BY created_at',
-      [req.params.id],
-    );
+    const items = await fetchItems(req.params.id);
 
-    res.json(formatOrder(order, items as Record<string, unknown>[]));
+    res.json(formatOrder(order, items));
   } catch (err) {
     console.error('PATCH /orders/:id/labor error:', err);
     res.status(500).json({ message: 'Erro ao atualizar mão de obra' });
@@ -460,12 +493,9 @@ router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => 
     const order = (orders as Record<string, unknown>[])[0];
     if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
 
-    const [items] = await pool.execute(
-      'SELECT * FROM os_order_items WHERE order_id = ? ORDER BY created_at',
-      [req.params.id],
-    );
+    const items = await fetchItems(req.params.id);
 
-    res.json(formatOrder(order, items as Record<string, unknown>[]));
+    res.json(formatOrder(order, items));
   } catch (err) {
     console.error('PATCH /orders/:id/items/:itemId/labor error:', err);
     res.status(500).json({ message: 'Erro ao atualizar mão de obra do item' });

@@ -16,6 +16,7 @@ import { SearchResultItem } from '@/components/SearchResultItem';
 import { ItemRow } from '@/components/ItemRow';
 import { PinModal } from '@/components/PinModal';
 import { ServicePriceModal } from '@/components/ServicePriceModal';
+import { InstalacaoModal } from '@/components/InstalacaoModal';
 import {
   useAddItem,
   useRemoveItem,
@@ -42,8 +43,9 @@ export default function OrderScreen() {
 
   const [search, setSearch] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [instalacaoTarget, setInstalacaoTarget] = useState<CatalogItem | null>(null);
   const [priceModalTarget, setPriceModalTarget] = useState<
-    | { mode: 'catalog'; item: CatalogItem }
+    | { mode: 'catalog'; item: CatalogItem; instalacaoId?: number }
     | { mode: 'orderItem'; item: OrderItem }
     | null
   >(null);
@@ -111,9 +113,23 @@ export default function OrderScreen() {
     (item: CatalogItem) => {
       if (isClosed) return;
       Keyboard.dismiss();
-      setPriceModalTarget({ mode: 'catalog', item });
+      if (item.instalacoes.length > 0) {
+        setInstalacaoTarget(item);
+      } else {
+        setPriceModalTarget({ mode: 'catalog', item });
+      }
     },
     [isClosed],
+  );
+
+  const handleInstSelect = useCallback(
+    (instalacaoId: number) => {
+      if (!instalacaoTarget) return;
+      const item = instalacaoTarget;
+      setInstalacaoTarget(null);
+      setPriceModalTarget({ mode: 'catalog', item, instalacaoId });
+    },
+    [instalacaoTarget],
   );
 
   const handleLaborRequest = useCallback(
@@ -129,12 +145,12 @@ export default function OrderScreen() {
       if (!priceModalTarget) return;
 
       if (priceModalTarget.mode === 'catalog') {
-        const { item } = priceModalTarget;
+        const { item, instalacaoId } = priceModalTarget;
         const laborPrice = Math.max(0, totalServicePrice - (item.unitPrice ?? 0));
         setPriceModalTarget(null);
         setSearch('');
         addItem(
-          { catalogItemId: item.id, quantity: 1, laborPrice },
+          { catalogItemId: item.id, quantity: 1, laborPrice, ...(instalacaoId !== undefined ? { instalacaoId } : {}) },
           {
             onSuccess: () => {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -560,6 +576,15 @@ export default function OrderScreen() {
           keyboardShouldPersistTaps="handled"
         />
       )}
+
+      {/* Modal de seleção obrigatória de instalação */}
+      <InstalacaoModal
+        visible={instalacaoTarget !== null}
+        productDescription={instalacaoTarget?.description ?? ''}
+        instalacoes={instalacaoTarget?.instalacoes ?? []}
+        onSelect={handleInstSelect}
+        onCancel={() => setInstalacaoTarget(null)}
+      />
 
       {/* Modal de preço total do serviço por item */}
       <ServicePriceModal

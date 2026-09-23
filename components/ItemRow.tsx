@@ -61,9 +61,18 @@ export function ItemRow({ item, onDeleteRequest, onQuantityChange, onLaborReques
           >
             {item.description}
           </Text>
-          <Text className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-            Peça: {currency(item.unitPrice)} / un
-          </Text>
+          <View className="flex-row items-center mt-1 gap-1.5">
+            <Text className="text-xs text-gray-500 dark:text-slate-400">
+              Peça: {currency(item.unitPrice)} / un
+            </Text>
+            {item.instalacaoSigla && (
+              <View className="px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40">
+                <Text className="text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                  {item.instalacaoSigla}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {/* Controle de quantidade */}
