@@ -48,10 +48,12 @@ CREATE TABLE IF NOT EXISTS `os_orders` (
   `status`       ENUM('open','in_progress','closed') NOT NULL DEFAULT 'open',
   `total_amount` DECIMAL(18,4) NOT NULL DEFAULT 0,
   `labor_amount` DECIMAL(18,4) NOT NULL DEFAULT 0,
+  `tenant_id`    INT           NOT NULL DEFAULT 1,
   `created_at`   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `closed_at`    DATETIME      NULL DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `tenant_id` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `os_order_items` (

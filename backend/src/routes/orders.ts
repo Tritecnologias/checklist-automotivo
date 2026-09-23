@@ -1,32 +1,89 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { pool } from '../db';
+import { requireAuth, allowedTenants, type JwtPayload } from '../middleware/auth';
 
 const router = Router();
+
+// Todos os endpoints de OS exigem autenticação JWT
+router.use(requireAuth);
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Verifica se a OS existe e está com status 'open' ou 'in_progress'.
- * Retorna true se a operação pode prosseguir, ou já envia 422 e retorna false.
+ * Retorna o tenant_id que o usuário usa para CRIAR/ESCREVER.
+ * Owner sem tenant_id definido usa o tenant do header X-Tenant-Id, senão 1.
  */
+function writeTenantId(user: JwtPayload, req: Request): number {
+  if (user.role === 'owner') {
+    const h = Number(req.headers['x-tenant-id']);
+    return h > 0 ? h : 1;
+  }
+  return user.tenantId ?? user.tenantIds[0] ?? 1;
+}
+
+/**
+ * Monta a cláusula WHERE de tenant para leituras.
+ * Retorna { clause: string; params: any[] }
+ * - owner sem X-Tenant-Id: sem filtro (vê todos)
+ * - owner com X-Tenant-Id: filtra pelo tenant do header
+ * - outros: filtra pela lista de tenants permitidos
+ */
+function tenantWhereClause(
+  user: JwtPayload,
+  req: Request,
+  existingWhere = false,
+): { clause: string; params: any[] } {
+  const prefix = existingWhere ? ' AND ' : ' WHERE ';
+  const ids = allowedTenants(user); // null = owner sem restrição
+
+  const headerTenant = Number(req.headers['x-tenant-id']);
+
+  if (ids === null) {
+    // owner
+    if (headerTenant > 0) {
+      return { clause: `${prefix}tenant_id = ?`, params: [headerTenant] };
+    }
+    return { clause: '', params: [] };
+  }
+
+  if (ids.length === 0) {
+    return { clause: `${prefix}1=0`, params: [] };
+  }
+  if (ids.length === 1) {
+    return { clause: `${prefix}tenant_id = ?`, params: [ids[0]] };
+  }
+  return {
+    clause: `${prefix}tenant_id IN (${ids.map(() => '?').join(',')})`,
+    params: ids,
+  };
+}
+
 async function assertOrderOpen(
   orderId: string,
-  res: import('express').Response,
+  user: JwtPayload,
+  req: Request,
+  res: Response,
 ): Promise<boolean> {
   const [rows] = await pool.execute(
-    'SELECT status FROM os_orders WHERE id = ?',
+    'SELECT status, tenant_id FROM os_orders WHERE id = ?',
     [orderId],
   );
-  const order = (rows as { status: string }[])[0];
+  const order = (rows as { status: string; tenant_id: number }[])[0];
   if (!order) {
     res.status(404).json({ message: 'OS não encontrada' });
     return false;
   }
+
+  // Verificar acesso ao tenant
+  const allowed = allowedTenants(user);
+  if (allowed !== null && !allowed.includes(order.tenant_id)) {
+    res.status(403).json({ message: 'Sem acesso a esta OS' });
+    return false;
+  }
+
   if (order.status === 'closed') {
-    res.status(422).json({
-      message: 'OS encerrada. Reabra a OS para realizar alterações.',
-    });
+    res.status(422).json({ message: 'OS encerrada. Reabra a OS para realizar alterações.' });
     return false;
   }
   return true;
@@ -39,9 +96,9 @@ async function recalcTotal(orderId: string): Promise<number> {
     [orderId],
   );
   const row = (rows as { items_t: string; labor_t: string }[])[0];
-  const totalParts  = row ? Number(row.items_t) : 0;
-  const totalLabor  = row ? Number(row.labor_t) : 0;
-  const total       = totalParts + totalLabor;
+  const totalParts = row ? Number(row.items_t) : 0;
+  const totalLabor = row ? Number(row.labor_t) : 0;
+  const total = totalParts + totalLabor;
   await pool.execute(
     'UPDATE os_orders SET labor_amount = ?, total_amount = ?, updated_at = NOW() WHERE id = ?',
     [totalLabor, total, orderId],
@@ -52,6 +109,7 @@ async function recalcTotal(orderId: string): Promise<number> {
 function formatOrder(order: Record<string, unknown>, items: Record<string, unknown>[]) {
   return {
     id: order.id,
+    tenantId: Number(order.tenant_id),
     vehicle: { plate: order.plate, model: order.model, mileage: order.mileage },
     status: order.status,
     items: items.map(i => ({
@@ -76,24 +134,39 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
 
 router.get('/', async (req: Request, res: Response) => {
   const { search } = req.query as { search?: string };
+  const user = req.user!;
+
   try {
-    let sql = 'SELECT * FROM os_orders';
-    const params: string[] = [];
+    const whereParts: string[] = [];
+    const params: any[] = [];
+
     if (search?.trim()) {
       const clean = search.replace(/[-\s]/g, '').toUpperCase();
-      sql += " WHERE REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') LIKE ?";
+      whereParts.push("REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') LIKE ?");
       params.push(`%${clean}%`);
     }
-    sql += ' ORDER BY created_at DESC LIMIT 200';
-    const [rows] = await pool.execute(sql, params);
+
+    const { clause: tenantClause, params: tenantParams } = tenantWhereClause(
+      user, req, whereParts.length > 0
+    );
+    // Se não tem busca, tenantClause já traz o WHERE; se tem busca, traz o AND
+    const whereStr = whereParts.length > 0
+      ? ` WHERE ${whereParts.join(' AND ')}${tenantClause}`
+      : tenantClause;
+
+    const sql = `SELECT * FROM os_orders${whereStr} ORDER BY created_at DESC LIMIT 200`;
+    const [rows] = await pool.execute(sql, [...params, ...tenantParams]);
+
     res.json(
       (rows as Record<string, unknown>[]).map((o) => ({
         id: o.id,
+        tenantId: Number(o.tenant_id),
         vehicle: { plate: o.plate, model: o.model, mileage: o.mileage },
         status: o.status,
         totalAmount: Number(o.total_amount),
         createdAt: o.created_at,
         updatedAt: o.updated_at,
+        closedAt: o.closed_at ?? null,
       })),
     );
   } catch (err) {
@@ -115,23 +188,27 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
+  const tenantId = writeTenantId(req.user!, req);
+
   try {
     const id  = crypto.randomUUID();
     const now = new Date().toISOString();
 
     await pool.execute(
-      'INSERT INTO os_orders (id, plate, model, mileage, status, total_amount) VALUES (?, ?, ?, ?, ?, 0)',
-      [id, vehicle.plate.toUpperCase(), vehicle.model, vehicle.mileage, status],
+      'INSERT INTO os_orders (id, plate, model, mileage, status, total_amount, tenant_id) VALUES (?, ?, ?, ?, ?, 0, ?)',
+      [id, vehicle.plate.toUpperCase(), vehicle.model, vehicle.mileage, status, tenantId],
     );
 
     res.status(201).json({
       id,
+      tenantId,
       vehicle: { plate: vehicle.plate.toUpperCase(), model: vehicle.model, mileage: vehicle.mileage },
       status,
       items: [],
       totalAmount: 0,
       createdAt: now,
       updatedAt: now,
+      closedAt: null,
     });
   } catch (err) {
     console.error('POST /orders error:', err);
@@ -142,6 +219,7 @@ router.post('/', async (req: Request, res: Response) => {
 // ── GET /orders/:id ─────────────────────────────────────────────────────────
 
 router.get('/:id', async (req: Request, res: Response) => {
+  const user = req.user!;
   try {
     const [orders] = await pool.execute(
       'SELECT * FROM os_orders WHERE id = ?',
@@ -149,6 +227,13 @@ router.get('/:id', async (req: Request, res: Response) => {
     );
     const order = (orders as Record<string, unknown>[])[0];
     if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
+
+    // Verificar acesso ao tenant
+    const allowed = allowedTenants(user);
+    if (allowed !== null && !allowed.includes(Number(order.tenant_id))) {
+      res.status(403).json({ message: 'Sem acesso a esta OS' });
+      return;
+    }
 
     const [items] = await pool.execute(
       'SELECT * FROM os_order_items WHERE order_id = ? ORDER BY created_at',
@@ -178,7 +263,7 @@ router.post('/:id/items', async (req: Request, res: Response) => {
   }
 
   try {
-    if (!await assertOrderOpen(req.params.id, res)) return;
+    if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
 
     const [products] = await pool.execute(
       `SELECT
@@ -200,8 +285,7 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       ? Number(overridePrice)
       : Number(product.unit_price);
     const total     = qty * unitPrice;
-
-    const lp = Number(laborPrice) >= 0 ? Number(laborPrice) : 0;
+    const lp        = Number(laborPrice) >= 0 ? Number(laborPrice) : 0;
 
     await pool.execute(
       `INSERT INTO os_order_items
@@ -239,7 +323,7 @@ router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
   }
 
   try {
-    if (!await assertOrderOpen(req.params.id, res)) return;
+    if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
 
     const [rows] = await pool.execute(
       'SELECT * FROM os_order_items WHERE id = ? AND order_id = ?',
@@ -259,15 +343,7 @@ router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
 
     await recalcTotal(req.params.id);
 
-    res.json({
-      id: item.id,
-      code: item.code,
-      description: item.description,
-      type: item.type,
-      quantity: qty,
-      unitPrice,
-      total,
-    });
+    res.json({ id: item.id, code: item.code, description: item.description, type: item.type, quantity: qty, unitPrice, total });
   } catch (err) {
     console.error('PATCH /orders/:id/items/:itemId error:', err);
     res.status(500).json({ message: 'Erro ao atualizar quantidade' });
@@ -286,6 +362,16 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
   }
 
   try {
+    // Verificar acesso ao tenant
+    const [rows] = await pool.execute('SELECT tenant_id FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (rows as { tenant_id: number }[])[0];
+    if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
+    const allowedT = allowedTenants(req.user!);
+    if (allowedT !== null && !allowedT.includes(order.tenant_id)) {
+      res.status(403).json({ message: 'Sem acesso a esta OS' });
+      return;
+    }
+
     if (status === 'closed') {
       await pool.execute(
         'UPDATE os_orders SET status = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?',
@@ -298,16 +384,16 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
       );
     }
 
-    const [rows] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
-    const order = (rows as Record<string, unknown>[])[0];
-    if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
+    const [updRows] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const updated = (updRows as Record<string, unknown>[])[0];
+    if (!updated) { res.status(404).json({ message: 'OS não encontrada' }); return; }
 
     const [items] = await pool.execute(
       'SELECT * FROM os_order_items WHERE order_id = ? ORDER BY created_at',
       [req.params.id],
     );
 
-    res.json(formatOrder(order, items as Record<string, unknown>[]));
+    res.json(formatOrder(updated, items as Record<string, unknown>[]));
   } catch (err) {
     console.error('PATCH /orders/:id/status error:', err);
     res.status(500).json({ message: 'Erro ao atualizar status da OS' });
@@ -325,7 +411,7 @@ router.patch('/:id/labor', async (req: Request, res: Response) => {
   }
 
   try {
-    if (!await assertOrderOpen(req.params.id, res)) return;
+    if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
 
     await pool.execute(
       'UPDATE os_orders SET labor_amount = ?, updated_at = NOW() WHERE id = ?',
@@ -361,7 +447,7 @@ router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => 
   }
 
   try {
-    if (!await assertOrderOpen(req.params.id, res)) return;
+    if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
 
     await pool.execute(
       'UPDATE os_order_items SET labor_price = ? WHERE id = ? AND order_id = ?',
@@ -390,7 +476,7 @@ router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => 
 
 router.delete('/:id/items/:itemId', async (req: Request, res: Response) => {
   try {
-    if (!await assertOrderOpen(req.params.id, res)) return;
+    if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
 
     await pool.execute(
       'DELETE FROM os_order_items WHERE id = ? AND order_id = ?',

@@ -12,6 +12,7 @@ export type OrderStatus = 'open' | 'in_progress' | 'closed';
 
 export interface Order {
   id: string;
+  tenantId: number;
   vehicle: Vehicle;
   items: OrderItem[];
   status: OrderStatus;
@@ -54,6 +55,7 @@ export interface AddItemPayload {
   catalogItemId: string;
   quantity: number;
   unitPrice?: number;
+  laborPrice?: number;
 }
 
 export interface UpdateQuantityPayload {

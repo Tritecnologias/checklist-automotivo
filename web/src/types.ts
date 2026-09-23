@@ -164,6 +164,7 @@ export interface OrderItem {
 
 export interface Order {
   id: string
+  tenantId: number
   vehicle: Vehicle
   status: 'open' | 'in_progress' | 'closed'
   items: OrderItem[]

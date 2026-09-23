@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
   AddItemPayload,
   CatalogItem,
@@ -9,12 +10,20 @@ import type {
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
+export const AUTH_TOKEN_KEY = '@auth_token';
+
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY).catch(() => null);
+
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options?.headers,
+    },
   });
 
   if (!res.ok) {
@@ -22,37 +31,55 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error((body as { message?: string }).message ?? `HTTP ${res.status}`);
   }
 
-  // 204 No Content
   if (res.status === 204) return undefined as T;
 
   return res.json() as Promise<T>;
 }
 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+export interface LoginResult {
+  token: string;
+  user: { id: number; nome: string; email: string; role: string };
+  tenants: { id: number; nome: string; slug: string }[];
+}
+
+async function authRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { message?: string }).message ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export const authApi = {
+  login: (email: string, password: string) =>
+    authRequest<LoginResult>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  me: () => request<{ user: LoginResult['user']; tenants: LoginResult['tenants'] }>('/auth/me'),
+};
+
 // ─── Ordens ──────────────────────────────────────────────────────────────────
 
 export const api = {
-  /** Cria uma nova OS a partir dos dados do veículo */
   createOrder: (vehicle: Vehicle) =>
     request<Order>('/orders', {
       method: 'POST',
-      body: JSON.stringify({
-        vehicle,
-        status: 'open',
-        items: [],
-        totalAmount: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }),
+      body: JSON.stringify({ vehicle, status: 'open' }),
     }),
 
-  /** GET /orders — lista todas as OS, opcionalmente filtrando por placa */
   listOrders: (search?: string) =>
     request<Order[]>(search ? `/orders?search=${encodeURIComponent(search)}` : '/orders'),
 
-  /** Busca uma OS pelo ID (usado pelo useQuery da tela de comanda) */
   getOrder: (id: string) => request<Order>(`/orders/${id}`),
 
-  /** PATCH /orders/:id/status — atualiza status (open/in_progress/closed) */
   updateOrderStatus: (id: string, status: string) =>
     request<Order>(`/orders/${id}/status`, {
       method: 'PATCH',
@@ -66,34 +93,29 @@ export const api = {
 
   // ─── Itens da Ordem ────────────────────────────────────────────────────────
 
-  /** POST /orders/:id/items — dispara atualização no backend via WS */
   addItem: (orderId: string, payload: AddItemPayload) =>
     request<OrderItem>(`/orders/${orderId}/items`, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
 
-  /** PATCH /orders/:id/items/:itemId — requer PIN se reduzir */
   updateItemQuantity: (orderId: string, itemId: string, quantity: number) =>
     request<OrderItem>(`/orders/${orderId}/items/${itemId}`, {
       method: 'PATCH',
       body: JSON.stringify({ quantity }),
     }),
 
-  /** DELETE /orders/:id/items/:itemId — sempre requer PIN */
   removeItem: (orderId: string, itemId: string) =>
     request<void>(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' }),
 
-  /** PATCH /orders/:id/items/:itemId/labor — define MO do item */
   updateItemLabor: (orderId: string, itemId: string, laborPrice: number) =>
     request<Order>(`/orders/${orderId}/items/${itemId}/labor`, {
       method: 'PATCH',
       body: JSON.stringify({ laborPrice }),
     }),
 
-  // ─── Autenticação ──────────────────────────────────────────────────────────
+  // ─── Autenticação (PIN de supervisor) ─────────────────────────────────────
 
-  /** POST /auth/verify-supervisor-pin — retorna { authorized, supervisorName } */
   verifySupervisorPin: (pin: string) =>
     request<PinVerificationResult>('/auth/verify-supervisor-pin', {
       method: 'POST',

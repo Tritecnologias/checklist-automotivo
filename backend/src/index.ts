@@ -36,6 +36,17 @@ async function runMigrations() {
     console.log('[migration] os_orders.closed_at adicionada');
   }
 
+  // tenant_id em os_orders
+  const [[{ cnt3 }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cnt3 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'tenant_id'`
+  );
+  if (Number(cnt3) === 0) {
+    await pool.query('ALTER TABLE os_orders ADD COLUMN tenant_id INT NOT NULL DEFAULT 1');
+    await pool.query('UPDATE os_orders SET tenant_id = 1 WHERE tenant_id = 0 OR tenant_id IS NULL');
+    console.log('[migration] os_orders.tenant_id adicionada (registros existentes → tenant 1)');
+  }
+
   // Tabela tenants
   await pool.query(`
     CREATE TABLE IF NOT EXISTS \`tenants\` (
