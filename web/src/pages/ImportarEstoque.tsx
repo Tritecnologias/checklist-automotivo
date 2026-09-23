@@ -152,6 +152,7 @@ export default function ImportarEstoque() {
   const [faseClientes, setFaseClientes]           = useState<'parseando' | 'enviando' | null>(null)
   const [resultadoClientes, setResultadoClientes] = useState<ResultadoClientes | null>(null)
   const [erroClientes, setErroClientes]           = useState('')
+  const [progressoClientes, setProgressoClientes] = useState<{ atual: number; total: number } | null>(null)
 
   if (!isOwner) {
     return (
@@ -211,31 +212,39 @@ export default function ImportarEstoque() {
 
       const jwt   = localStorage.getItem('erp_jwt_token') ?? ''
       const hdrs  = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'x-tenant-id': String(currentTenant.id) }
-      const CHUNK = 500
+      const CHUNK = 100
+      const totalLotes = Math.ceil(unique.length / CHUNK)
 
       let totalExistentes = 0
       let totalCriados    = 0
       let totalAssociados = 0
 
-      for (let i = 0; i < unique.length; i += CHUNK) {
-        const chunk = unique.slice(i, i + CHUNK)
-        const res   = await fetch('/api/erp/clientes/importar', {
+      for (let i = 0, lote = 0; i < unique.length; i += CHUNK, lote++) {
+        setProgressoClientes({ atual: lote + 1, total: totalLotes })
+        const chunk   = unique.slice(i, i + CHUNK)
+        const res     = await fetch('/api/erp/clientes/importar', {
           method: 'POST',
           headers: hdrs,
           body: JSON.stringify({ clientes: chunk }),
         })
-        const data = await res.json()
+        const text = await res.text()
+        let data: any
+        try { data = JSON.parse(text) } catch {
+          setErroClientes(`Lote ${lote + 1}/${totalLotes}: resposta inválida do servidor (${res.status}). O arquivo pode ter dados incomuns.`)
+          return
+        }
         if (!res.ok) { setErroClientes(data.message ?? `Erro ${res.status}`); return }
         totalExistentes += data.existentes
         totalCriados    += data.criados
         totalAssociados += data.associados
       }
+      setProgressoClientes(null)
 
       setResultadoClientes({ existentes: totalExistentes, criados: totalCriados, associados: totalAssociados })
     } catch (e: any) {
       setErroClientes(e.message ?? 'Erro de conexão')
     } finally {
-      setLoadingClientes(false); setFaseClientes(null)
+      setLoadingClientes(false); setFaseClientes(null); setProgressoClientes(null)
     }
   }
 
@@ -379,8 +388,25 @@ export default function ImportarEstoque() {
             disabled={!arquivoClientes || !currentTenant || loadingClientes}
             className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-semibold rounded-xl transition-colors"
           >
-            {faseClientes === 'parseando' ? 'Lendo arquivo…' : faseClientes === 'enviando' ? 'Enviando ao servidor…' : 'Importar clientes'}
+            {faseClientes === 'parseando' ? 'Lendo arquivo…'
+              : progressoClientes ? `Enviando lote ${progressoClientes.atual}/${progressoClientes.total}…`
+              : 'Importar clientes'}
           </button>
+
+          {progressoClientes && (
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>Lote {progressoClientes.atual} de {progressoClientes.total}</span>
+                <span>{Math.round((progressoClientes.atual / progressoClientes.total) * 100)}%</span>
+              </div>
+              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                  style={{ width: `${(progressoClientes.atual / progressoClientes.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {erroClientes && (
             <div className="bg-red-900/20 border border-red-800/50 rounded-xl px-4 py-3 text-sm text-red-400">
