@@ -1,6 +1,7 @@
 import type {
   Order, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
+  TenantAdmin, UserAdmin,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -114,6 +115,25 @@ export const erpApi = {
     if (params.page)   q.set('page',   String(params.page))
     return adminRequest<{ data: ProdutoEstoque[]; total: number; pages: number }>(`/erp/estoque?${q}`)
   },
+}
+
+export const tenantsApi = {
+  list: () => adminRequest<TenantAdmin[]>('/tenants'),
+  create: (data: { nome: string; slug: string }) =>
+    adminRequest<TenantAdmin>('/tenants', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: { nome?: string; ativo?: boolean }) =>
+    adminRequest('/tenants/' + id, { method: 'PATCH', body: JSON.stringify(data) }),
+}
+
+export const usersApi = {
+  list: () => adminRequest<UserAdmin[]>('/auth/users'),
+  create: (data: {
+    nome: string; email: string; password: string
+    role: string; tenant_id?: number | null; tenant_ids?: number[]
+  }) => adminRequest<{ id: number }>('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: {
+    nome?: string; role?: string; tenant_id?: number | null; ativo?: boolean; password?: string
+  }) => adminRequest('/auth/users/' + id, { method: 'PATCH', body: JSON.stringify(data) }),
 }
 
 export const adminApi = {

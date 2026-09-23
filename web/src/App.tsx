@@ -19,6 +19,8 @@ import Contas          from './pages/Contas'
 import Estoque         from './pages/Estoque'
 import Clientes        from './pages/Clientes'
 import ClienteHistorico from './pages/ClienteHistorico'
+import Lojas           from './pages/Lojas'
+import Usuarios        from './pages/Usuarios'
 
 export default function App() {
   return (
@@ -48,6 +50,8 @@ export default function App() {
               <Route path="/erp/caixa"        element={<Caixa />} />
               <Route path="/erp/clientes"     element={<Clientes />} />
               <Route path="/erp/clientes/:id" element={<ClienteHistorico />} />
+              <Route path="/erp/lojas"        element={<Lojas />} />
+              <Route path="/erp/usuarios"     element={<Usuarios />} />
             </Route>
           </Route>
 

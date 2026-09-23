@@ -143,6 +143,26 @@ export interface ClienteHistorico {
   }[]
 }
 
+// ── Admin Types ──────────────────────────────────────────────────────────────
+
+export interface TenantAdmin {
+  id: number
+  nome: string
+  slug: string
+  ativo: number
+  created_at: string
+}
+
+export interface UserAdmin {
+  id: number
+  nome: string
+  email: string
+  role: 'owner' | 'manager' | 'operator'
+  tenant_id: number | null
+  tenant_nome: string | null
+  ativo: number
+}
+
 // ── Checklist Types ───────────────────────────────────────────────────────────
 
 export interface Vehicle {

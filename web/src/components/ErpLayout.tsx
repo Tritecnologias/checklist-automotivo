@@ -134,16 +134,45 @@ export default function ErpLayout() {
           ))}
         </nav>
 
-        {/* Rodapé */}
-        <div className="px-3 py-4 border-t border-slate-800 space-y-0.5">
-          {isOwner && (
+        {/* Gestão (owner only) */}
+        {isOwner && (
+          <div className="px-3 py-3 border-t border-slate-800 space-y-0.5">
+            <p className="text-[10px] text-slate-600 uppercase tracking-widest px-3 mb-1">Gestão</p>
+            <NavLink
+              to="/erp/lojas"
+              className={({ isActive }) =>
+                `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`
+              }
+            >
+              <span className="text-base leading-none">🏪</span> Lojas
+            </NavLink>
+            <NavLink
+              to="/erp/usuarios"
+              className={({ isActive }) =>
+                `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`
+              }
+            >
+              <span className="text-base leading-none">👤</span> Usuários
+            </NavLink>
             <NavLink
               to="/admin/products"
-              className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              className={({ isActive }) =>
+                `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`
+              }
             >
-              <span>⚙️</span> Admin
+              <span className="text-base leading-none">⚙️</span> Admin
             </NavLink>
-          )}
+          </div>
+        )}
+
+        {/* Rodapé */}
+        <div className="px-3 py-4 border-t border-slate-800 space-y-0.5">
           <a
             href="/"
             className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
