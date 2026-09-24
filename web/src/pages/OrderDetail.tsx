@@ -32,6 +32,15 @@ export default function OrderDetail() {
     enabled: !!id,
   })
 
+  // ── Aprovar Orçamento (Virar OS) ─────────────────────────────────────────
+  const { mutate: approveQuote, isPending: approving } = useMutation({
+    mutationFn: () => api.approveQuote(id!),
+    onSuccess: (updated) => {
+      qc.setQueryData(['order', id], updated)
+      qc.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+
   // ── Encerrar OS ──────────────────────────────────────────────────────────
   const { mutate: closeOrder, isPending: closing } = useMutation({
     mutationFn: () => api.updateOrderStatus(id!, 'closed'),
@@ -90,7 +99,7 @@ export default function OrderDetail() {
   if (isError || !order) {
     return (
       <div className="py-32 text-center">
-        <p className="text-red-400 mb-4">OS não encontrada.</p>
+        <p className="text-red-400 mb-4">Registro não encontrado.</p>
         <button onClick={() => navigate('/orders')} className="text-blue-400 hover:text-blue-300 text-sm">
           ← Voltar para lista
         </button>
@@ -98,6 +107,7 @@ export default function OrderDetail() {
     )
   }
 
+  const isQuote  = order.status === 'quote'
   const isClosed = order.status === 'closed'
   const parts    = order.items.filter((i) => i.type === 'part')
   const services = order.items.filter((i) => i.type === 'service')
@@ -109,10 +119,35 @@ export default function OrderDetail() {
     <div className="space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-slate-500">
-        <Link to="/orders" className="hover:text-slate-300">Ordens de Serviço</Link>
+        <Link to="/orders" className="hover:text-slate-300">
+          {isQuote ? 'Orçamentos' : 'Ordens de Serviço'}
+        </Link>
         <span>/</span>
         <span className="font-mono text-slate-300">#{order.id.split('-')[0].toUpperCase()}</span>
       </div>
+
+      {/* Banner Orçamento */}
+      {isQuote && (
+        <div className="flex items-center justify-between flex-wrap gap-4 bg-purple-950/40 border border-purple-800/60 rounded-xl px-5 py-4">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">📋</span>
+            <div>
+              <p className="text-sm font-semibold text-purple-200">Orçamento Aguardando Aprovação</p>
+              <p className="text-xs text-purple-300/80 mt-0.5">
+                O cliente aprovou o orçamento? Clique no botão para transformá-lo automaticamente em uma Ordem de Serviço em aberto.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => approveQuote()}
+            disabled={approving}
+            className="px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-green-900/30 transition-all flex items-center gap-2 shrink-0 disabled:opacity-50"
+          >
+            <span>✅</span>
+            <span>{approving ? 'Aprovando…' : 'Aprovar Orçamento (Gerar OS)'}</span>
+          </button>
+        </div>
+      )}
 
       {/* Banner somente-leitura */}
       {isClosed && (
@@ -132,14 +167,19 @@ export default function OrderDetail() {
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div>
             <p className="text-xs font-mono text-slate-500 uppercase">
-              OS #{order.id.split('-')[0].toUpperCase()}
+              {isQuote ? 'ORÇAMENTO' : 'OS'} #{order.id.split('-')[0].toUpperCase()}
             </p>
             <h1 className="text-3xl font-bold text-white mt-1">{order.vehicle.plate}</h1>
             <p className="text-slate-400 mt-1">
               {order.vehicle.model} &middot; {order.vehicle.mileage.toLocaleString('pt-BR')} km
             </p>
-            <div className="flex items-center gap-3 mt-3">
+            <div className="flex items-center flex-wrap gap-3 mt-3">
               <StatusBadge status={order.status} />
+              {order.vendaControle && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/70 text-emerald-300 border border-emerald-700/60">
+                  <span>💰</span> Faturada no PDV (#{order.vendaControle})
+                </span>
+              )}
               <span className="text-xs text-slate-500">
                 Criada em {fmtDate(order.createdAt)}
               </span>
@@ -147,7 +187,16 @@ export default function OrderDetail() {
           </div>
 
           <div className="flex items-center gap-3">
-            {!isClosed ? (
+            {isQuote ? (
+              <button
+                onClick={() => approveQuote()}
+                disabled={approving}
+                className="px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-green-900/30 transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                <span>✅</span>
+                <span>{approving ? 'Aprovando…' : 'Aprovar Orçamento'}</span>
+              </button>
+            ) : !isClosed ? (
               <button
                 onClick={() => setConfirmClose(true)}
                 className="px-4 py-2 bg-red-900/40 hover:bg-red-900/60 text-red-400 rounded-xl text-sm font-semibold border border-red-800/50 transition-colors"

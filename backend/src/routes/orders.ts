@@ -124,8 +124,10 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
     tenantId: Number(order.tenant_id),
     vehicle: { plate: order.plate, model: order.model, mileage: order.mileage },
     status: order.status,
+    vendaControle: (order.venda_controle as string | null) ?? null,
     items: items.map(i => ({
       id: i.id,
+      productId: i.product_id ? Number(i.product_id) : null,
       code: i.code,
       description: i.description,
       type: i.type,
@@ -147,7 +149,7 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
 // ── GET /orders ─────────────────────────────────────────────────────────────
 
 router.get('/', async (req: Request, res: Response) => {
-  const { search } = req.query as { search?: string };
+  const { search, status } = req.query as { search?: string; status?: string };
   const user = req.user!;
 
   try {
@@ -158,6 +160,11 @@ router.get('/', async (req: Request, res: Response) => {
       const clean = search.replace(/[-\s]/g, '').toUpperCase();
       whereParts.push("REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') LIKE ?");
       params.push(`%${clean}%`);
+    }
+
+    if (status?.trim()) {
+      whereParts.push('status = ?');
+      params.push(status.trim());
     }
 
     const { clause: tenantClause, params: tenantParams } = tenantWhereClause(
@@ -177,6 +184,8 @@ router.get('/', async (req: Request, res: Response) => {
         tenantId: Number(o.tenant_id),
         vehicle: { plate: o.plate, model: o.model, mileage: o.mileage },
         status: o.status,
+        vendaControle: (o.venda_controle as string | null) ?? null,
+        laborAmount: Number(o.labor_amount ?? 0),
         totalAmount: Number(o.total_amount),
         createdAt: o.created_at,
         updatedAt: o.updated_at,
@@ -202,6 +211,8 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
+  const allowedStatus = ['quote', 'open', 'in_progress', 'closed'];
+  const finalStatus = allowedStatus.includes(status) ? status : 'open';
   const tenantId = writeTenantId(req.user!, req);
 
   try {
@@ -210,16 +221,18 @@ router.post('/', async (req: Request, res: Response) => {
 
     await pool.execute(
       'INSERT INTO os_orders (id, plate, model, mileage, status, total_amount, tenant_id) VALUES (?, ?, ?, ?, ?, 0, ?)',
-      [id, vehicle.plate.toUpperCase(), vehicle.model, vehicle.mileage, status, tenantId],
+      [id, vehicle.plate.toUpperCase(), vehicle.model, vehicle.mileage, finalStatus, tenantId],
     );
 
     res.status(201).json({
       id,
       tenantId,
       vehicle: { plate: vehicle.plate.toUpperCase(), model: vehicle.model, mileage: vehicle.mileage },
-      status,
+      status: finalStatus,
+      vendaControle: null,
       items: [],
       totalAmount: 0,
+      laborAmount: 0,
       createdAt: now,
       updatedAt: now,
       closedAt: null,
@@ -393,7 +406,7 @@ router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
 
 router.patch('/:id/status', async (req: Request, res: Response) => {
   const { status } = req.body as { status?: string };
-  const allowed = ['open', 'in_progress', 'closed'];
+  const allowed = ['quote', 'open', 'in_progress', 'closed'];
 
   if (!status || !allowed.includes(status)) {
     res.status(400).json({ message: `Status deve ser: ${allowed.join(', ')}` });
@@ -433,6 +446,36 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('PATCH /orders/:id/status error:', err);
     res.status(500).json({ message: 'Erro ao atualizar status da OS' });
+  }
+});
+
+// ── POST /orders/:id/approve ────────────────────────────────────────────────
+// Aprova um orçamento transformando-o em OS aberta (status = 'open')
+router.post('/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const [rows] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (rows as Record<string, unknown>[])[0];
+    if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
+
+    const allowedT = allowedTenants(req.user!);
+    if (allowedT !== null && !allowedT.includes(Number(order.tenant_id))) {
+      res.status(403).json({ message: 'Sem acesso a esta OS' });
+      return;
+    }
+
+    await pool.execute(
+      "UPDATE os_orders SET status = 'open', updated_at = NOW() WHERE id = ?",
+      [req.params.id],
+    );
+
+    const [updRows] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const updated = (updRows as Record<string, unknown>[])[0];
+    const items = await fetchItems(req.params.id);
+
+    res.json(formatOrder(updated, items));
+  } catch (err) {
+    console.error('POST /orders/:id/approve error:', err);
+    res.status(500).json({ message: 'Erro ao aprovar orçamento' });
   }
 });
 

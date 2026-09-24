@@ -8,7 +8,7 @@ export interface Vehicle {
 
 // ─── Ordem de Serviço ────────────────────────────────────────────────────────
 
-export type OrderStatus = 'open' | 'in_progress' | 'closed';
+export type OrderStatus = 'quote' | 'open' | 'in_progress' | 'closed';
 
 export interface Order {
   id: string;
@@ -16,6 +16,7 @@ export interface Order {
   vehicle: Vehicle;
   items: OrderItem[];
   status: OrderStatus;
+  vendaControle?: string | null;
   laborAmount: number;
   totalAmount: number;
   createdAt: string;

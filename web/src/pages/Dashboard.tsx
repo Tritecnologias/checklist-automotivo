@@ -30,9 +30,10 @@ function StatCard({
 export default function Dashboard() {
   const { data: orders = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['orders'],
-    queryFn: api.listOrders,
+    queryFn: () => api.listOrders(),
   })
 
+  const quotes      = orders.filter((o) => o.status === 'quote').length
   const open        = orders.filter((o) => o.status === 'open').length
   const in_progress = orders.filter((o) => o.status === 'in_progress').length
   const closed      = orders.filter((o) => o.status === 'closed').length
@@ -65,11 +66,12 @@ export default function Dashboard() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="text-slate-400 text-sm mt-1">{orders.length} ordens registradas</p>
+        <p className="text-slate-400 text-sm mt-1">{orders.length} atendimentos registrados</p>
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <StatCard label="Orçamentos"   value={quotes}      color="text-purple-400" />
         <StatCard label="Abertas"       value={open}        color="text-green-400" />
         <StatCard label="Em andamento"  value={in_progress} color="text-amber-400" />
         <StatCard label="Encerradas"    value={closed}      color="text-slate-400" />

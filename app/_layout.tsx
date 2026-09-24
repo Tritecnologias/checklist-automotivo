@@ -16,12 +16,12 @@ function AuthGate() {
   useEffect(() => {
     if (isLoading) return;
     const inLogin = segments[0] === 'login';
-    const inTenantSelect = segments[0] === 'select-tenant';
+    const inTenantSelect = (segments[0] as string) === 'select-tenant';
 
     if (!token) {
       if (!inLogin) router.replace('/login');
     } else if (needsTenantSelection) {
-      if (!inTenantSelect) router.replace('/select-tenant');
+      if (!inTenantSelect) router.replace('/select-tenant' as any);
     } else {
       if (inLogin || inTenantSelect) router.replace('/');
     }

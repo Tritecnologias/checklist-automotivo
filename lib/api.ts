@@ -75,10 +75,15 @@ export const authApi = {
 // ─── Ordens ──────────────────────────────────────────────────────────────────
 
 export const api = {
-  createOrder: (vehicle: Vehicle) =>
+  createOrder: (vehicle: Vehicle, status: 'quote' | 'open' = 'open') =>
     request<Order>('/orders', {
       method: 'POST',
-      body: JSON.stringify({ vehicle, status: 'open' }),
+      body: JSON.stringify({ vehicle, status }),
+    }),
+
+  approveQuote: (id: string) =>
+    request<Order>(`/orders/${id}/approve`, {
+      method: 'POST',
     }),
 
   listOrders: (search?: string) =>

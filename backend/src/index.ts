@@ -47,6 +47,21 @@ async function runMigrations() {
     console.log('[migration] os_orders.closed_at adicionada');
   }
 
+  // status ENUM com 'quote' (orçamento) em os_orders
+  await pool.query(
+    `ALTER TABLE os_orders MODIFY COLUMN status ENUM('quote','open','in_progress','closed') NOT NULL DEFAULT 'open'`
+  ).catch(() => {});
+
+  // venda_controle em os_orders (vínculo com PDV quando faturada)
+  const [[{ cntVendaCol }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntVendaCol FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'venda_controle'`
+  );
+  if (Number(cntVendaCol) === 0) {
+    await pool.query('ALTER TABLE os_orders ADD COLUMN venda_controle VARCHAR(50) NULL DEFAULT NULL');
+    console.log('[migration] os_orders.venda_controle adicionada');
+  }
+
   // tenant_id em os_orders
   const [[{ cnt3 }]] = await pool.query<any>(
     `SELECT COUNT(*) as cnt3 FROM information_schema.COLUMNS

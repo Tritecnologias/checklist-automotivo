@@ -176,6 +176,8 @@ export interface UserAdmin {
 
 // ── Checklist Types ───────────────────────────────────────────────────────────
 
+export type OrderStatus = 'quote' | 'open' | 'in_progress' | 'closed'
+
 export interface Vehicle {
   plate: string
   model: string
@@ -184,6 +186,7 @@ export interface Vehicle {
 
 export interface OrderItem {
   id: string
+  productId?: number | null
   code: string
   description: string
   type: 'part' | 'service'
@@ -191,17 +194,57 @@ export interface OrderItem {
   unitPrice: number
   laborPrice: number
   total: number
+  instalacaoId?: number | null
+  instalacaoSigla?: string | null
 }
 
 export interface Order {
   id: string
   tenantId: number
   vehicle: Vehicle
-  status: 'open' | 'in_progress' | 'closed'
+  status: OrderStatus
+  vendaControle?: string | null
   items: OrderItem[]
   laborAmount: number
   totalAmount: number
   createdAt: string
   updatedAt: string
   closedAt: string | null
+}
+
+// ── Tipos para Integração OS no PDV ──────────────────────────────────────────
+
+export interface OsEncerradaPdv {
+  id: string
+  plate: string
+  model: string
+  mileage: number
+  status: string
+  totalAmount: number
+  laborAmount: number
+  createdAt: string
+  updatedAt: string
+  closedAt: string | null
+  vendaControle: string | null
+  totalItens: number
+}
+
+export interface ImportarOsPdvResponse {
+  order: {
+    id: string
+    plate: string
+    model: string
+    mileage: number
+    status: string
+    totalAmount: number
+    laborAmount: number
+    vendaControle: string | null
+    closedAt: string | null
+  }
+  cliente: ClientePdv | null
+  itens: {
+    produto: ProdutoPdv
+    quant: number
+    valor: number
+  }[]
 }

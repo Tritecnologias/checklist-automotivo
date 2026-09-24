@@ -1,7 +1,7 @@
 import type {
-  Order, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
+  Order, Vehicle, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
-  TenantAdmin, UserAdmin, Instalacao,
+  TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -23,8 +23,20 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listOrders: () => request<Order[]>('/orders'),
+  listOrders: (status?: string | unknown) => {
+    const q = typeof status === 'string' && status ? `?status=${encodeURIComponent(status)}` : ''
+    return request<Order[]>(`/orders${q}`)
+  },
   getOrder: (id: string) => request<Order>(`/orders/${id}`),
+  createOrder: (vehicle: Vehicle, status: 'quote' | 'open' = 'open') =>
+    request<Order>('/orders', {
+      method: 'POST',
+      body: JSON.stringify({ vehicle, status }),
+    }),
+  approveQuote: (id: string) =>
+    request<Order>(`/orders/${id}/approve`, {
+      method: 'POST',
+    }),
   updateOrderStatus: (id: string, status: string) =>
     request<Order>(`/orders/${id}/status`, {
       method: 'PATCH',
@@ -87,9 +99,20 @@ export const erpApi = {
     vr_ticket?: number
     vr_adicional?: number
     parcelas?: number
+    id_os?: string
   }) => adminRequest<{ controle: string; id: number; vr_total: number }>(
     '/erp/vendas', { method: 'POST', body: JSON.stringify(data) }
   ),
+
+  listarOsEncerradas: (params?: { search?: string; apenasPendentes?: boolean }) => {
+    const q = new URLSearchParams()
+    if (params?.search) q.set('search', params.search)
+    if (params?.apenasPendentes !== undefined) q.set('apenas_pendentes', String(params.apenasPendentes))
+    return adminRequest<OsEncerradaPdv[]>(`/erp/pdv/os-encerradas?${q}`)
+  },
+
+  carregarOsPdv: (id: string) =>
+    adminRequest<ImportarOsPdvResponse>(`/erp/pdv/os/${id}`),
 
   contas: (params: { status?: string; page?: number; search?: string }) => {
     const q = new URLSearchParams()

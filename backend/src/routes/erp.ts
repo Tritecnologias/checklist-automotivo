@@ -300,106 +300,121 @@ router.get('/vendas/:controle', async (req, res) => {
 });
 
 router.post('/vendas', async (req, res) => {
-  const {
-    id_cliente = 0,
-    itens = [],
-    vr_dinheiro = 0,
-    vr_cheque = 0,
-    vr_cartao = 0,
-    vr_carne = 0,
-    vr_ticket = 0,
-    vr_adicional = 0,
-    parcelas = 1,
-    id_login = 1,
-    terminal = '01',
-    turno = '1',
-  } = req.body as {
-    id_cliente?: number;
-    itens: { id_produto: number; valor: number; quant: number }[];
-    vr_dinheiro?: number;
-    vr_cheque?: number;
-    vr_cartao?: number;
-    vr_carne?: number;
-    vr_ticket?: number;
-    vr_adicional?: number;
-    parcelas?: number;
-    id_login?: number;
-    terminal?: string;
-    turno?: string;
-  };
+  try {
+    const {
+      id_cliente = 0,
+      itens = [],
+      vr_dinheiro = 0,
+      vr_cheque = 0,
+      vr_cartao = 0,
+      vr_carne = 0,
+      vr_ticket = 0,
+      vr_adicional = 0,
+      parcelas = 1,
+      id_login = 1,
+      terminal = '01',
+      turno = '1',
+      id_os,
+    } = req.body as {
+      id_cliente?: number;
+      itens: { id_produto: number; valor: number; quant: number }[];
+      vr_dinheiro?: number;
+      vr_cheque?: number;
+      vr_cartao?: number;
+      vr_carne?: number;
+      vr_ticket?: number;
+      vr_adicional?: number;
+      parcelas?: number;
+      id_login?: number;
+      terminal?: string;
+      turno?: string;
+      id_os?: string;
+    };
 
-  if (!itens.length) {
-    res.status(400).json({ message: 'Venda sem itens' });
-    return;
-  }
+    if (!itens.length) {
+      res.status(400).json({ message: 'Venda sem itens' });
+      return;
+    }
 
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const controle = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  const data_venda = now.toISOString().slice(0, 10);
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const controle = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const data_venda = now.toISOString().slice(0, 10);
 
-  const vr_total = itens.reduce((s, i) => s + i.valor * i.quant, 0) + Number(vr_adicional);
-  const em_aberto = vr_carne > 0 ? 1 : 0;
+    const vr_total = itens.reduce((s, i) => s + i.valor * i.quant, 0) + Number(vr_adicional);
+    const em_aberto = vr_carne > 0 ? 1 : 0;
 
-  // Detect primary payment mode for cod_lancamento mapping
-  const codLancamento =
-    vr_cartao > 0 ? (vr_cartao === vr_total ? 7 : 1) :
-    vr_cheque  > 0 ? 2 :
-    vr_carne   > 0 ? 5 :
-    vr_ticket  > 0 ? 8 : 1;
+    // Detect primary payment mode for cod_lancamento mapping
+    const codLancamento =
+      vr_cartao > 0 ? (vr_cartao === vr_total ? 7 : 1) :
+      vr_cheque  > 0 ? 2 :
+      vr_carne   > 0 ? 5 :
+      vr_ticket  > 0 ? 8 : 1;
 
-  const [vendaResult] = await pool.query<any>(
-    `INSERT INTO mv_vendas
-       (controle, data_venda, parcelas, id_cliente, id_cliente_convenio,
-        id_login, terminal, turno, vr_total, vr_adicional,
-        vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket,
-        em_aberto, vr_pagto_parcial, cod_lancamento)
-     VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
-    [controle, data_venda, parcelas, id_cliente, id_login, terminal, turno,
-     vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket,
-     em_aberto, codLancamento]
-  );
-  const id_venda = vendaResult.insertId;
-
-  for (const item of itens) {
-    const item_total = Number(item.valor) * Number(item.quant);
-    await pool.query(
-      `INSERT INTO mv_vendas_movimento
-         (data_venda, controle, modo_venda, cod_lancamento, id_login,
-          id_cliente, id_cliente_convenio, id_produto, id_grade,
-          modo_lancamento, terminal, turno, valor, quant, vr_total, vr_cotacao, desconto_total_venda)
-       VALUES (?,?,1,?,?,?,0,?,0,0,?,?,?,?,?,1,'N')`,
-      [data_venda, controle, codLancamento, id_login, id_cliente,
-       item.id_produto, terminal, turno, item.valor, item.quant, item_total]
+    const [vendaResult] = await pool.query<any>(
+      `INSERT INTO mv_vendas
+         (controle, data_venda, parcelas, id_cliente, id_cliente_convenio,
+          id_login, terminal, turno, vr_total, vr_adicional,
+          vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket,
+          em_aberto, vr_pagto_parcial, cod_lancamento)
+       VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
+      [controle, data_venda, parcelas, id_cliente, id_login, terminal, turno,
+       vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket,
+       em_aberto, codLancamento]
     );
-    const tenantId = getErpWriteTenantId(req);
+    const id_venda = vendaResult.insertId;
+
+    for (const item of itens) {
+      const item_total = Number(item.valor) * Number(item.quant);
+      await pool.query(
+        `INSERT INTO mv_vendas_movimento
+           (data_venda, controle, modo_venda, cod_lancamento, id_login,
+            id_cliente, id_cliente_convenio, id_produto, id_grade,
+            modo_lancamento, terminal, turno, valor, quant, vr_total, vr_cotacao, desconto_total_venda)
+         VALUES (?,?,1,?,?,?,0,?,0,0,?,?,?,?,?,1,'N')`,
+        [data_venda, controle, codLancamento, id_login, id_cliente,
+         item.id_produto, terminal, turno, item.valor, item.quant, item_total]
+      );
+      const tenantId = getErpWriteTenantId(req);
+      await pool.query(
+        `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
+         SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) - ?)
+         FROM cad_produtos p
+         LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+         WHERE p.id = ?
+         ON DUPLICATE KEY UPDATE saldo = GREATEST(0, produto_saldo_tenant.saldo - ?)`,
+        [tenantId, tenantId, item.quant, tenantId, item.id_produto, item.quant]
+      );
+    }
+
+    // Lançamento financeiro
+    const hist = `VENDA REALIZADA [ ${controle} ]`;
     await pool.query(
-      `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
-       SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) - ?)
-       FROM cad_produtos p
-       LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-       WHERE p.id = ?
-       ON DUPLICATE KEY UPDATE saldo = GREATEST(0, saldo - ?)`,
-      [tenantId, tenantId, item.quant, tenantId, item.id_produto, item.quant]
+      `INSERT INTO cad_lancamentos
+         (id_planejamento, id_conta, id_modo_lancamento, status_lancamento,
+          controle, documento, historico, parcela, data_vencimento,
+          vr_parcela, vr_abatimentos, vr_acrescimo, transferido,
+          id_cliente, id_venda, data_confirmacao, dias_atraso)
+       VALUES (2,1,?,?,?,?,?,1,?,?,0,0,0,?,?,?,0)`,
+      [codLancamento, em_aberto === 0 ? 1 : 0,
+       controle, controle, hist, data_venda,
+       vr_total, id_cliente, id_venda,
+       em_aberto === 0 ? data_venda : null]
     );
+
+    // Se a venda é de uma OS, atualiza o controle na OS
+    if (id_os) {
+      await pool.query(
+        'UPDATE os_orders SET venda_controle = ?, updated_at = NOW() WHERE id = ?',
+        [controle, id_os]
+      ).catch(err => console.error('Erro ao vincular venda à OS:', err));
+    }
+
+    res.status(201).json({ controle, id: id_venda, vr_total });
+  } catch (err: any) {
+    console.error('POST /erp/vendas error:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao processar venda' });
   }
-
-  // Lançamento financeiro
-  const hist = `VENDA REALIZADA [ ${controle} ]`;
-  await pool.query(
-    `INSERT INTO cad_lancamentos
-       (id_planejamento, id_conta, id_modo_lancamento, status_lancamento,
-        controle, documento, historico, parcela, data_vencimento,
-        vr_parcela, vr_abatimentos, vr_acrescimo, transferido,
-        id_cliente, id_venda, data_confirmacao, dias_atraso)
-     VALUES (2,1,?,?,?,?,?,1,?,?,0,0,0,?,?,?,0)`,
-    [codLancamento, em_aberto === 0 ? 1 : 0,
-     controle, controle, hist, data_venda,
-     vr_total, id_cliente, id_venda,
-     em_aberto === 0 ? data_venda : null]
-  );
-
-  res.status(201).json({ controle, id: id_venda, vr_total });
 });
 
 // ── CONTAS / FINANCEIRO ──────────────────────────────────────────────────────
@@ -496,6 +511,180 @@ router.get('/busca/clientes', async (req, res) => {
     [`%${q}%`, `%${q}%`, `%${q}%`]
   );
   res.json(rows);
+});
+
+// ── BUSCA OS ENCERRADA PARA PDV ─────────────────────────────────────────────
+
+async function getMaoDeObraProduto(): Promise<{ id: number; nome_produto: string; cod_barra: string }> {
+  const [[prod]] = await pool.query<any>(
+    "SELECT id, nome_produto, cod_barra FROM cad_produtos WHERE nome_produto LIKE '%MAO DE OBRA%' OR nome_produto LIKE '%MÃO DE OBRA%' LIMIT 1"
+  );
+  if (prod) return { id: Number(prod.id), nome_produto: prod.nome_produto, cod_barra: prod.cod_barra ?? '' };
+  const [[prodServ]] = await pool.query<any>(
+    "SELECT id, nome_produto, cod_barra FROM cad_produtos WHERE id_tipo IN (2, 9) LIMIT 1"
+  );
+  if (prodServ) return { id: Number(prodServ.id), nome_produto: prodServ.nome_produto, cod_barra: prodServ.cod_barra ?? '' };
+  return { id: 1981, nome_produto: 'MÃO DE OBRA', cod_barra: '2000000019819' };
+}
+
+router.get('/pdv/os-encerradas', async (req, res) => {
+  try {
+    const search = String(req.query.search ?? '').trim();
+    const apenasPendentes = req.query.apenas_pendentes === 'true' || req.query.apenas_pendentes === '1';
+    const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true);
+
+    const whereParts: string[] = ["o.status = 'closed'"];
+    const params: any[] = [];
+
+    if (search.length >= 2) {
+      const clean = search.replace(/[-\s]/g, '').toUpperCase();
+      whereParts.push("(REPLACE(REPLACE(UPPER(o.plate), '-', ''), ' ', '') LIKE ? OR o.model LIKE ? OR o.id LIKE ?)");
+      params.push(`%${clean}%`, `%${search}%`, `%${search}%`);
+    }
+
+    if (apenasPendentes) {
+      whereParts.push('o.venda_controle IS NULL');
+    }
+
+    const whereStr = 'WHERE ' + whereParts.join(' AND ') + tenantClause;
+    const sql = `
+      SELECT o.id, o.plate, o.model, o.mileage, o.status, o.total_amount,
+             o.labor_amount, o.created_at, o.updated_at, o.closed_at,
+             o.venda_controle,
+             (SELECT COUNT(*) FROM os_order_items oi WHERE oi.order_id = o.id) AS total_itens
+      FROM os_orders o
+      ${whereStr}
+      ORDER BY o.closed_at DESC, o.updated_at DESC
+      LIMIT 50
+    `;
+
+    const [rows] = await pool.query<any>(sql, [...params, ...tenantParams]);
+
+    res.json(rows.map((r: any) => ({
+      id: r.id,
+      plate: r.plate,
+      model: r.model,
+      mileage: Number(r.mileage),
+      status: r.status,
+      totalAmount: Number(r.total_amount),
+      laborAmount: Number(r.labor_amount ?? 0),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      closedAt: r.closed_at,
+      vendaControle: r.venda_controle ?? null,
+      totalItens: Number(r.total_itens ?? 0),
+    })));
+  } catch (err) {
+    console.error('GET /erp/pdv/os-encerradas error:', err);
+    res.status(500).json({ message: 'Erro ao listar ordens de serviço encerradas' });
+  }
+});
+
+router.get('/pdv/os/:id', async (req, res) => {
+  try {
+    const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true);
+    const [[order]] = await pool.query<any>(
+      `SELECT * FROM os_orders WHERE id = ?${tenantClause}`,
+      [req.params.id, ...tenantParams]
+    );
+
+    if (!order) {
+      res.status(404).json({ message: 'Ordem de serviço não encontrada' });
+      return;
+    }
+
+    // Busca itens da OS
+    const [rawItems] = await pool.query<any>(
+      `SELECT oi.*, p.unidade, p.estoque, p.cod_barra AS prod_cod_barra
+       FROM os_order_items oi
+       LEFT JOIN cad_produtos p ON p.id = oi.product_id
+       WHERE oi.order_id = ?
+       ORDER BY oi.created_at`,
+      [order.id]
+    );
+
+    // Tenta encontrar cliente pela placa no cadastro
+    const cleanPlate = order.plate.replace(/[-\s]/g, '').toUpperCase();
+    const [[cliente]] = await pool.query<any>(
+      `SELECT id, nome_cliente, cpf_cnpj, telefone, celular
+       FROM cad_clientes
+       WHERE inativo = 0 AND (
+         REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
+         OR inf_adicional LIKE ?
+       )
+       LIMIT 1`,
+      [`%${cleanPlate}%`, `%${cleanPlate}%`]
+    );
+
+    // Formata itens para o PDV
+    const itensPdv: any[] = [];
+    let totalLabor = 0;
+
+    for (const item of rawItems) {
+      const qty = Number(item.quantity);
+      const unitPrice = Number(item.unit_price);
+      const lp = Number(item.labor_price ?? 0);
+      totalLabor += lp;
+
+      itensPdv.push({
+        produto: {
+          id: Number(item.product_id),
+          nome_produto: item.description,
+          cod_barra: item.code || item.prod_cod_barra || '',
+          unidade: item.unidade || 'UN',
+          vr_venda: unitPrice,
+          estoque: Number(item.estoque ?? 0),
+        },
+        quant: qty,
+        valor: unitPrice,
+      });
+    }
+
+    // Se houver mão de obra geral na OS ou acumulada nos itens
+    const osLaborAmount = Number(order.labor_amount ?? 0);
+    const finalLabor = totalLabor > 0 ? totalLabor : osLaborAmount;
+
+    if (finalLabor > 0) {
+      const prodMo = await getMaoDeObraProduto();
+      itensPdv.push({
+        produto: {
+          id: prodMo.id,
+          nome_produto: `MÃO DE OBRA (OS ${order.plate})`,
+          cod_barra: prodMo.cod_barra,
+          unidade: 'UN',
+          vr_venda: finalLabor,
+          estoque: 0,
+        },
+        quant: 1,
+        valor: finalLabor,
+      });
+    }
+
+    res.json({
+      order: {
+        id: order.id,
+        plate: order.plate,
+        model: order.model,
+        mileage: Number(order.mileage),
+        status: order.status,
+        totalAmount: Number(order.total_amount),
+        laborAmount: Number(order.labor_amount ?? 0),
+        vendaControle: order.venda_controle ?? null,
+        closedAt: order.closed_at,
+      },
+      cliente: cliente ? {
+        id: Number(cliente.id),
+        nome_cliente: cliente.nome_cliente,
+        cpf_cnpj: cliente.cpf_cnpj ?? '',
+        telefone: cliente.telefone ?? '',
+        celular: cliente.celular ?? '',
+      } : null,
+      itens: itensPdv,
+    });
+  } catch (err) {
+    console.error('GET /erp/pdv/os/:id error:', err);
+    res.status(500).json({ message: 'Erro ao carregar itens da OS para o PDV' });
+  }
 });
 
 // ── CLIENTES ─────────────────────────────────────────────────────────────────

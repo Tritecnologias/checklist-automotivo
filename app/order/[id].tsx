@@ -100,6 +100,18 @@ export default function OrderScreen() {
     },
   });
 
+  const { mutate: approveQuote, isPending: approvingQuote } = useMutation({
+    mutationFn: () => api.approveQuote(id),
+    onSuccess: (updated: Order) => {
+      qc.setQueryData(['order', id], updated);
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    },
+  });
+
   // ─── Totais ───────────────────────────────────────────────────────────────────
 
   const items = order?.items ?? [];
@@ -392,7 +404,9 @@ export default function OrderScreen() {
 
           <View
             className={`px-3 py-1.5 rounded-full ${
-              order.status === 'open'
+              order.status === 'quote'
+                ? 'bg-purple-100 dark:bg-purple-900/40'
+                : order.status === 'open'
                 ? 'bg-green-100 dark:bg-green-900/30'
                 : order.status === 'in_progress'
                 ? 'bg-amber-100 dark:bg-amber-900/30'
@@ -401,14 +415,18 @@ export default function OrderScreen() {
           >
             <Text
               className={`text-xs font-bold uppercase ${
-                order.status === 'open'
+                order.status === 'quote'
+                  ? 'text-purple-700 dark:text-purple-300'
+                  : order.status === 'open'
                   ? 'text-green-700 dark:text-green-400'
                   : order.status === 'in_progress'
                   ? 'text-amber-700 dark:text-amber-400'
                   : 'text-gray-500 dark:text-slate-400'
               }`}
             >
-              {order.status === 'open'
+              {order.status === 'quote'
+                ? 'Orçamento'
+                : order.status === 'open'
                 ? 'Aberta'
                 : order.status === 'in_progress'
                 ? 'Em andamento'
@@ -416,6 +434,31 @@ export default function OrderScreen() {
             </Text>
           </View>
         </View>
+
+        {/* Banner de Orçamento */}
+        {order.status === 'quote' && (
+          <View className="mt-3 p-3.5 rounded-2xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60">
+            <View className="flex-row items-center gap-2 mb-2.5">
+              <Text style={{ fontSize: 16 }}>📋</Text>
+              <Text className="text-xs font-bold text-purple-900 dark:text-purple-200">
+                Orçamento Aguardando Aprovação
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => approveQuote()}
+              disabled={approvingQuote}
+              className="py-3 rounded-xl bg-green-600 dark:bg-green-500 items-center justify-center shadow-sm"
+            >
+              {approvingQuote ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <Text className="text-white font-bold text-sm">
+                  ✅ Aprovar Orçamento (Gerar OS)
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Banner somente-leitura */}
         {isClosed && (

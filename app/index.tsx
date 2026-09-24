@@ -33,6 +33,7 @@ export default function IdentificationScreen() {
   const [plate, setPlate] = useState('');
   const [model, setModel] = useState('');
   const [mileage, setMileage] = useState('');
+  const [orderType, setOrderType] = useState<'quote' | 'open'>('quote');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const hasContent = plate.length > 0 || model.length > 0 || mileage.length > 0;
@@ -47,14 +48,15 @@ export default function IdentificationScreen() {
   }
 
   const { mutate: createOrder, isPending } = useMutation({
-    mutationFn: api.createOrder,
+    mutationFn: (vars: { vehicle: { plate: string; model: string; mileage: number }; status: 'quote' | 'open' }) =>
+      api.createOrder(vars.vehicle, vars.status),
     onSuccess: (order) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.push(`/order/${order.id}`);
     },
     onError: () => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setErrors((prev) => ({ ...prev, submit: 'Erro ao abrir OS. Verifique a conexão.' }));
+      setErrors((prev) => ({ ...prev, submit: 'Erro ao abrir. Verifique a conexão.' }));
     },
   });
 
@@ -82,9 +84,12 @@ export default function IdentificationScreen() {
       return;
     }
     createOrder({
-      plate: cleanPlate(plate),
-      model: model.trim(),
-      mileage: parseInt(mileage.replace(/\D/g, ''), 10),
+      vehicle: {
+        plate: cleanPlate(plate),
+        model: model.trim(),
+        mileage: parseInt(mileage.replace(/\D/g, ''), 10),
+      },
+      status: orderType,
     });
   }
 
@@ -129,7 +134,7 @@ export default function IdentificationScreen() {
               )}
               {tenants.length > 1 && (
                 <TouchableOpacity
-                  onPress={() => router.push('/select-tenant')}
+                  onPress={() => router.push('/select-tenant' as any)}
                   className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800"
                 >
                   <Text style={{ fontSize: 14 }}>🏪</Text>
@@ -205,6 +210,46 @@ export default function IdentificationScreen() {
 
         {/* Card do formulário */}
         <View className="bg-white dark:bg-slate-800 rounded-3xl p-5 shadow-sm border border-gray-100 dark:border-slate-700">
+
+          {/* Seleção do Tipo: Orçamento vs OS */}
+          <View className="mb-5">
+            <Text className={labelStyle}>Tipo de Atendimento</Text>
+            <View className="flex-row gap-2.5">
+              <TouchableOpacity
+                onPress={() => setOrderType('quote')}
+                activeOpacity={0.8}
+                className={`flex-1 py-3 px-2 rounded-2xl items-center border ${
+                  orderType === 'quote'
+                    ? 'border-purple-500 bg-purple-50 dark:bg-purple-950/40'
+                    : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60'
+                }`}
+              >
+                <Text style={{ fontSize: 18 }}>📋</Text>
+                <Text className={`text-xs font-bold mt-1 ${
+                  orderType === 'quote' ? 'text-purple-700 dark:text-purple-300' : 'text-gray-500 dark:text-slate-400'
+                }`}>
+                  Orçamento
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setOrderType('open')}
+                activeOpacity={0.8}
+                className={`flex-1 py-3 px-2 rounded-2xl items-center border ${
+                  orderType === 'open'
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40'
+                    : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60'
+                }`}
+              >
+                <Text style={{ fontSize: 18 }}>🔧</Text>
+                <Text className={`text-xs font-bold mt-1 ${
+                  orderType === 'open' ? 'text-blue-700 dark:text-blue-300' : 'text-gray-500 dark:text-slate-400'
+                }`}>
+                  Ordem de Serviço
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {/* Placa */}
           <View className="mb-5">
@@ -286,15 +331,15 @@ export default function IdentificationScreen() {
           activeOpacity={0.8}
           className={`mt-6 py-4 rounded-2xl items-center ${
             isPending || !plateValid
-              ? 'bg-blue-300 dark:bg-blue-900'
-              : 'bg-blue-600 dark:bg-blue-500'
+              ? orderType === 'quote' ? 'bg-purple-300 dark:bg-purple-900' : 'bg-blue-300 dark:bg-blue-900'
+              : orderType === 'quote' ? 'bg-purple-600 dark:bg-purple-500' : 'bg-blue-600 dark:bg-blue-500'
           }`}
         >
           {isPending ? (
             <ActivityIndicator color="#ffffff" />
           ) : (
             <Text className="text-white font-bold text-base">
-              Abrir Ordem de Serviço
+              {orderType === 'quote' ? '📋 Criar Orçamento' : '🔧 Abrir Ordem de Serviço'}
             </Text>
           )}
         </TouchableOpacity>
