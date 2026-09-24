@@ -146,6 +146,8 @@ export default function Vendas() {
                   {[
                     { label: 'Dinheiro',       val: detalhe.vr_dinheiro },
                     { label: 'Cartão',         val: detalhe.vr_cartao },
+                    { label: 'PIX CNPJ',       val: detalhe.vr_pix },
+                    { label: 'NOTA',           val: detalhe.vr_nota },
                     { label: 'Cheque',         val: detalhe.vr_cheque },
                     { label: 'Carnê',          val: detalhe.vr_carne },
                     { label: 'Ticket',         val: detalhe.vr_ticket },

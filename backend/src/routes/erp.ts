@@ -244,6 +244,7 @@ router.get('/vendas', async (req, res) => {
   const [rows] = await pool.query<any>(
     `SELECT v.id, v.controle, v.data_venda, v.vr_total, v.vr_adicional,
             v.vr_dinheiro, v.vr_cheque, v.vr_cartao, v.vr_carne, v.vr_ticket,
+            COALESCE(v.vr_pix, 0) as vr_pix, COALESCE(v.vr_nota, 0) as vr_nota,
             v.em_aberto, v.parcelas, v.id_cliente,
             COALESCE(c.nome_cliente, 'Consumidor') as nome_cliente
      FROM mv_vendas v
@@ -264,6 +265,8 @@ router.get('/vendas', async (req, res) => {
       vr_cartao: Number(r.vr_cartao),
       vr_carne: Number(r.vr_carne),
       vr_ticket: Number(r.vr_ticket),
+      vr_pix: Number(r.vr_pix ?? 0),
+      vr_nota: Number(r.vr_nota ?? 0),
     })),
     total: Number(total),
     pages: Math.ceil(total / limit),
@@ -290,6 +293,8 @@ router.get('/vendas/:controle', async (req, res) => {
   res.json({
     ...venda,
     vr_total: Number(venda.vr_total),
+    vr_pix: Number(venda.vr_pix ?? 0),
+    vr_nota: Number(venda.vr_nota ?? 0),
     itens: itens.map((i: any) => ({
       ...i,
       valor: Number(i.valor),
@@ -309,6 +314,8 @@ router.post('/vendas', async (req, res) => {
       vr_cartao = 0,
       vr_carne = 0,
       vr_ticket = 0,
+      vr_pix = 0,
+      vr_nota = 0,
       vr_adicional = 0,
       parcelas = 1,
       id_login = 1,
@@ -323,6 +330,8 @@ router.post('/vendas', async (req, res) => {
       vr_cartao?: number;
       vr_carne?: number;
       vr_ticket?: number;
+      vr_pix?: number;
+      vr_nota?: number;
       vr_adicional?: number;
       parcelas?: number;
       id_login?: number;
@@ -342,24 +351,27 @@ router.post('/vendas', async (req, res) => {
     const data_venda = now.toISOString().slice(0, 10);
 
     const vr_total = itens.reduce((s, i) => s + i.valor * i.quant, 0) + Number(vr_adicional);
-    const em_aberto = vr_carne > 0 ? 1 : 0;
+    const em_aberto = (vr_nota > 0 || vr_carne > 0) ? 1 : 0;
 
     // Detect primary payment mode for cod_lancamento mapping
+    // 1: Dinheiro, 7: Cartão, 11: PIX/Transferência, 10: Duplicata/Nota, 2: Cheque, 5: Carnê, 8: Ticket
     const codLancamento =
+      vr_pix > 0 ? 11 :
       vr_cartao > 0 ? (vr_cartao === vr_total ? 7 : 1) :
-      vr_cheque  > 0 ? 2 :
-      vr_carne   > 0 ? 5 :
-      vr_ticket  > 0 ? 8 : 1;
+      vr_nota > 0 ? 10 :
+      vr_cheque > 0 ? 2 :
+      vr_carne > 0 ? 5 :
+      vr_ticket > 0 ? 8 : 1;
 
     const [vendaResult] = await pool.query<any>(
       `INSERT INTO mv_vendas
          (controle, data_venda, parcelas, id_cliente, id_cliente_convenio,
           id_login, terminal, turno, vr_total, vr_adicional,
-          vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket,
+          vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket, vr_pix, vr_nota,
           em_aberto, vr_pagto_parcial, cod_lancamento)
-       VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
+       VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
       [controle, data_venda, parcelas, id_cliente, id_login, terminal, turno,
-       vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket,
+       vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket, vr_pix, vr_nota,
        em_aberto, codLancamento]
     );
     const id_venda = vendaResult.insertId;

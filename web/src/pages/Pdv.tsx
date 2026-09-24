@@ -23,12 +23,11 @@ interface CartItem {
 interface Pagamento {
   dinheiro: string
   cartao: string
-  cheque: string
-  carne: string
-  ticket: string
+  pix: string
+  nota: string
 }
 
-const PAG_VAZIO: Pagamento = { dinheiro: '', cartao: '', cheque: '', carne: '', ticket: '' }
+const PAG_VAZIO: Pagamento = { dinheiro: '', cartao: '', pix: '', nota: '' }
 
 export default function Pdv() {
   const { currentTenant } = useAuth()
@@ -112,9 +111,8 @@ export default function Pdv() {
       const pag = {
         vr_dinheiro: parseNum(pagamento.dinheiro),
         vr_cartao:   parseNum(pagamento.cartao),
-        vr_cheque:   parseNum(pagamento.cheque),
-        vr_carne:    parseNum(pagamento.carne),
-        vr_ticket:   parseNum(pagamento.ticket),
+        vr_pix:      parseNum(pagamento.pix),
+        vr_nota:     parseNum(pagamento.nota),
         vr_adicional: -(parseNum(desconto)),
         id_cliente: cliente?.id ?? 0,
         itens,
@@ -421,13 +419,12 @@ export default function Pdv() {
         <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 space-y-2.5 flex-1">
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Pagamento</p>
 
-          {(['dinheiro', 'cartao', 'cheque', 'carne', 'ticket'] as (keyof Pagamento)[]).map(key => {
+          {(['dinheiro', 'cartao', 'pix', 'nota'] as (keyof Pagamento)[]).map(key => {
             const labels: Record<keyof Pagamento, string> = {
               dinheiro: '💵 Dinheiro',
               cartao:   '💳 Cartão',
-              cheque:   '📝 Cheque',
-              carne:    '📋 Carnê',
-              ticket:   '🎫 Ticket',
+              pix:      '⚡ PIX CNPJ',
+              nota:     '📝 NOTA',
             }
             return (
               <div key={key} className="flex items-center justify-between gap-2">

@@ -135,6 +135,25 @@ async function runMigrations() {
     console.log('[migration] mv_caixa.tenant_id adicionada (registros existentes → tenant 1)');
   }
 
+  // vr_pix e vr_nota em mv_vendas
+  const [[{ cntPix }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntPix FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_vendas' AND COLUMN_NAME = 'vr_pix'`
+  );
+  if (Number(cntPix) === 0) {
+    await pool.query('ALTER TABLE mv_vendas ADD COLUMN vr_pix DOUBLE(18,4) NULL DEFAULT 0');
+    console.log('[migration] mv_vendas.vr_pix adicionada');
+  }
+
+  const [[{ cntNota }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntNota FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_vendas' AND COLUMN_NAME = 'vr_nota'`
+  );
+  if (Number(cntNota) === 0) {
+    await pool.query('ALTER TABLE mv_vendas ADD COLUMN vr_nota DOUBLE(18,4) NULL DEFAULT 0');
+    console.log('[migration] mv_vendas.vr_nota adicionada');
+  }
+
   // Adiciona role 'caixa' ao ENUM se ainda não existir
   await pool.query(
     `ALTER TABLE users MODIFY COLUMN role ENUM('owner','manager','operator','caixa') NOT NULL DEFAULT 'operator'`

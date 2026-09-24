@@ -93,8 +93,10 @@ export const erpApi = {
     id_cliente?: number
     itens: { id_produto: number; valor: number; quant: number }[]
     vr_dinheiro?: number
-    vr_cheque?: number
     vr_cartao?: number
+    vr_pix?: number
+    vr_nota?: number
+    vr_cheque?: number
     vr_carne?: number
     vr_ticket?: number
     vr_adicional?: number
