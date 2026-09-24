@@ -195,8 +195,27 @@ router.post('/instalacoes', async (req, res) => {
   res.status(201).json({ id: result.insertId, nome: nome.trim(), sigla: sigla.trim().toUpperCase(), ordem: ordem ?? 0 });
 });
 
+router.put('/instalacoes/:id', async (req, res) => {
+  const { nome, sigla, ordem } = req.body as { nome?: string; sigla?: string; ordem?: number };
+  if (!nome?.trim() || !sigla?.trim()) {
+    res.status(400).json({ message: 'Nome e sigla são obrigatórios' });
+    return;
+  }
+  await pool.query(
+    'UPDATE instalacoes SET nome = ?, sigla = ?, ordem = ? WHERE id = ?',
+    [nome.trim(), sigla.trim().toUpperCase(), Number(ordem) || 0, req.params.id]
+  );
+  res.json({
+    id: Number(req.params.id),
+    nome: nome.trim(),
+    sigla: sigla.trim().toUpperCase(),
+    ordem: Number(ordem) || 0,
+  });
+});
+
 router.delete('/instalacoes/:id', async (req, res) => {
   await pool.query('DELETE FROM produto_instalacao WHERE instalacao_id = ?', [req.params.id]);
+  await pool.query('UPDATE os_order_items SET instalacao_id = NULL WHERE instalacao_id = ?', [req.params.id]);
   await pool.query('DELETE FROM instalacoes WHERE id = ?', [req.params.id]);
   res.status(204).end();
 });

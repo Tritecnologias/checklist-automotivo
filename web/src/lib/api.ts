@@ -185,6 +185,8 @@ export const adminApi = {
     adminRequest<Instalacao[]>('/admin/instalacoes'),
   createInstalacao: (data: { nome: string; sigla: string; ordem?: number }) =>
     adminRequest<Instalacao>('/admin/instalacoes', { method: 'POST', body: JSON.stringify(data) }),
+  updateInstalacao: (id: number, data: { nome: string; sigla: string; ordem?: number }) =>
+    adminRequest<Instalacao>(`/admin/instalacoes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteInstalacao: (id: number) =>
     adminRequest(`/admin/instalacoes/${id}`, { method: 'DELETE' }),
   getProductInstalacoes: (id: number) =>

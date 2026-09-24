@@ -170,13 +170,18 @@ async function runMigrations() {
       PRIMARY KEY (\`produto_id\`, \`instalacao_id\`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
-  await pool.query(`
-    INSERT IGNORE INTO instalacoes (id, nome, sigla, ordem) VALUES
-    (1, 'Lado Direito',  'LD', 1),
-    (2, 'Lado Esquerdo', 'LE', 2),
-    (3, 'Dianteiro',     'D',  3),
-    (4, 'Traseiro',      'T',  4)
-  `);
+  const [[{ cntInstInit }]] = await pool.query<any>(
+    'SELECT COUNT(*) as cntInstInit FROM instalacoes'
+  );
+  if (Number(cntInstInit) === 0) {
+    await pool.query(`
+      INSERT INTO instalacoes (id, nome, sigla, ordem) VALUES
+      (1, 'Lado Direito',  'LD', 1),
+      (2, 'Lado Esquerdo', 'LE', 2),
+      (3, 'Dianteiro',     'D',  3),
+      (4, 'Traseiro',      'T',  4)
+    `);
+  }
 
   console.log('[migration] tabelas de multi-tenant OK');
 }
