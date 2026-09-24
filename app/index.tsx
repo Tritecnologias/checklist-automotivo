@@ -23,6 +23,27 @@ function ListIcon() {
   );
 }
 
+function formatPhone(val: string) {
+  const digits = val.replace(/\D/g, '').slice(0, 11);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
+}
+
+function formatDoc(val: string) {
+  const digits = val.replace(/\D/g, '').slice(0, 14);
+  if (digits.length <= 11) {
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+    if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9, 11)}`;
+  } else {
+    if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`;
+  }
+}
+
 // ─── Identificação do Veículo ─────────────────────────────────────────────────
 
 export default function IdentificationScreen() {
@@ -33,10 +54,16 @@ export default function IdentificationScreen() {
   const [plate, setPlate] = useState('');
   const [model, setModel] = useState('');
   const [mileage, setMileage] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [clientDoc, setClientDoc] = useState('');
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupFeedback, setLookupFeedback] = useState<string | null>(null);
   const [orderType, setOrderType] = useState<'quote' | 'open'>('quote');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const hasContent = plate.length > 0 || model.length > 0 || mileage.length > 0;
+  const hasContent = plate.length > 0 || model.length > 0 || mileage.length > 0 || clientName.length > 0;
   const plateValid = cleanPlate(plate).length >= 7;
 
   function handleClear() {
@@ -44,25 +71,68 @@ export default function IdentificationScreen() {
     setPlate('');
     setModel('');
     setMileage('');
+    setClientName('');
+    setClientPhone('');
+    setClientDoc('');
+    setClientId(null);
+    setLookupFeedback(null);
     setErrors({});
   }
 
+  async function triggerLookup(plateText: string) {
+    const clean = cleanPlate(plateText);
+    if (clean.length < 7) return;
+    setLookupLoading(true);
+    setLookupFeedback(null);
+    try {
+      const res = await api.lookupPlate(clean);
+      if (res.found) {
+        if (res.vehicle?.model && !model) setModel(res.vehicle.model);
+        if (res.vehicle?.mileage && !mileage) setMileage(String(res.vehicle.mileage));
+        if (res.client) {
+          setClientId(res.client.id ?? null);
+          if (res.client.name) setClientName(res.client.name);
+          if (res.client.phone) setClientPhone(res.client.phone);
+          if (res.client.document) setClientDoc(res.client.document);
+        }
+        setLookupFeedback('✨ Cadastro localizado! Valide os dados abaixo.');
+      } else {
+        setClientId(null);
+        setLookupFeedback('🆕 Novo cadastro! Informe o contato do cliente.');
+      }
+    } catch {
+      // silencioso
+    } finally {
+      setLookupLoading(false);
+    }
+  }
+
   const { mutate: createOrder, isPending } = useMutation({
-    mutationFn: (vars: { vehicle: { plate: string; model: string; mileage: number }; status: 'quote' | 'open' }) =>
-      api.createOrder(vars.vehicle, vars.status),
+    mutationFn: (vars: {
+      vehicle: { plate: string; model: string; mileage: number };
+      client: { id?: number | null; name: string; phone: string; document?: string };
+      status: 'quote' | 'open';
+    }) => api.createOrder(vars.vehicle, vars.status, vars.client),
     onSuccess: (order) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.push(`/order/${order.id}`);
     },
-    onError: () => {
+    onError: (err: any) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setErrors((prev) => ({ ...prev, submit: 'Erro ao abrir. Verifique a conexão.' }));
+      setErrors((prev) => ({
+        ...prev,
+        submit: err?.message || 'Erro ao abrir OS. Verifique a conexão.',
+      }));
     },
   });
 
   function handlePlateChange(text: string) {
     setErrors((prev) => ({ ...prev, plate: '' }));
-    setPlate(formatPlate(text));
+    const formatted = formatPlate(text);
+    setPlate(formatted);
+    if (cleanPlate(formatted).length >= 7) {
+      triggerLookup(formatted);
+    }
   }
 
   function validate() {
@@ -70,6 +140,10 @@ export default function IdentificationScreen() {
     const rawPlate = cleanPlate(plate);
 
     if (rawPlate.length < 7) next.plate = 'Placa inválida (mín. 7 caracteres).';
+    if (!clientName.trim()) next.clientName = 'Informe o nome completo do cliente.';
+    if (!clientPhone.trim() || clientPhone.replace(/\D/g, '').length < 8) {
+      next.clientPhone = 'Informe o telefone/WhatsApp do cliente.';
+    }
     if (!model.trim()) next.model = 'Informe o modelo do veículo.';
     const km = parseInt(mileage.replace(/\D/g, ''), 10);
     if (!mileage || isNaN(km) || km < 0) next.mileage = 'Quilometragem inválida.';
@@ -88,6 +162,12 @@ export default function IdentificationScreen() {
         plate: cleanPlate(plate),
         model: model.trim(),
         mileage: parseInt(mileage.replace(/\D/g, ''), 10),
+      },
+      client: {
+        id: clientId,
+        name: clientName.trim(),
+        phone: clientPhone.trim(),
+        document: clientDoc.trim() || undefined,
       },
       status: orderType,
     });
@@ -256,18 +336,25 @@ export default function IdentificationScreen() {
             <Text className={labelStyle}>
               Placa <Text className="text-red-500">*</Text>
             </Text>
-            <TextInput
-              className={errors.plate ? inputErrorStyle : inputStyle}
-              value={plate}
-              onChangeText={handlePlateChange}
-              placeholder="ABC-1234 ou ABC1D23"
-              placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              maxLength={8}
-              returnKeyType="next"
-              autoFocus
-            />
+            <View className="relative justify-center">
+              <TextInput
+                className={errors.plate ? inputErrorStyle : inputStyle}
+                value={plate}
+                onChangeText={handlePlateChange}
+                placeholder="ABC-1234 ou ABC1D23"
+                placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                maxLength={8}
+                returnKeyType="next"
+                autoFocus
+              />
+              {lookupLoading && (
+                <View className="absolute right-4">
+                  <ActivityIndicator size="small" color="#3b82f6" />
+                </View>
+              )}
+            </View>
             {errors.plate ? (
               <Text className={errorStyle}>⚠ {errors.plate}</Text>
             ) : plate.length > 0 && !plateValid ? (
@@ -275,45 +362,124 @@ export default function IdentificationScreen() {
                 Continue digitando… ({cleanPlate(plate).length}/7)
               </Text>
             ) : null}
+            {lookupFeedback && (
+              <View className="mt-2.5 p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50">
+                <Text className="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                  {lookupFeedback}
+                </Text>
+              </View>
+            )}
           </View>
 
-          {/* Modelo */}
-          <View className="mb-5">
-            <Text className={labelStyle}>Modelo</Text>
-            <TextInput
-              className={inputStyle}
-              value={model}
-              onChangeText={(t) => {
-                setErrors((prev) => ({ ...prev, model: '' }));
-                setModel(t);
-              }}
-              placeholder="Ex: Volkswagen Gol 1.0 2019"
-              placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
-              autoCorrect={false}
-              returnKeyType="next"
-            />
-            {errors.model ? <Text className={errorStyle}>{errors.model}</Text> : null}
+          {/* Dados do Cliente */}
+          <View className="mb-5 pt-4 border-t border-gray-100 dark:border-slate-700/60">
+            <Text className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-slate-500 mb-3">
+              👤 Dados do Cliente
+            </Text>
+
+            {/* Nome do Cliente */}
+            <View className="mb-3.5">
+              <Text className={labelStyle}>
+                Nome completo <Text className="text-red-500">*</Text>
+              </Text>
+              <TextInput
+                className={errors.clientName ? inputErrorStyle : inputStyle}
+                value={clientName}
+                onChangeText={(t) => {
+                  setErrors((prev) => ({ ...prev, clientName: '' }));
+                  setClientName(t);
+                }}
+                placeholder="Nome completo do cliente"
+                placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
+                autoCapitalize="words"
+                returnKeyType="next"
+              />
+              {errors.clientName ? <Text className={errorStyle}>⚠ {errors.clientName}</Text> : null}
+            </View>
+
+            {/* Telefone / WhatsApp */}
+            <View className="mb-3.5">
+              <Text className={labelStyle}>
+                Telefone / WhatsApp <Text className="text-red-500">*</Text>
+              </Text>
+              <TextInput
+                className={errors.clientPhone ? inputErrorStyle : inputStyle}
+                value={clientPhone}
+                onChangeText={(t) => {
+                  setErrors((prev) => ({ ...prev, clientPhone: '' }));
+                  setClientPhone(formatPhone(t));
+                }}
+                placeholder="(00) 00000-0000"
+                placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
+                keyboardType="phone-pad"
+                returnKeyType="next"
+              />
+              {errors.clientPhone ? <Text className={errorStyle}>⚠ {errors.clientPhone}</Text> : null}
+            </View>
+
+            {/* CPF / CNPJ (Opcional) */}
+            <View>
+              <Text className={labelStyle}>CPF / CNPJ (opcional)</Text>
+              <TextInput
+                className={inputStyle}
+                value={clientDoc}
+                onChangeText={(t) => setClientDoc(formatDoc(t))}
+                placeholder="000.000.000-00 ou 00.000.000/0000-00"
+                placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
+                keyboardType="numeric"
+                returnKeyType="next"
+              />
+            </View>
           </View>
 
-          {/* Quilometragem */}
-          <View>
-            <Text className={labelStyle}>Quilometragem atual</Text>
-            <TextInput
-              className={inputStyle}
-              value={mileage}
-              onChangeText={(t) => {
-                setErrors((prev) => ({ ...prev, mileage: '' }));
-                setMileage(t.replace(/\D/g, ''));
-              }}
-              placeholder="Ex: 85000"
-              placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
-              keyboardType="numeric"
-              returnKeyType="done"
-              onSubmitEditing={handleSubmit}
-            />
-            {errors.mileage ? (
-              <Text className={errorStyle}>{errors.mileage}</Text>
-            ) : null}
+          {/* Dados do Veículo */}
+          <View className="pt-4 border-t border-gray-100 dark:border-slate-700/60">
+            <Text className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-slate-500 mb-3">
+              🚗 Dados do Veículo
+            </Text>
+
+            {/* Modelo */}
+            <View className="mb-3.5">
+              <Text className={labelStyle}>
+                Modelo do veículo <Text className="text-red-500">*</Text>
+              </Text>
+              <TextInput
+                className={errors.model ? inputErrorStyle : inputStyle}
+                value={model}
+                onChangeText={(t) => {
+                  setErrors((prev) => ({ ...prev, model: '' }));
+                  setModel(t);
+                }}
+                placeholder="Ex: Volkswagen Gol 1.0 2019"
+                placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
+                autoCorrect={false}
+                returnKeyType="next"
+              />
+              {errors.model ? <Text className={errorStyle}>⚠ {errors.model}</Text> : null}
+            </View>
+
+            {/* Quilometragem */}
+            <View>
+              <Text className={labelStyle}>
+                Quilometragem atual <Text className="text-red-500">*</Text>
+              </Text>
+              <TextInput
+                className={errors.mileage ? inputErrorStyle : inputStyle}
+                value={mileage}
+                onChangeText={(t) => {
+                  setErrors((prev) => ({ ...prev, mileage: '' }));
+                  setMileage(t.replace(/\D/g, ''));
+                }}
+                placeholder="Ex: 85000"
+                placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
+                keyboardType="numeric"
+                returnKeyType="done"
+                onSubmitEditing={handleSubmit}
+              />
+              {errors.mileage ? (
+                <Text className={errorStyle}>⚠ {errors.mileage}</Text>
+              ) : null}
+            </View>
           </View>
         </View>
 

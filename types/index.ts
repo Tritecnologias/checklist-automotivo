@@ -6,6 +6,13 @@ export interface Vehicle {
   mileage: number;
 }
 
+export interface OrderClient {
+  id?: number | null;
+  name: string;
+  phone: string;
+  document?: string | null;
+}
+
 // ─── Ordem de Serviço ────────────────────────────────────────────────────────
 
 export type OrderStatus = 'quote' | 'open' | 'in_progress' | 'closed';
@@ -14,6 +21,7 @@ export interface Order {
   id: string;
   tenantId: number;
   vehicle: Vehicle;
+  client?: OrderClient | null;
   items: OrderItem[];
   status: OrderStatus;
   vendaControle?: string | null;

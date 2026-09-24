@@ -219,6 +219,7 @@ export default function OrderScreen() {
     if (!order) return;
     const lines: string[] = [
       `OS #${order.id.split('-')[0].toUpperCase()}`,
+      ...(order.client?.name ? [`Cliente: ${order.client.name}${order.client.phone ? ` (${order.client.phone})` : ''}`] : []),
       `Veículo: ${order.vehicle.plate} — ${order.vehicle.model}`,
       `Quilometragem: ${order.vehicle.mileage.toLocaleString('pt-BR')} km`,
       '',
@@ -394,6 +395,11 @@ export default function OrderScreen() {
             <Text className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">
               {order.vehicle.model} · {order.vehicle.mileage.toLocaleString('pt-BR')} km
             </Text>
+            {order.client?.name ? (
+              <Text className="text-xs font-semibold text-blue-600 dark:text-blue-400 mt-1">
+                👤 {order.client.name} {order.client.phone ? `· 📞 ${order.client.phone}` : ''}
+              </Text>
+            ) : null}
             <Text className="text-xs text-gray-400 dark:text-slate-500 mt-1">
               Aberta: {fmtDate(order.createdAt as unknown as string)}
               {isClosed && order.closedAt

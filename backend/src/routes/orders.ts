@@ -328,18 +328,49 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  const clientName = String(client?.name ?? '').trim();
-  const clientPhone = String(client?.phone ?? '').trim();
-  const clientDoc = client?.document ? String(client.document).trim() : null;
+  let clientName = String(client?.name ?? '').trim();
+  let clientPhone = String(client?.phone ?? '').trim();
+  let clientDoc = client?.document ? String(client.document).trim() : null;
+  let finalClientId: number | null = client?.id ? Number(client.id) : null;
 
-  if (!clientName) {
-    res.status(400).json({ message: 'Nome completo do cliente é obrigatório' });
-    return;
-  }
-
-  if (!clientPhone || clientPhone.replace(/\D/g, '').length < 8) {
-    res.status(400).json({ message: 'Número de telefone / WhatsApp do cliente é obrigatório' });
-    return;
+  // Se o cliente foi enviado pelo novo frontend, valida obrigatoriedade
+  if (client && client.name !== undefined) {
+    if (!clientName) {
+      res.status(400).json({ message: 'Nome completo do cliente é obrigatório' });
+      return;
+    }
+    if (!clientPhone || clientPhone.replace(/\D/g, '').length < 8) {
+      res.status(400).json({ message: 'Número de telefone / WhatsApp do cliente é obrigatório' });
+      return;
+    }
+  } else {
+    // Compatibilidade com versões do app mobile anteriores ao rebuild:
+    // Tenta resolver cliente automaticamente pela placa
+    const cleanPlate = vehicle.plate.replace(/[-\s]/g, '').toUpperCase();
+    try {
+      const [cRows] = await pool.query<any>(
+        `SELECT id, nome_cliente, telefone, celular, cpf_cnpj, inf_adicional
+         FROM cad_clientes
+         WHERE inativo = 0 AND (
+           REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
+           OR UPPER(inf_adicional) LIKE ?
+         )
+         LIMIT 1`,
+        [`%${cleanPlate}%`, `%${cleanPlate}%`]
+      );
+      if (cRows.length > 0) {
+        finalClientId = Number(cRows[0].id);
+        clientName = stripPlate(cRows[0].nome_cliente) || cRows[0].nome_cliente;
+        clientPhone = cRows[0].celular || cRows[0].telefone || '';
+        clientDoc = cRows[0].cpf_cnpj || null;
+      } else {
+        clientName = `Cliente ${vehicle.plate.toUpperCase()}`;
+        clientPhone = '';
+      }
+    } catch {
+      clientName = `Cliente ${vehicle.plate.toUpperCase()}`;
+      clientPhone = '';
+    }
   }
 
   const allowedStatus = ['quote', 'open', 'in_progress', 'closed'];
