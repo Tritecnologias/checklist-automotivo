@@ -758,26 +758,27 @@ router.get('/pdv/os/:id', async (req, res) => {
     }
 
     if (!cliente) {
-      // Fallback: tenta encontrar cliente pela placa no cadastro
+      // Fallback: tenta encontrar cliente pela placa no cadastro (somente placa válida completa de 7 caracteres)
       const cleanPlate = order.plate.replace(/[-\s]/g, '').toUpperCase();
-      const [[cRow]] = await pool.query<any>(
-        `SELECT id, nome_cliente, cpf_cnpj, telefone, celular
-         FROM cad_clientes
-         WHERE inativo = 0 AND (
-           REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
-           OR inf_adicional LIKE ?
-         )
-         LIMIT 1`,
-        [`%${cleanPlate}%`, `%${cleanPlate}%`]
-      );
-      if (cRow) {
-        cliente = {
-          id: Number(cRow.id),
-          nome_cliente: stripPlate(cRow.nome_cliente) || cRow.nome_cliente,
-          cpf_cnpj: cRow.cpf_cnpj ?? '',
-          telefone: cRow.telefone ?? '',
-          celular: cRow.celular ?? '',
-        };
+      if (cleanPlate.length === 7 && /^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(cleanPlate)) {
+        const [[cRow]] = await pool.query<any>(
+          `SELECT id, nome_cliente, cpf_cnpj, telefone, celular
+           FROM cad_clientes
+           WHERE inativo = 0 AND (
+             REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
+           )
+           LIMIT 1`,
+          [`%${cleanPlate}%`]
+        );
+        if (cRow) {
+          cliente = {
+            id: Number(cRow.id),
+            nome_cliente: stripPlate(cRow.nome_cliente) || cRow.nome_cliente,
+            cpf_cnpj: cRow.cpf_cnpj ?? '',
+            telefone: cRow.telefone ?? '',
+            celular: cRow.celular ?? '',
+          };
+        }
       }
     }
 

@@ -239,13 +239,14 @@ router.get('/lookup-plate/:plate', async (req: Request, res: Response) => {
   const rawPlate = String(req.params.plate ?? '');
   const cleanPlate = rawPlate.replace(/[-\s]/g, '').toUpperCase();
 
-  if (cleanPlate.length < 3) {
+  // Uma placa veicular no Brasil possui exatamente 7 caracteres (padrão tradicional AAA9999 ou Mercosul AAA9A99)
+  if (cleanPlate.length !== 7 || !/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(cleanPlate)) {
     res.json({ found: false });
     return;
   }
 
   try {
-    // 1. Tenta buscar na última OS gravada
+    // 1. Tenta buscar na última OS gravada (correspondência exata da placa)
     const [orders] = await pool.execute<any[]>(
       `SELECT plate, model, mileage, client_id, client_name, client_phone, client_document
        FROM os_orders
@@ -257,16 +258,17 @@ router.get('/lookup-plate/:plate', async (req: Request, res: Response) => {
     const lastOrder = (orders as any[])[0];
 
     // 2. Tenta buscar no cadastro de clientes (cad_clientes)
+    // Busca exclusivamente pela placa completa de 7 caracteres no nome do cliente (onde a placa fica armazenada no formato legado).
+    // NÃO busca em inf_adicional para evitar falsos positivos com modelos de veículos.
     const [clients] = await pool.execute<any[]>(
       `SELECT id, nome_cliente, telefone, celular, cpf_cnpj, inf_adicional
        FROM cad_clientes
        WHERE inativo = 0 AND (
          REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
-         OR UPPER(inf_adicional) LIKE ?
        )
        ORDER BY id DESC
        LIMIT 1`,
-      [`%${cleanPlate}%`, `%${cleanPlate}%`]
+      [`%${cleanPlate}%`]
     );
     const clientRow = (clients as any[])[0];
 
@@ -345,29 +347,33 @@ router.post('/', async (req: Request, res: Response) => {
     }
   } else {
     // Compatibilidade com versões do app mobile anteriores ao rebuild:
-    // Tenta resolver cliente automaticamente pela placa
+    // Tenta resolver cliente automaticamente pela placa (somente placa válida completa de 7 caracteres)
     const cleanPlate = vehicle.plate.replace(/[-\s]/g, '').toUpperCase();
-    try {
-      const [cRows] = await pool.query<any>(
-        `SELECT id, nome_cliente, telefone, celular, cpf_cnpj, inf_adicional
-         FROM cad_clientes
-         WHERE inativo = 0 AND (
-           REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
-           OR UPPER(inf_adicional) LIKE ?
-         )
-         LIMIT 1`,
-        [`%${cleanPlate}%`, `%${cleanPlate}%`]
-      );
-      if (cRows.length > 0) {
-        finalClientId = Number(cRows[0].id);
-        clientName = stripPlate(cRows[0].nome_cliente) || cRows[0].nome_cliente;
-        clientPhone = cRows[0].celular || cRows[0].telefone || '';
-        clientDoc = cRows[0].cpf_cnpj || null;
-      } else {
+    if (cleanPlate.length === 7 && /^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(cleanPlate)) {
+      try {
+        const [cRows] = await pool.query<any>(
+          `SELECT id, nome_cliente, telefone, celular, cpf_cnpj, inf_adicional
+           FROM cad_clientes
+           WHERE inativo = 0 AND (
+             REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
+           )
+           LIMIT 1`,
+          [`%${cleanPlate}%`]
+        );
+        if (cRows.length > 0) {
+          finalClientId = Number(cRows[0].id);
+          clientName = stripPlate(cRows[0].nome_cliente) || cRows[0].nome_cliente;
+          clientPhone = cRows[0].celular || cRows[0].telefone || '';
+          clientDoc = cRows[0].cpf_cnpj || null;
+        } else {
+          clientName = `Cliente ${vehicle.plate.toUpperCase()}`;
+          clientPhone = '';
+        }
+      } catch {
         clientName = `Cliente ${vehicle.plate.toUpperCase()}`;
         clientPhone = '';
       }
-    } catch {
+    } else {
       clientName = `Cliente ${vehicle.plate.toUpperCase()}`;
       clientPhone = '';
     }

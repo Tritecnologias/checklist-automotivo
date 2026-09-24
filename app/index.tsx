@@ -87,8 +87,8 @@ export default function IdentificationScreen() {
     try {
       const res = await api.lookupPlate(clean);
       if (res.found) {
-        if (res.vehicle?.model && !model) setModel(res.vehicle.model);
-        if (res.vehicle?.mileage && !mileage) setMileage(String(res.vehicle.mileage));
+        if (res.vehicle?.model) setModel(res.vehicle.model);
+        if (res.vehicle?.mileage) setMileage(String(res.vehicle.mileage));
         if (res.client) {
           setClientId(res.client.id ?? null);
           if (res.client.name) setClientName(res.client.name);
@@ -98,6 +98,11 @@ export default function IdentificationScreen() {
         setLookupFeedback('✨ Cadastro localizado! Valide os dados abaixo.');
       } else {
         setClientId(null);
+        setClientName('');
+        setClientPhone('');
+        setClientDoc('');
+        setModel('');
+        setMileage('');
         setLookupFeedback('🆕 Novo cadastro! Informe o contato do cliente.');
       }
     } catch {
@@ -130,8 +135,17 @@ export default function IdentificationScreen() {
     setErrors((prev) => ({ ...prev, plate: '' }));
     const formatted = formatPlate(text);
     setPlate(formatted);
-    if (cleanPlate(formatted).length >= 7) {
+    const clean = cleanPlate(formatted);
+    if (clean.length === 7) {
       triggerLookup(formatted);
+    } else if (clean.length < 7 && clientId) {
+      setClientId(null);
+      setClientName('');
+      setClientPhone('');
+      setClientDoc('');
+      setModel('');
+      setMileage('');
+      setLookupFeedback(null);
     }
   }
 

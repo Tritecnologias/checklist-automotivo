@@ -52,7 +52,7 @@ export default function Orders() {
 
   const triggerLookup = async (plateToSearch: string) => {
     const clean = plateToSearch.replace(/[-\s]/g, '').toUpperCase()
-    if (clean.length < 3) return
+    if (clean.length !== 7 || !/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(clean)) return
     setLookupLoading(true)
     setLookupFeedback(null)
     try {
@@ -69,6 +69,11 @@ export default function Orders() {
         setLookupFeedback('Cadastro localizado! Valide e confirme o telefone e nome do cliente para prosseguir.')
       } else {
         setNewClientId(null)
+        setNewClientName('')
+        setNewClientPhone('')
+        setNewClientDoc('')
+        setNewModel('')
+        setNewMileage('')
         setLookupFeedback('Novo veículo / cliente! Preencha a ficha cadastral abaixo.')
       }
     } catch {
@@ -386,12 +391,22 @@ export default function Orders() {
                     onChange={(e) => {
                       const v = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '')
                       setNewPlate(v)
-                      if (v.replace(/[-\s]/g, '').length >= 7) {
+                      const clean = v.replace(/[-\s]/g, '')
+                      if (clean.length === 7) {
                         triggerLookup(v)
+                      } else if (clean.length < 7 && newClientId) {
+                        setNewClientId(null)
+                        setNewClientName('')
+                        setNewClientPhone('')
+                        setNewClientDoc('')
+                        setNewModel('')
+                        setNewMileage('')
+                        setLookupFeedback(null)
                       }
                     }}
                     onBlur={() => {
-                      if (newPlate.replace(/[-\s]/g, '').length >= 3) {
+                      const clean = newPlate.replace(/[-\s]/g, '')
+                      if (clean.length === 7) {
                         triggerLookup(newPlate)
                       }
                     }}
@@ -401,7 +416,7 @@ export default function Orders() {
                   <button
                     type="button"
                     onClick={() => triggerLookup(newPlate)}
-                    disabled={lookupLoading || !newPlate.trim()}
+                    disabled={lookupLoading || newPlate.replace(/[-\s]/g, '').length !== 7}
                     className="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-xs font-medium text-slate-200 rounded-xl transition-colors shrink-0"
                   >
                     🔍 Buscar
