@@ -26,10 +26,34 @@ export default function OrderDetail() {
   const [pinError, setPinError]           = useState('')
   const [verifying, setVerifying]         = useState(false)
 
+  // ── estado de edição de cliente ───────────────────────────────────────────
+  const [editClientOpen, setEditClientOpen]   = useState(false)
+  const [editClientName, setEditClientName]   = useState('')
+  const [editClientPhone, setEditClientPhone] = useState('')
+  const [editClientDoc, setEditClientDoc]     = useState('')
+  const [editClientError, setEditClientError] = useState('')
+
   const { data: order, isLoading, isError } = useQuery({
     queryKey: ['order', id],
     queryFn: () => api.getOrder(id!),
     enabled: !!id,
+  })
+
+  // ── Editar Cliente ───────────────────────────────────────────────────────
+  const { mutate: handleUpdateClient, isPending: savingClient } = useMutation({
+    mutationFn: () => api.updateOrderClient(id!, {
+      name: editClientName.trim(),
+      phone: editClientPhone.trim(),
+      document: editClientDoc.trim() || undefined,
+    }),
+    onSuccess: (updated) => {
+      qc.setQueryData(['order', id], updated)
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      setEditClientOpen(false)
+    },
+    onError: (err: any) => {
+      setEditClientError(err.message || 'Erro ao atualizar dados do cliente')
+    },
   })
 
   // ── Aprovar Orçamento (Virar OS) ─────────────────────────────────────────
@@ -165,57 +189,135 @@ export default function OrderDetail() {
         </div>
       )}
 
-      {/* Header card */}
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
-        <div className="flex items-start justify-between flex-wrap gap-4">
-          <div>
-            <p className="text-xs font-mono text-slate-500 uppercase">
-              {isQuote ? 'ORÇAMENTO' : 'OS'} #{order.id.split('-')[0].toUpperCase()}
-            </p>
-            <h1 className="text-3xl font-bold text-white mt-1">{order.vehicle.plate}</h1>
-            <p className="text-slate-400 mt-1">
-              {order.vehicle.model} &middot; {order.vehicle.mileage.toLocaleString('pt-BR')} km
-            </p>
-            <div className="flex items-center flex-wrap gap-3 mt-3">
-              <StatusBadge status={order.status} />
-              {order.vendaControle && (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/70 text-emerald-300 border border-emerald-700/60">
-                  <span>💰</span> Faturada no PDV (#{order.vendaControle})
+      {/* Header cards: Veículo e Cliente */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Veículo e status */}
+        <div className="lg:col-span-2 bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between">
+          <div className="flex items-start justify-between flex-wrap gap-4">
+            <div>
+              <p className="text-xs font-mono text-slate-500 uppercase">
+                {isQuote ? 'ORÇAMENTO' : 'OS'} #{order.id.split('-')[0].toUpperCase()}
+              </p>
+              <h1 className="text-3xl font-bold text-white mt-1">{order.vehicle.plate}</h1>
+              <p className="text-slate-400 mt-1">
+                {order.vehicle.model} &middot; {order.vehicle.mileage.toLocaleString('pt-BR')} km
+              </p>
+              <div className="flex items-center flex-wrap gap-3 mt-3">
+                <StatusBadge status={order.status} />
+                {order.vendaControle && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/70 text-emerald-300 border border-emerald-700/60">
+                    <span>💰</span> Faturada no PDV (#{order.vendaControle})
+                  </span>
+                )}
+                <span className="text-xs text-slate-500">
+                  Criada em {fmtDate(order.createdAt)}
                 </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {isQuote ? (
+                <button
+                  onClick={() => approveQuote()}
+                  disabled={approving}
+                  className="px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-green-900/30 transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  <span>✅</span>
+                  <span>{approving ? 'Aprovando…' : 'Aprovar Orçamento'}</span>
+                </button>
+              ) : !isClosed ? (
+                <button
+                  onClick={() => setConfirmClose(true)}
+                  className="px-4 py-2 bg-red-900/40 hover:bg-red-900/60 text-red-400 rounded-xl text-sm font-semibold border border-red-800/50 transition-colors"
+                >
+                  🔒 Encerrar OS
+                </button>
+              ) : (
+                <button
+                  onClick={handleReopenClick}
+                  disabled={reopening}
+                  className="px-4 py-2 bg-amber-900/40 hover:bg-amber-900/60 text-amber-400 rounded-xl text-sm font-semibold border border-amber-800/50 transition-colors disabled:opacity-50"
+                >
+                  🔓 Reabrir OS
+                </button>
               )}
-              <span className="text-xs text-slate-500">
-                Criada em {fmtDate(order.createdAt)}
-              </span>
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-3">
-            {isQuote ? (
-              <button
-                onClick={() => approveQuote()}
-                disabled={approving}
-                className="px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-green-900/30 transition-all flex items-center gap-2 disabled:opacity-50"
-              >
-                <span>✅</span>
-                <span>{approving ? 'Aprovando…' : 'Aprovar Orçamento'}</span>
-              </button>
-            ) : !isClosed ? (
-              <button
-                onClick={() => setConfirmClose(true)}
-                className="px-4 py-2 bg-red-900/40 hover:bg-red-900/60 text-red-400 rounded-xl text-sm font-semibold border border-red-800/50 transition-colors"
-              >
-                🔒 Encerrar OS
-              </button>
+        {/* Card do Cliente */}
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <span>👤</span> Dados do Cliente
+              </span>
+              {!isClosed && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditClientName(order.client?.name || '')
+                    setEditClientPhone(order.client?.phone || '')
+                    setEditClientDoc(order.client?.document || '')
+                    setEditClientError('')
+                    setEditClientOpen(true)
+                  }}
+                  className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-lg transition-colors border border-slate-700"
+                >
+                  ✏️ Editar
+                </button>
+              )}
+            </div>
+
+            {order.client?.name ? (
+              <div className="space-y-2">
+                <p className="text-base font-bold text-white leading-snug">
+                  {order.client.name}
+                </p>
+                {order.client.phone && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <a
+                      href={`tel:${order.client.phone.replace(/\D/g, '')}`}
+                      className="text-xs text-slate-300 font-mono hover:text-white transition-colors"
+                    >
+                      📞 {order.client.phone}
+                    </a>
+                    <a
+                      href={`https://wa.me/55${order.client.phone.replace(/\D/g, '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] bg-emerald-950/70 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded-full hover:bg-emerald-900/80 transition-colors flex items-center gap-1"
+                    >
+                      <span>💬</span> WhatsApp
+                    </a>
+                  </div>
+                )}
+                {order.client.document && (
+                  <p className="text-xs text-slate-500 font-mono">
+                    Doc: {order.client.document}
+                  </p>
+                )}
+              </div>
             ) : (
-              <button
-                onClick={handleReopenClick}
-                disabled={reopening}
-                className="px-4 py-2 bg-amber-900/40 hover:bg-amber-900/60 text-amber-400 rounded-xl text-sm font-semibold border border-amber-800/50 transition-colors disabled:opacity-50"
-              >
-                🔓 Reabrir OS
-              </button>
+              <div className="py-2">
+                <p className="text-sm text-amber-400 font-medium flex items-center gap-1.5">
+                  <span>⚠️</span> Cliente não cadastrado
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Clique em Editar para registrar nome e telefone.
+                </p>
+              </div>
             )}
           </div>
+
+          {order.client?.id ? (
+            <div className="pt-3 mt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Cadastro ERP:</span>
+              <span className="font-mono text-slate-400">ID #{order.client.id}</span>
+            </div>
+          ) : (
+            <div className="pt-2"></div>
+          )}
         </div>
       </div>
 
@@ -291,6 +393,95 @@ export default function OrderDetail() {
                 {verifying || reopening ? 'Verificando…' : 'Confirmar'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal — Editar Dados do Cliente */}
+      {editClientOpen && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-md shadow-2xl">
+            <h2 className="text-lg font-bold text-white mb-1">Editar Dados do Cliente</h2>
+            <p className="text-slate-400 text-xs mb-4">
+              Atualize as informações de contato do cliente desta Ordem de Serviço.
+            </p>
+
+            {editClientError && (
+              <div className="bg-red-950/50 border border-red-800 rounded-xl px-4 py-2.5 text-red-300 text-xs mb-4">
+                {editClientError}
+              </div>
+            )}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (!editClientName.trim()) {
+                  setEditClientError('Nome do cliente é obrigatório')
+                  return
+                }
+                if (!editClientPhone.trim() || editClientPhone.replace(/\D/g, '').length < 8) {
+                  setEditClientError('Telefone válido é obrigatório (mínimo 8 dígitos)')
+                  return
+                }
+                handleUpdateClient()
+              }}
+              className="space-y-3.5"
+            >
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Nome Completo *
+                </label>
+                <input
+                  type="text"
+                  value={editClientName}
+                  onChange={(e) => setEditClientName(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Telefone / WhatsApp *
+                </label>
+                <input
+                  type="text"
+                  value={editClientPhone}
+                  onChange={(e) => setEditClientPhone(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  CPF / CNPJ <span className="text-[10px] text-slate-500">(opcional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={editClientDoc}
+                  onChange={(e) => setEditClientDoc(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditClientOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingClient}
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold disabled:opacity-50"
+                >
+                  {savingClient ? 'Salvando…' : 'Salvar Alterações'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

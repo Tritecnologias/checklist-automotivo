@@ -72,6 +72,22 @@ async function runMigrations() {
     console.log('[migration] os_orders.discount_amount adicionada');
   }
 
+  // colunas de cliente em os_orders (nome, telefone, documento, id)
+  const [[{ cntClientCol }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntClientCol FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'client_name'`
+  );
+  if (Number(cntClientCol) === 0) {
+    await pool.query(`
+      ALTER TABLE os_orders
+      ADD COLUMN client_id INT NULL,
+      ADD COLUMN client_name VARCHAR(150) NULL,
+      ADD COLUMN client_phone VARCHAR(30) NULL,
+      ADD COLUMN client_document VARCHAR(30) NULL
+    `);
+    console.log('[migration] os_orders colunas de cliente adicionadas');
+  }
+
   // tenant_id em os_orders
   const [[{ cnt3 }]] = await pool.query<any>(
     `SELECT COUNT(*) as cnt3 FROM information_schema.COLUMNS

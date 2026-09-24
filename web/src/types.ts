@@ -186,6 +186,13 @@ export interface Vehicle {
   mileage: number
 }
 
+export interface OrderClient {
+  id?: number | null
+  name: string
+  phone: string
+  document?: string | null
+}
+
 export interface OrderItem {
   id: string
   productId?: number | null
@@ -204,6 +211,7 @@ export interface Order {
   id: string
   tenantId: number
   vehicle: Vehicle
+  client?: OrderClient | null
   status: OrderStatus
   vendaControle?: string | null
   items: OrderItem[]
@@ -222,6 +230,7 @@ export interface OsEncerradaPdv {
   plate: string
   model: string
   mileage: number
+  client?: OrderClient | null
   status: string
   totalAmount: number
   laborAmount: number

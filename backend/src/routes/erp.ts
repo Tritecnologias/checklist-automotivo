@@ -364,6 +364,14 @@ router.post('/vendas', async (req, res) => {
       vr_carne > 0 ? 5 :
       vr_ticket > 0 ? 8 : 1;
 
+    let finalClienteId = Number(id_cliente ?? 0);
+    if (finalClienteId === 0 && id_os) {
+      const [[osRowForClient]] = await pool.query<any>('SELECT client_id FROM os_orders WHERE id = ?', [id_os]);
+      if (osRowForClient?.client_id) {
+        finalClienteId = Number(osRowForClient.client_id);
+      }
+    }
+
     const [vendaResult] = await pool.query<any>(
       `INSERT INTO mv_vendas
          (controle, data_venda, parcelas, id_cliente, id_cliente_convenio,
@@ -371,7 +379,7 @@ router.post('/vendas', async (req, res) => {
           vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket, vr_pix, vr_nota,
           em_aberto, vr_pagto_parcial, cod_lancamento)
        VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
-      [controle, data_venda, parcelas, id_cliente, id_login, terminal, turno,
+      [controle, data_venda, parcelas, finalClienteId, id_login, terminal, turno,
        vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket, vr_pix, vr_nota,
        em_aberto, codLancamento]
     );
@@ -385,7 +393,7 @@ router.post('/vendas', async (req, res) => {
             id_cliente, id_cliente_convenio, id_produto, id_grade,
             modo_lancamento, terminal, turno, valor, quant, vr_total, vr_cotacao, desconto_total_venda)
          VALUES (?,?,1,?,?,?,0,?,0,0,?,?,?,?,?,1,'N')`,
-        [data_venda, controle, codLancamento, id_login, id_cliente,
+        [data_venda, controle, codLancamento, id_login, finalClienteId,
          item.id_produto, terminal, turno, item.valor, item.quant, item_total]
       );
       const tenantId = getErpWriteTenantId(req);
@@ -411,7 +419,7 @@ router.post('/vendas', async (req, res) => {
        VALUES (2,1,?,?,?,?,?,1,?,?,0,0,0,?,?,?,0)`,
       [codLancamento, em_aberto === 0 ? 1 : 0,
        controle, controle, hist, data_venda,
-       vr_total, id_cliente, id_venda,
+       vr_total, finalClienteId, id_venda,
        em_aberto === 0 ? data_venda : null]
     );
 
@@ -603,6 +611,18 @@ router.get('/busca/clientes', async (req, res) => {
 
 // ── BUSCA OS ENCERRADA PARA PDV ─────────────────────────────────────────────
 
+const PLATE_RE = /\b([A-Z]{3})[\-\s]?([0-9][A-Z0-9][0-9]{2})\b/i;
+
+function extractPlate(nome: string): string | null {
+  const m = String(nome || '').match(PLATE_RE);
+  if (!m) return null;
+  return (m[1] + m[2]).toUpperCase();
+}
+
+function stripPlate(nome: string): string {
+  return String(nome || '').replace(PLATE_RE, '').replace(/\s+/g, ' ').trim();
+}
+
 async function getMaoDeObraProduto(): Promise<{ id: number; nome_produto: string; cod_barra: string }> {
   const [[prod]] = await pool.query<any>(
     "SELECT id, nome_produto, cod_barra FROM cad_produtos WHERE nome_produto LIKE '%MAO DE OBRA%' OR nome_produto LIKE '%MÃO DE OBRA%' LIMIT 1"
@@ -626,8 +646,14 @@ router.get('/pdv/os-encerradas', async (req, res) => {
 
     if (search.length >= 2) {
       const clean = search.replace(/[-\s]/g, '').toUpperCase();
-      whereParts.push("(REPLACE(REPLACE(UPPER(o.plate), '-', ''), ' ', '') LIKE ? OR o.model LIKE ? OR o.id LIKE ?)");
-      params.push(`%${clean}%`, `%${search}%`, `%${search}%`);
+      whereParts.push(`(
+        REPLACE(REPLACE(UPPER(o.plate), '-', ''), ' ', '') LIKE ?
+        OR o.model LIKE ?
+        OR o.id LIKE ?
+        OR UPPER(COALESCE(o.client_name, '')) LIKE ?
+        OR COALESCE(o.client_phone, '') LIKE ?
+      )`);
+      params.push(`%${clean}%`, `%${search}%`, `%${search}%`, `%${search.toUpperCase()}%`, `%${search}%`);
     }
 
     if (apenasPendentes) {
@@ -641,6 +667,7 @@ router.get('/pdv/os-encerradas', async (req, res) => {
              COALESCE(ABS(v.vr_adicional), o.discount_amount, 0) AS discount_amount,
              o.labor_amount, o.created_at, o.updated_at, o.closed_at,
              o.venda_controle,
+             o.client_id, o.client_name, o.client_phone, o.client_document,
              (SELECT COUNT(*) FROM os_order_items oi WHERE oi.order_id = o.id) AS total_itens
       FROM os_orders o
       LEFT JOIN mv_vendas v ON v.controle = o.venda_controle
@@ -665,6 +692,12 @@ router.get('/pdv/os-encerradas', async (req, res) => {
       closedAt: r.closed_at,
       vendaControle: r.venda_controle ?? null,
       totalItens: Number(r.total_itens ?? 0),
+      client: {
+        id: r.client_id ? Number(r.client_id) : null,
+        name: r.client_name || '',
+        phone: r.client_phone || '',
+        document: r.client_document || null,
+      },
     })));
   } catch (err) {
     console.error('GET /erp/pdv/os-encerradas error:', err);
@@ -695,18 +728,58 @@ router.get('/pdv/os/:id', async (req, res) => {
       [order.id]
     );
 
-    // Tenta encontrar cliente pela placa no cadastro
-    const cleanPlate = order.plate.replace(/[-\s]/g, '').toUpperCase();
-    const [[cliente]] = await pool.query<any>(
-      `SELECT id, nome_cliente, cpf_cnpj, telefone, celular
-       FROM cad_clientes
-       WHERE inativo = 0 AND (
-         REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
-         OR inf_adicional LIKE ?
-       )
-       LIMIT 1`,
-      [`%${cleanPlate}%`, `%${cleanPlate}%`]
-    );
+    // Resolve dados do cliente prioritariamente da OS e cad_clientes
+    let cliente: any = null;
+
+    if (order.client_id) {
+      const [[cRow]] = await pool.query<any>(
+        'SELECT id, nome_cliente, cpf_cnpj, telefone, celular FROM cad_clientes WHERE id = ?',
+        [order.client_id]
+      );
+      if (cRow) {
+        cliente = {
+          id: Number(cRow.id),
+          nome_cliente: order.client_name || stripPlate(cRow.nome_cliente) || cRow.nome_cliente,
+          cpf_cnpj: cRow.cpf_cnpj || order.client_document || '',
+          telefone: cRow.telefone || order.client_phone || '',
+          celular: cRow.celular || order.client_phone || '',
+        };
+      }
+    }
+
+    if (!cliente && (order.client_name || order.client_phone)) {
+      cliente = {
+        id: 0,
+        nome_cliente: order.client_name || 'Cliente',
+        cpf_cnpj: order.client_document || '',
+        telefone: order.client_phone || '',
+        celular: order.client_phone || '',
+      };
+    }
+
+    if (!cliente) {
+      // Fallback: tenta encontrar cliente pela placa no cadastro
+      const cleanPlate = order.plate.replace(/[-\s]/g, '').toUpperCase();
+      const [[cRow]] = await pool.query<any>(
+        `SELECT id, nome_cliente, cpf_cnpj, telefone, celular
+         FROM cad_clientes
+         WHERE inativo = 0 AND (
+           REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
+           OR inf_adicional LIKE ?
+         )
+         LIMIT 1`,
+        [`%${cleanPlate}%`, `%${cleanPlate}%`]
+      );
+      if (cRow) {
+        cliente = {
+          id: Number(cRow.id),
+          nome_cliente: stripPlate(cRow.nome_cliente) || cRow.nome_cliente,
+          cpf_cnpj: cRow.cpf_cnpj ?? '',
+          telefone: cRow.telefone ?? '',
+          celular: cRow.celular ?? '',
+        };
+      }
+    }
 
     // Formata itens para o PDV
     const itensPdv: any[] = [];
@@ -780,18 +853,6 @@ router.get('/pdv/os/:id', async (req, res) => {
 });
 
 // ── CLIENTES ─────────────────────────────────────────────────────────────────
-
-const PLATE_RE = /\b([A-Z]{3})[\-\s]?([0-9][A-Z0-9][0-9]{2})\b/i;
-
-function extractPlate(nome: string): string | null {
-  const m = String(nome || '').match(PLATE_RE);
-  if (!m) return null;
-  return (m[1] + m[2]).toUpperCase();
-}
-
-function stripPlate(nome: string): string {
-  return String(nome || '').replace(PLATE_RE, '').replace(/\s+/g, ' ').trim();
-}
 
 function getClienteTenantId(req: Request): number | null {
   const user = req.user as JwtPayload | undefined;

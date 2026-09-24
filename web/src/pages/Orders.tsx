@@ -31,12 +31,18 @@ export default function Orders() {
   const [statusFilter, setStatus] = useState<StatusFilter>('all')
 
   // Estado do Modal de Nova OS / Orçamento
-  const [modalOpen, setModalOpen]     = useState(false)
-  const [newPlate, setNewPlate]       = useState('')
-  const [newModel, setNewModel]       = useState('')
-  const [newMileage, setNewMileage]   = useState('')
-  const [newStatus, setNewStatus]     = useState<'quote' | 'open'>('quote')
-  const [createError, setCreateError] = useState('')
+  const [modalOpen, setModalOpen]           = useState(false)
+  const [newPlate, setNewPlate]             = useState('')
+  const [newModel, setNewModel]             = useState('')
+  const [newMileage, setNewMileage]         = useState('')
+  const [newClientName, setNewClientName]   = useState('')
+  const [newClientPhone, setNewClientPhone] = useState('')
+  const [newClientDoc, setNewClientDoc]     = useState('')
+  const [newClientId, setNewClientId]       = useState<number | null>(null)
+  const [newStatus, setNewStatus]           = useState<'quote' | 'open'>('quote')
+  const [createError, setCreateError]       = useState('')
+  const [lookupLoading, setLookupLoading]   = useState(false)
+  const [lookupFeedback, setLookupFeedback] = useState<string | null>(null)
 
   const { data: orders = [], isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['orders'],
@@ -44,17 +50,61 @@ export default function Orders() {
     staleTime: 30_000,
   })
 
+  const triggerLookup = async (plateToSearch: string) => {
+    const clean = plateToSearch.replace(/[-\s]/g, '').toUpperCase()
+    if (clean.length < 3) return
+    setLookupLoading(true)
+    setLookupFeedback(null)
+    try {
+      const res = await api.lookupPlate(clean)
+      if (res.found) {
+        if (res.vehicle?.model) setNewModel(res.vehicle.model)
+        if (res.vehicle?.mileage) setNewMileage(String(res.vehicle.mileage))
+        if (res.client) {
+          setNewClientId(res.client.id ?? null)
+          if (res.client.name) setNewClientName(res.client.name)
+          if (res.client.phone) setNewClientPhone(res.client.phone)
+          if (res.client.document) setNewClientDoc(res.client.document)
+        }
+        setLookupFeedback('Cadastro localizado! Valide e confirme o telefone e nome do cliente para prosseguir.')
+      } else {
+        setNewClientId(null)
+        setLookupFeedback('Novo veículo / cliente! Preencha a ficha cadastral abaixo.')
+      }
+    } catch {
+      // silencioso
+    } finally {
+      setLookupLoading(false)
+    }
+  }
+
   const { mutate: handleCreate, isPending: creating } = useMutation({
     mutationFn: () => {
       const plate = newPlate.trim().toUpperCase()
       const model = newModel.trim()
       const mileage = parseInt(newMileage.replace(/\D/g, ''), 10) || 0
+      const clientName = newClientName.trim()
+      const clientPhone = newClientPhone.trim()
+      const clientDoc = newClientDoc.trim()
 
       if (!plate) throw new Error('A placa do veículo é obrigatória')
       if (!model) throw new Error('O modelo do veículo é obrigatório')
       if (mileage < 0) throw new Error('Quilometragem inválida')
+      if (!clientName) throw new Error('O Nome Completo do cliente é obrigatório')
+      if (!clientPhone || clientPhone.replace(/\D/g, '').length < 8) {
+        throw new Error('Informe um número de Telefone / WhatsApp válido (mínimo 8 dígitos)')
+      }
 
-      return api.createOrder({ plate, model, mileage }, newStatus)
+      return api.createOrder(
+        { plate, model, mileage },
+        newStatus,
+        {
+          id: newClientId,
+          name: clientName,
+          phone: clientPhone,
+          document: clientDoc || undefined,
+        }
+      )
     },
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['orders'] })
@@ -62,6 +112,11 @@ export default function Orders() {
       setNewPlate('')
       setNewModel('')
       setNewMileage('')
+      setNewClientName('')
+      setNewClientPhone('')
+      setNewClientDoc('')
+      setNewClientId(null)
+      setLookupFeedback(null)
       setCreateError('')
       navigate(`/orders/${created.id}`)
     },
@@ -78,7 +133,9 @@ export default function Orders() {
         return (
           o.vehicle.plate.toLowerCase().includes(q) ||
           o.vehicle.model.toLowerCase().includes(q) ||
-          o.id.toLowerCase().includes(q)
+          o.id.toLowerCase().includes(q) ||
+          (o.client?.name && o.client.name.toLowerCase().includes(q)) ||
+          (o.client?.phone && o.client.phone.includes(q))
         )
       }
       return true
@@ -106,6 +163,14 @@ export default function Orders() {
           <button
             onClick={() => {
               setCreateError('')
+              setLookupFeedback(null)
+              setNewPlate('')
+              setNewModel('')
+              setNewMileage('')
+              setNewClientName('')
+              setNewClientPhone('')
+              setNewClientDoc('')
+              setNewClientId(null)
               setModalOpen(true)
             }}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold text-white shadow-lg shadow-blue-900/30 transition-all flex items-center gap-2"
@@ -119,7 +184,7 @@ export default function Orders() {
       <div className="flex flex-col sm:flex-row gap-3">
         <input
           type="text"
-          placeholder="Buscar por placa, modelo ou código…"
+          placeholder="Buscar por placa, modelo, cliente ou telefone…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 bg-slate-800 border border-slate-700 text-white placeholder-slate-500 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -163,7 +228,7 @@ export default function Orders() {
                 <thead>
                   <tr className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-800">
                     <th className="px-5 py-3">Registro</th>
-                    <th className="px-5 py-3">Placa</th>
+                    <th className="px-5 py-3">Placa / Cliente</th>
                     <th className="px-5 py-3">Modelo</th>
                     <th className="px-5 py-3">Km</th>
                     <th className="px-5 py-3">Status</th>
@@ -178,7 +243,21 @@ export default function Orders() {
                       <td className="px-5 py-3 font-mono text-slate-400 text-xs">
                         #{o.id.split('-')[0].toUpperCase()}
                       </td>
-                      <td className="px-5 py-3 font-bold text-white">{o.vehicle.plate}</td>
+                      <td className="px-5 py-3">
+                        <div className="font-bold text-white tracking-wide">{o.vehicle.plate}</div>
+                        {o.client?.name ? (
+                          <div className="text-xs text-slate-300 font-medium truncate max-w-[200px]" title={o.client.name}>
+                            👤 {o.client.name}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-500 italic">Cliente s/ cadastro</div>
+                        )}
+                        {o.client?.phone && (
+                          <div className="text-[11px] text-slate-400 font-mono">
+                            📞 {o.client.phone}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-5 py-3 text-slate-300 max-w-[180px] truncate">
                         {o.vehicle.model}
                       </td>
@@ -220,11 +299,20 @@ export default function Orders() {
 
       {/* Modal — Criar Novo Orçamento ou OS */}
       {modalOpen && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
-          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-md shadow-2xl">
-            <h2 className="text-xl font-bold text-white mb-1">Novo Atendimento</h2>
-            <p className="text-slate-400 text-xs mb-5">
-              Crie um novo orçamento para enviar ao cliente ou abra uma Ordem de Serviço direta.
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4 py-6 overflow-y-auto">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-lg shadow-2xl my-auto">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-xl font-bold text-white">Novo Atendimento</h2>
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="text-slate-400 hover:text-white text-lg px-2"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-slate-400 text-xs mb-4">
+              Identifique o veículo e registre ou valide obrigatoriamente os dados de contato do cliente logo no arranque do atendimento.
             </p>
 
             {createError && (
@@ -249,7 +337,7 @@ export default function Orders() {
                   <button
                     type="button"
                     onClick={() => setNewStatus('quote')}
-                    className={`py-3 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-1 ${
+                    className={`py-2.5 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-1 ${
                       newStatus === 'quote'
                         ? 'border-purple-500 bg-purple-950/40 text-purple-200 ring-2 ring-purple-500/30'
                         : 'border-slate-800 bg-slate-800/40 text-slate-400 hover:bg-slate-800 hover:text-white'
@@ -263,7 +351,7 @@ export default function Orders() {
                   <button
                     type="button"
                     onClick={() => setNewStatus('open')}
-                    className={`py-3 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-1 ${
+                    className={`py-2.5 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-1 ${
                       newStatus === 'open'
                         ? 'border-blue-500 bg-blue-950/40 text-blue-200 ring-2 ring-blue-500/30'
                         : 'border-slate-800 bg-slate-800/40 text-slate-400 hover:bg-slate-800 hover:text-white'
@@ -276,68 +364,179 @@ export default function Orders() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Placa do Veículo *
-                </label>
-                <input
-                  type="text"
-                  maxLength={8}
-                  placeholder="Ex: ABC1D23"
-                  value={newPlate}
-                  onChange={(e) => setNewPlate(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-800 border border-slate-700 text-white font-mono uppercase rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
+              {/* Placa do Veículo com Consulta Automática */}
+              <div className="bg-slate-800/40 border border-slate-700/60 rounded-xl p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-200">
+                    Placa do Veículo *
+                  </label>
+                  {lookupLoading && (
+                    <span className="text-[11px] text-blue-400 animate-pulse">
+                      🔍 Consultando placa…
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    maxLength={8}
+                    placeholder="Ex: ABC1D23"
+                    value={newPlate}
+                    onChange={(e) => {
+                      const v = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '')
+                      setNewPlate(v)
+                      if (v.replace(/[-\s]/g, '').length >= 7) {
+                        triggerLookup(v)
+                      }
+                    }}
+                    onBlur={() => {
+                      if (newPlate.replace(/[-\s]/g, '').length >= 3) {
+                        triggerLookup(newPlate)
+                      }
+                    }}
+                    className="flex-1 bg-slate-800 border border-slate-700 text-white font-mono uppercase text-base rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => triggerLookup(newPlate)}
+                    disabled={lookupLoading || !newPlate.trim()}
+                    className="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-xs font-medium text-slate-200 rounded-xl transition-colors shrink-0"
+                  >
+                    🔍 Buscar
+                  </button>
+                </div>
+
+                {lookupFeedback && (
+                  <div className={`text-xs px-3 py-2 rounded-lg flex items-center gap-2 ${
+                    newClientId || lookupFeedback.includes('localizado')
+                      ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/50'
+                      : 'bg-blue-950/60 text-blue-300 border border-blue-800/50'
+                  }`}>
+                    <span>{newClientId ? '✅' : 'ℹ️'}</span>
+                    <span>{lookupFeedback}</span>
+                  </div>
+                )}
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Modelo do Veículo *
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Honda Civic 2.0 EXL 2021"
-                  value={newModel}
-                  onChange={(e) => setNewModel(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
+              {/* Seção Dados do Cliente (Obrigatórios) */}
+              <div className="bg-slate-800/40 border border-slate-700/60 rounded-xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase text-slate-300 tracking-wider flex items-center gap-1.5">
+                    <span>👤</span> Contato do Cliente (Obrigatório)
+                  </h3>
+                  {newClientId && (
+                    <span className="text-[10px] bg-emerald-900/60 text-emerald-300 border border-emerald-700/50 px-2 py-0.5 rounded-full font-mono">
+                      Cliente #{newClientId}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Nome Completo do Cliente *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: João da Silva Santos"
+                      value={newClientName}
+                      onChange={(e) => setNewClientName(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Telefone / WhatsApp *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: (31) 98888-7777"
+                      value={newClientPhone}
+                      onChange={(e) => setNewClientPhone(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">
+                      CPF / CNPJ <span className="text-[10px] text-slate-500">(opcional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: 000.000.000-00"
+                      value={newClientDoc}
+                      onChange={(e) => setNewClientDoc(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Quilometragem (Km) *
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="Ex: 45000"
-                  value={newMileage}
-                  onChange={(e) => setNewMileage(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
+              {/* Seção Dados do Veículo */}
+              <div className="bg-slate-800/40 border border-slate-700/60 rounded-xl p-3.5 space-y-3">
+                <h3 className="text-xs font-bold uppercase text-slate-300 tracking-wider flex items-center gap-1.5">
+                  <span>🚗</span> Dados do Veículo
+                </h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Modelo do Veículo *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Honda Civic 2.0 EXL"
+                      value={newModel}
+                      onChange={(e) => setNewModel(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Quilometragem (Km) *
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="Ex: 45000"
+                      value={newMileage}
+                      onChange={(e) => setNewMileage(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="flex gap-3 pt-3">
+              <div className="flex gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800"
+                  className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={creating}
-                  className={`flex-1 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 transition-colors ${
+                  className={`flex-1 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 transition-colors shadow-lg ${
                     newStatus === 'quote'
-                      ? 'bg-purple-600 hover:bg-purple-500'
-                      : 'bg-blue-600 hover:bg-blue-500'
+                      ? 'bg-purple-600 hover:bg-purple-500 shadow-purple-950/40'
+                      : 'bg-blue-600 hover:bg-blue-500 shadow-blue-950/40'
                   }`}
                 >
-                  {creating ? 'Criando…' : newStatus === 'quote' ? 'Criar Orçamento' : 'Criar Ordem de Serviço'}
+                  {creating
+                    ? 'Salvando…'
+                    : newStatus === 'quote'
+                    ? 'Criar Orçamento'
+                    : 'Criar Ordem de Serviço'}
                 </button>
               </div>
             </form>

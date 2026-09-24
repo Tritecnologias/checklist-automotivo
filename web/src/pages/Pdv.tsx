@@ -566,6 +566,13 @@ export default function Pdv() {
                           {os.model} &middot; <span className="text-slate-400">{os.mileage.toLocaleString('pt-BR')} km</span>
                         </p>
 
+                        {os.client?.name && (
+                          <p className="text-xs text-indigo-300 font-medium flex items-center gap-1.5">
+                            <span>👤</span> {os.client.name}
+                            {os.client.phone && <span className="text-slate-400 font-mono">({os.client.phone})</span>}
+                          </p>
+                        )}
+
                         <p className="text-xs text-slate-500">
                           Encerrada em: {fmtDate(os.closedAt || os.updatedAt)} &middot; {os.totalItens} item(ns)
                         </p>

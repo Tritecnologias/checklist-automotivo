@@ -1,5 +1,5 @@
 import type {
-  Order, Vehicle, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
+  Order, Vehicle, OrderClient, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse,
 } from '../types'
@@ -28,10 +28,29 @@ export const api = {
     return request<Order[]>(`/orders${q}`)
   },
   getOrder: (id: string) => request<Order>(`/orders/${id}`),
-  createOrder: (vehicle: Vehicle, status: 'quote' | 'open' = 'open') =>
+  lookupPlate: (plate: string) =>
+    request<{
+      found: boolean
+      vehicle?: Vehicle
+      client?: OrderClient
+      source?: string
+    }>(`/orders/lookup-plate/${encodeURIComponent(plate)}`),
+  createOrder: (
+    vehicle: Vehicle,
+    status: 'quote' | 'open' = 'open',
+    client?: OrderClient,
+  ) =>
     request<Order>('/orders', {
       method: 'POST',
-      body: JSON.stringify({ vehicle, status }),
+      body: JSON.stringify({ vehicle, status, client }),
+    }),
+  updateOrderClient: (
+    id: string,
+    client: { name: string; phone: string; document?: string },
+  ) =>
+    request<Order>(`/orders/${id}/client`, {
+      method: 'PATCH',
+      body: JSON.stringify(client),
     }),
   approveQuote: (id: string) =>
     request<Order>(`/orders/${id}/approve`, {

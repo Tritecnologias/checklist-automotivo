@@ -118,11 +118,23 @@ async function fetchItems(orderId: string): Promise<Record<string, unknown>[]> {
   return rows as Record<string, unknown>[];
 }
 
+const PLATE_RE = /\b([A-Z]{3})[\-\s]?([0-9][A-Z0-9][0-9]{2})\b/i;
+
+function stripPlate(nome: string): string {
+  return String(nome || '').replace(PLATE_RE, '').replace(/\s+/g, ' ').trim();
+}
+
 function formatOrder(order: Record<string, unknown>, items: Record<string, unknown>[]) {
   return {
     id: order.id,
     tenantId: Number(order.tenant_id),
     vehicle: { plate: order.plate, model: order.model, mileage: order.mileage },
+    client: {
+      id: order.client_id ? Number(order.client_id) : null,
+      name: (order.client_name as string) || '',
+      phone: (order.client_phone as string) || '',
+      document: (order.client_document as string) || null,
+    },
     status: order.status,
     vendaControle: (order.venda_controle as string | null) ?? null,
     items: items.map(i => ({
@@ -159,8 +171,14 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (search?.trim()) {
       const clean = search.replace(/[-\s]/g, '').toUpperCase();
-      whereParts.push("REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') LIKE ?");
-      params.push(`%${clean}%`);
+      const term = `%${search.trim()}%`;
+      whereParts.push(`(
+        REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') LIKE ?
+        OR UPPER(model) LIKE ?
+        OR UPPER(COALESCE(client_name, '')) LIKE ?
+        OR COALESCE(client_phone, '') LIKE ?
+      )`);
+      params.push(`%${clean}%`, term, term, term);
     }
 
     if (status?.trim()) {
@@ -193,6 +211,12 @@ router.get('/', async (req: Request, res: Response) => {
         id: o.id,
         tenantId: Number(o.tenant_id),
         vehicle: { plate: o.plate, model: o.model, mileage: o.mileage },
+        client: {
+          id: o.client_id ? Number(o.client_id) : null,
+          name: (o.client_name as string) || '',
+          phone: (o.client_phone as string) || '',
+          document: (o.client_document as string) || null,
+        },
         status: o.status,
         vendaControle: (o.venda_controle as string | null) ?? null,
         laborAmount: Number(o.labor_amount ?? 0),
@@ -209,16 +233,112 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /orders/lookup-plate/:plate ──────────────────────────────────────────
+
+router.get('/lookup-plate/:plate', async (req: Request, res: Response) => {
+  const rawPlate = String(req.params.plate ?? '');
+  const cleanPlate = rawPlate.replace(/[-\s]/g, '').toUpperCase();
+
+  if (cleanPlate.length < 3) {
+    res.json({ found: false });
+    return;
+  }
+
+  try {
+    // 1. Tenta buscar na última OS gravada
+    const [orders] = await pool.execute<any[]>(
+      `SELECT plate, model, mileage, client_id, client_name, client_phone, client_document
+       FROM os_orders
+       WHERE REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [cleanPlate]
+    );
+    const lastOrder = (orders as any[])[0];
+
+    // 2. Tenta buscar no cadastro de clientes (cad_clientes)
+    const [clients] = await pool.execute<any[]>(
+      `SELECT id, nome_cliente, telefone, celular, cpf_cnpj, inf_adicional
+       FROM cad_clientes
+       WHERE inativo = 0 AND (
+         REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
+         OR UPPER(inf_adicional) LIKE ?
+       )
+       ORDER BY id DESC
+       LIMIT 1`,
+      [`%${cleanPlate}%`, `%${cleanPlate}%`]
+    );
+    const clientRow = (clients as any[])[0];
+
+    if (!lastOrder && !clientRow) {
+      res.json({ found: false });
+      return;
+    }
+
+    const cleanClientName = clientRow
+      ? stripPlate(clientRow.nome_cliente) || clientRow.nome_cliente
+      : '';
+    const cleanClientPhone = clientRow
+      ? clientRow.celular || clientRow.telefone || ''
+      : '';
+    const cleanClientDoc = clientRow
+      ? clientRow.cpf_cnpj || ''
+      : '';
+
+    const resolvedClient = {
+      id: lastOrder?.client_id ?? clientRow?.id ?? null,
+      name: lastOrder?.client_name || cleanClientName || '',
+      phone: lastOrder?.client_phone || cleanClientPhone || '',
+      document: lastOrder?.client_document || cleanClientDoc || '',
+    };
+
+    const resolvedVehicle = {
+      plate: lastOrder?.plate || rawPlate.toUpperCase(),
+      model: lastOrder?.model || clientRow?.inf_adicional || '',
+      mileage: lastOrder?.mileage ? Number(lastOrder.mileage) : 0,
+    };
+
+    res.json({
+      found: true,
+      vehicle: resolvedVehicle,
+      client: resolvedClient,
+      source: lastOrder ? (clientRow ? 'os_and_cad_clientes' : 'os') : 'cad_clientes',
+    });
+  } catch (err) {
+    console.error('GET /orders/lookup-plate error:', err);
+    res.status(500).json({ message: 'Erro ao consultar placa' });
+  }
+});
+
 // ── POST /orders ────────────────────────────────────────────────────────────
 
 router.post('/', async (req: Request, res: Response) => {
-  const { vehicle, status = 'open' } = req.body as {
+  const {
+    vehicle,
+    client,
+    status = 'open',
+  } = req.body as {
     vehicle?: { plate?: string; model?: string; mileage?: number };
+    client?: { id?: number | null; name?: string; phone?: string; document?: string };
     status?: string;
   };
 
-  if (!vehicle?.plate || !vehicle?.model || !vehicle?.mileage) {
+  if (!vehicle?.plate || !vehicle?.model || vehicle?.mileage === undefined) {
     res.status(400).json({ message: 'Dados do veículo obrigatórios (plate, model, mileage)' });
+    return;
+  }
+
+  const clientName = String(client?.name ?? '').trim();
+  const clientPhone = String(client?.phone ?? '').trim();
+  const clientDoc = client?.document ? String(client.document).trim() : null;
+
+  if (!clientName) {
+    res.status(400).json({ message: 'Nome completo do cliente é obrigatório' });
+    return;
+  }
+
+  if (!clientPhone || clientPhone.replace(/\D/g, '').length < 8) {
+    res.status(400).json({ message: 'Número de telefone / WhatsApp do cliente é obrigatório' });
     return;
   }
 
@@ -230,15 +350,116 @@ router.post('/', async (req: Request, res: Response) => {
     const id  = crypto.randomUUID();
     const now = new Date().toISOString();
 
+    let finalClientId: number | null = client?.id ? Number(client.id) : null;
+
+    // Sincroniza / cadastra em cad_clientes
+    try {
+      if (finalClientId && finalClientId > 0) {
+        // Atualiza cliente existente com os dados validados
+        await pool.execute(
+          `UPDATE cad_clientes
+           SET telefone = COALESCE(NULLIF(?, ''), telefone),
+               celular  = COALESCE(NULLIF(?, ''), celular),
+               cpf_cnpj = COALESCE(NULLIF(?, ''), cpf_cnpj),
+               data_ultima_alteracao = CURDATE()
+           WHERE id = ?`,
+          [clientPhone, clientPhone, clientDoc, finalClientId]
+        );
+        await pool.query(
+          'INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) VALUES (?, ?)',
+          [finalClientId, tenantId]
+        ).catch(() => {});
+      } else {
+        // Tenta localizar por documento ou telefone
+        const cleanDoc = clientDoc ? clientDoc.replace(/\D/g, '') : '';
+        const cleanTel = clientPhone.replace(/\D/g, '');
+        let existingClient: any = null;
+
+        if (cleanDoc.length === 11 || cleanDoc.length === 14) {
+          const [rows] = await pool.query<any>(
+            `SELECT id FROM cad_clientes
+             WHERE inativo = 0 AND REPLACE(REPLACE(REPLACE(COALESCE(cpf_cnpj, ''), '.', ''), '-', ''), '/', '') = ?
+             LIMIT 1`,
+            [cleanDoc]
+          );
+          if (rows.length > 0) existingClient = rows[0];
+        }
+
+        if (!existingClient && cleanTel.length >= 8) {
+          const [rows] = await pool.query<any>(
+            `SELECT id FROM cad_clientes
+             WHERE inativo = 0 AND (
+               REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefone, ''), '-', ''), ' ', ''), '(', ''), ')', '') LIKE ?
+               OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(celular, ''), '-', ''), ' ', ''), '(', ''), ')', '') LIKE ?
+             )
+             LIMIT 1`,
+            [`%${cleanTel.slice(-8)}%`, `%${cleanTel.slice(-8)}%`]
+          );
+          if (rows.length > 0) existingClient = rows[0];
+        }
+
+        if (existingClient) {
+          finalClientId = Number(existingClient.id);
+          await pool.execute(
+            `UPDATE cad_clientes
+             SET telefone = COALESCE(NULLIF(?, ''), telefone),
+                 celular  = COALESCE(NULLIF(?, ''), celular),
+                 cpf_cnpj = COALESCE(NULLIF(?, ''), cpf_cnpj),
+                 data_ultima_alteracao = CURDATE()
+             WHERE id = ?`,
+            [clientPhone, clientPhone, clientDoc, finalClientId]
+          );
+          await pool.query(
+            'INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) VALUES (?, ?)',
+            [finalClientId, tenantId]
+          ).catch(() => {});
+        } else {
+          // Cria novo cliente no cad_clientes
+          const rawNome = `${clientName} ${vehicle.plate.toUpperCase()}`.slice(0, 60);
+          const [insResult] = await pool.query<any>(
+            `INSERT INTO cad_clientes (nome_cliente, telefone, celular, cpf_cnpj, inf_adicional, inativo, data_cadastro)
+             VALUES (?, ?, ?, ?, ?, 0, CURDATE())`,
+            [rawNome, clientPhone, clientPhone, clientDoc, vehicle.model.slice(0, 255)]
+          );
+          finalClientId = insResult.insertId;
+          await pool.query(
+            'INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) VALUES (?, ?)',
+            [finalClientId, tenantId]
+          ).catch(() => {});
+        }
+      }
+    } catch (cErr) {
+      console.error('Erro ao sincronizar cliente em cad_clientes:', cErr);
+    }
+
     await pool.execute(
-      'INSERT INTO os_orders (id, plate, model, mileage, status, total_amount, tenant_id) VALUES (?, ?, ?, ?, ?, 0, ?)',
-      [id, vehicle.plate.toUpperCase(), vehicle.model, vehicle.mileage, finalStatus, tenantId],
+      `INSERT INTO os_orders
+         (id, plate, model, mileage, status, total_amount, tenant_id, client_id, client_name, client_phone, client_document)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        vehicle.plate.toUpperCase(),
+        vehicle.model,
+        vehicle.mileage,
+        finalStatus,
+        tenantId,
+        finalClientId,
+        clientName,
+        clientPhone,
+        clientDoc,
+      ],
     );
 
     res.status(201).json({
       id,
       tenantId,
       vehicle: { plate: vehicle.plate.toUpperCase(), model: vehicle.model, mileage: vehicle.mileage },
+      client: {
+        id: finalClientId,
+        name: clientName,
+        phone: clientPhone,
+        document: clientDoc,
+      },
       status: finalStatus,
       vendaControle: null,
       items: [],
@@ -323,7 +544,7 @@ router.post('/:id/items', async (req: Request, res: Response) => {
     // Verifica instalações obrigatórias
     const [instRows] = await pool.execute(
       'SELECT instalacao_id FROM produto_instalacao WHERE produto_id = ?',
-      [product.id],
+      [product.id as any],
     );
     const validInstIds = (instRows as { instalacao_id: number }[]).map(r => r.instalacao_id);
     if (validInstIds.length > 0 && !instalacaoId) {
@@ -357,7 +578,7 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       `INSERT INTO os_order_items
          (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total, instalacao_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [itemId, req.params.id, product.id, product.code, product.description, product.type, qty, unitPrice, lp, total, instId],
+      [itemId, req.params.id, product.id as any, product.code as any, product.description as any, product.type as any, qty, unitPrice, lp, total, instId],
     );
 
     await recalcTotal(req.params.id);
@@ -578,6 +799,66 @@ router.delete('/:id/items/:itemId', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('DELETE /orders/:id/items/:itemId error:', err);
     res.status(500).json({ message: 'Erro ao remover item' });
+  }
+});
+
+// ── PATCH /orders/:id/client ───────────────────────────────────────────────
+
+router.patch('/:id/client', async (req: Request, res: Response) => {
+  const { name, phone, document } = req.body as {
+    name?: string;
+    phone?: string;
+    document?: string;
+  };
+
+  const clientName = String(name || '').trim();
+  const clientPhone = String(phone || '').trim();
+  const clientDoc = document ? String(document).trim() : null;
+
+  if (!clientName) {
+    res.status(400).json({ message: 'Nome do cliente é obrigatório' });
+    return;
+  }
+  if (!clientPhone || clientPhone.replace(/\D/g, '').length < 8) {
+    res.status(400).json({ message: 'Número de telefone / WhatsApp do cliente é obrigatório' });
+    return;
+  }
+
+  try {
+    if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
+
+    const [orders] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (orders as Record<string, unknown>[])[0];
+    if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
+
+    const clientId = order.client_id ? Number(order.client_id) : null;
+    if (clientId) {
+      await pool.execute(
+        `UPDATE cad_clientes
+         SET telefone = ?,
+             celular  = ?,
+             cpf_cnpj = COALESCE(NULLIF(?, ''), cpf_cnpj),
+             data_ultima_alteracao = CURDATE()
+         WHERE id = ?`,
+        [clientPhone, clientPhone, clientDoc, clientId]
+      ).catch((e) => console.error('Erro ao atualizar cad_clientes:', e));
+    }
+
+    await pool.execute(
+      `UPDATE os_orders
+       SET client_name = ?, client_phone = ?, client_document = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [clientName, clientPhone, clientDoc, req.params.id]
+    );
+
+    const [updatedOrders] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const updatedOrder = (updatedOrders as Record<string, unknown>[])[0];
+    const items = await fetchItems(req.params.id);
+
+    res.json(formatOrder(updatedOrder, items));
+  } catch (err) {
+    console.error('PATCH /orders/:id/client error:', err);
+    res.status(500).json({ message: 'Erro ao atualizar dados do cliente' });
   }
 });
 
