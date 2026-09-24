@@ -191,7 +191,7 @@ export default function Pdv() {
   }
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-3rem)] max-w-[1400px]">
+    <div className="flex gap-6 min-h-[calc(100vh-5.5rem)] max-w-[1400px]">
 
       {/* ── COLUNA ESQUERDA: busca + carrinho ── */}
       <div className="flex-1 flex flex-col gap-4 min-w-0">
