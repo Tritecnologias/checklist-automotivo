@@ -62,6 +62,16 @@ async function runMigrations() {
     console.log('[migration] os_orders.venda_controle adicionada');
   }
 
+  // discount_amount em os_orders (desconto faturado no PDV)
+  const [[{ cntDiscount }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntDiscount FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'discount_amount'`
+  );
+  if (Number(cntDiscount) === 0) {
+    await pool.query('ALTER TABLE os_orders ADD COLUMN discount_amount DECIMAL(18,4) NULL DEFAULT 0');
+    console.log('[migration] os_orders.discount_amount adicionada');
+  }
+
   // tenant_id em os_orders
   const [[{ cnt3 }]] = await pool.query<any>(
     `SELECT COUNT(*) as cnt3 FROM information_schema.COLUMNS

@@ -113,7 +113,10 @@ export default function OrderDetail() {
   const services = order.items.filter((i) => i.type === 'service')
   const totalParts  = order.items.reduce((s, i) => s + i.total, 0)
   const totalLabor  = order.items.reduce((s, i) => s + (i.laborPrice ?? 0), 0)
-  const totalGeral  = totalParts + totalLabor
+  const discount    = Number(order.discountAmount ?? 0)
+  const totalGeral  = order.vendaControle
+    ? Number(order.totalAmount)
+    : Math.max(0, totalParts + totalLabor - discount)
 
   return (
     <div className="space-y-6">
@@ -315,14 +318,24 @@ export default function OrderDetail() {
           <div className="space-y-2.5">
             <SummaryRow label="Total Peças"      value={currency(totalParts)} color="text-amber-400" />
             <SummaryRow label="Total Mão de Obra" value={currency(totalLabor)} color="text-blue-400" />
+            {discount > 0 && (
+              <SummaryRow label="Desconto Aplicado" value={`- ${currency(discount)}`} color="text-amber-400" />
+            )}
             <div className="border-t border-slate-700 pt-3 mt-1">
               <SummaryRow
-                label="Total Geral"
+                label={order.vendaControle ? "Total Faturado no PDV" : "Total Geral"}
                 value={currency(totalGeral)}
                 color="text-green-400"
                 bold
               />
             </div>
+            {order.vendaControle && (
+              <div className="pt-2 text-right">
+                <span className="text-xs text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-md font-mono inline-block">
+                  ✓ Faturada no PDV · Venda #{order.vendaControle}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}

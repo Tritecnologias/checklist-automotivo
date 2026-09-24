@@ -113,7 +113,7 @@ export default function Pdv() {
         vr_cartao:   parseNum(pagamento.cartao),
         vr_pix:      parseNum(pagamento.pix),
         vr_nota:     parseNum(pagamento.nota),
-        vr_adicional: -(parseNum(desconto)),
+        vr_adicional: -(descontoVal),
         id_cliente: cliente?.id ?? 0,
         itens,
         id_os: osImportada?.id,
@@ -171,7 +171,7 @@ export default function Pdv() {
   const remover = (idx: number) => setCart(prev => prev.filter((_, i) => i !== idx))
 
   const subtotal = cart.reduce((s, c) => s + c.valor * c.quant, 0)
-  const descontoVal = parseNum(desconto)
+  const descontoVal = parseDesconto(subtotal, desconto)
   const total = Math.max(0, subtotal - descontoVal)
   const totalPagto = Object.values(pagamento).reduce((s, v) => s + parseNum(v), 0)
   const troco = Math.max(0, totalPagto - total)
@@ -400,13 +400,23 @@ export default function Pdv() {
           </div>
 
           <div className="flex justify-between items-center text-sm text-slate-400">
-            <span>Desconto</span>
-            <input
-              value={desconto}
-              onChange={e => setDesconto(e.target.value)}
-              placeholder="0,00"
-              className="w-24 text-right bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-white text-sm focus:outline-none focus:border-blue-500"
-            />
+            <span className="flex items-center gap-1">
+              Desconto
+              <span className="text-[10px] text-slate-500">(R$ ou %)</span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              {desconto.trim().endsWith('%') && descontoVal > 0 && (
+                <span className="text-xs text-amber-400 font-mono">
+                  (-{R(descontoVal)})
+                </span>
+              )}
+              <input
+                value={desconto}
+                onChange={e => setDesconto(e.target.value)}
+                placeholder="0,00 ou 4%"
+                className="w-28 text-right bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono"
+              />
+            </div>
           </div>
 
           <div className="border-t border-slate-800 pt-2 flex justify-between text-base font-bold text-white">
@@ -563,10 +573,13 @@ export default function Pdv() {
 
                       <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
                         <div className="text-right">
-                          <p className="text-xs text-slate-400">Total da OS</p>
+                          <p className="text-xs text-slate-400">{jaFaturada ? 'Total Faturado' : 'Total da OS'}</p>
                           <p className="text-lg font-bold text-emerald-400">{R(os.totalAmount)}</p>
                           {os.laborAmount > 0 && (
                             <p className="text-[10px] text-blue-400">M.O.: {R(os.laborAmount)}</p>
+                          )}
+                          {Boolean(os.discountAmount && os.discountAmount > 0) && (
+                            <p className="text-[10px] text-amber-400 font-medium">Desc: -{R(os.discountAmount!)}</p>
                           )}
                         </div>
 
@@ -606,4 +619,16 @@ export default function Pdv() {
 function parseNum(s: string): number {
   const n = parseFloat(String(s).replace(',', '.'))
   return isNaN(n) ? 0 : n
+}
+
+function parseDesconto(subtotal: number, s: string): number {
+  const str = String(s).trim()
+  if (!str) return 0
+  if (str.endsWith('%')) {
+    const pct = parseFloat(str.slice(0, -1).replace(',', '.'))
+    if (isNaN(pct) || pct <= 0) return 0
+    return Math.round((subtotal * pct / 100) * 100) / 100
+  }
+  const val = parseFloat(str.replace(',', '.'))
+  return isNaN(val) || val <= 0 ? 0 : val
 }

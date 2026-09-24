@@ -209,6 +209,7 @@ export interface Order {
   items: OrderItem[]
   laborAmount: number
   totalAmount: number
+  discountAmount?: number
   createdAt: string
   updatedAt: string
   closedAt: string | null
@@ -224,6 +225,7 @@ export interface OsEncerradaPdv {
   status: string
   totalAmount: number
   laborAmount: number
+  discountAmount?: number
   createdAt: string
   updatedAt: string
   closedAt: string | null
@@ -240,6 +242,7 @@ export interface ImportarOsPdvResponse {
     status: string
     totalAmount: number
     laborAmount: number
+    discountAmount?: number
     vendaControle: string | null
     closedAt: string | null
   }

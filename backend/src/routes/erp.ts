@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db';
 import { JWT_SECRET, type JwtPayload } from '../middleware/auth';
@@ -414,12 +415,87 @@ router.post('/vendas', async (req, res) => {
        em_aberto === 0 ? data_venda : null]
     );
 
-    // Se a venda é de uma OS, atualiza o controle na OS
+    // Se a venda é de uma OS, sincroniza a OS completamente (itens, total e desconto)
     if (id_os) {
-      await pool.query(
-        'UPDATE os_orders SET venda_controle = ?, updated_at = NOW() WHERE id = ?',
-        [controle, id_os]
-      ).catch(err => console.error('Erro ao vincular venda à OS:', err));
+      try {
+        const [[osRow]] = await pool.query<any>('SELECT * FROM os_orders WHERE id = ?', [id_os]);
+        if (osRow) {
+          const prodMo = await getMaoDeObraProduto();
+          const [existingOsItems] = await pool.query<any>('SELECT * FROM os_order_items WHERE order_id = ?', [id_os]);
+
+          let osLabor = 0;
+          const soldPartProductIds: number[] = [];
+
+          for (const item of itens) {
+            const pid = Number(item.id_produto);
+            const val = Number(item.valor);
+            const qty = Number(item.quant);
+            const itemTot = val * qty;
+
+            if (pid === prodMo.id) {
+              osLabor += itemTot;
+              continue;
+            }
+
+            soldPartProductIds.push(pid);
+
+            const existing = (existingOsItems as any[]).find(
+              oi => Number(oi.product_id) === pid && oi.type === 'part'
+            );
+
+            if (existing) {
+              await pool.query(
+                'UPDATE os_order_items SET quantity = ?, unit_price = ?, total = ? WHERE id = ?',
+                [qty, val, itemTot, existing.id]
+              );
+            } else {
+              // Item novo adicionado pelo operador no PDV (ex: Aromatizante em spray)
+              const [[prodInfo]] = await pool.query<any>(
+                'SELECT id, nome_produto, cod_barra, unidade, id_tipo FROM cad_produtos WHERE id = ?',
+                [pid]
+              );
+              const newItemId = crypto.randomUUID();
+              const pCode = prodInfo?.cod_barra || '';
+              const pDesc = prodInfo?.nome_produto || `Item #${pid}`;
+              const pType = (prodInfo?.id_tipo === 2 || prodInfo?.id_tipo === 9) ? 'service' : 'part';
+
+              await pool.query(
+                `INSERT INTO os_order_items
+                   (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+                [newItemId, id_os, pid, pCode, pDesc, pType, qty, val, itemTot]
+              );
+            }
+          }
+
+          // Se peças originais da OS foram removidas no PDV antes da venda, remove de os_order_items
+          if (soldPartProductIds.length > 0) {
+            const placeholders = soldPartProductIds.map(() => '?').join(',');
+            await pool.query(
+              `DELETE FROM os_order_items WHERE order_id = ? AND type = 'part' AND product_id NOT IN (${placeholders})`,
+              [id_os, ...soldPartProductIds]
+            );
+          }
+
+          const discountAmount = Number(vr_adicional) < 0 ? Math.abs(Number(vr_adicional)) : 0;
+          const finalLabor = osLabor > 0 ? osLabor : Number(osRow.labor_amount ?? 0);
+
+          await pool.query(
+            `UPDATE os_orders
+             SET venda_controle = ?,
+                 status = 'closed',
+                 closed_at = COALESCE(closed_at, NOW()),
+                 total_amount = ?,
+                 labor_amount = ?,
+                 discount_amount = ?,
+                 updated_at = NOW()
+             WHERE id = ?`,
+            [controle, vr_total, finalLabor, discountAmount, id_os]
+          );
+        }
+      } catch (osSyncErr) {
+        console.error('Erro ao sincronizar OS com a venda:', osSyncErr);
+      }
     }
 
     res.status(201).json({ controle, id: id_venda, vr_total });
@@ -560,11 +636,14 @@ router.get('/pdv/os-encerradas', async (req, res) => {
 
     const whereStr = 'WHERE ' + whereParts.join(' AND ') + tenantClause;
     const sql = `
-      SELECT o.id, o.plate, o.model, o.mileage, o.status, o.total_amount,
+      SELECT o.id, o.plate, o.model, o.mileage, o.status,
+             COALESCE(v.vr_total, o.total_amount) AS total_amount,
+             COALESCE(ABS(v.vr_adicional), o.discount_amount, 0) AS discount_amount,
              o.labor_amount, o.created_at, o.updated_at, o.closed_at,
              o.venda_controle,
              (SELECT COUNT(*) FROM os_order_items oi WHERE oi.order_id = o.id) AS total_itens
       FROM os_orders o
+      LEFT JOIN mv_vendas v ON v.controle = o.venda_controle
       ${whereStr}
       ORDER BY o.closed_at DESC, o.updated_at DESC
       LIMIT 50
@@ -579,6 +658,7 @@ router.get('/pdv/os-encerradas', async (req, res) => {
       mileage: Number(r.mileage),
       status: r.status,
       totalAmount: Number(r.total_amount),
+      discountAmount: Number(r.discount_amount ?? 0),
       laborAmount: Number(r.labor_amount ?? 0),
       createdAt: r.created_at,
       updatedAt: r.updated_at,

@@ -140,6 +140,7 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
     })),
     laborAmount: Number(order.labor_amount ?? 0),
     totalAmount: Number(order.total_amount),
+    discountAmount: Number(order.discount_amount ?? 0),
     createdAt: order.created_at,
     updatedAt: order.updated_at,
     closedAt: order.closed_at ?? null,
@@ -175,7 +176,16 @@ router.get('/', async (req: Request, res: Response) => {
       ? ` WHERE ${whereParts.join(' AND ')}${tenantClause}`
       : tenantClause;
 
-    const sql = `SELECT * FROM os_orders${whereStr} ORDER BY created_at DESC LIMIT 200`;
+    const sql = `
+      SELECT o.*,
+             COALESCE(v.vr_total, o.total_amount) AS total_amount,
+             COALESCE(ABS(v.vr_adicional), o.discount_amount, 0) AS discount_amount
+      FROM os_orders o
+      LEFT JOIN mv_vendas v ON v.controle = o.venda_controle
+      ${whereStr}
+      ORDER BY o.created_at DESC
+      LIMIT 200
+    `;
     const [rows] = await pool.execute(sql, [...params, ...tenantParams]);
 
     res.json(
@@ -187,6 +197,7 @@ router.get('/', async (req: Request, res: Response) => {
         vendaControle: (o.venda_controle as string | null) ?? null,
         laborAmount: Number(o.labor_amount ?? 0),
         totalAmount: Number(o.total_amount),
+        discountAmount: Number(o.discount_amount ?? 0),
         createdAt: o.created_at,
         updatedAt: o.updated_at,
         closedAt: o.closed_at ?? null,
@@ -249,7 +260,12 @@ router.get('/:id', async (req: Request, res: Response) => {
   const user = req.user!;
   try {
     const [orders] = await pool.execute(
-      'SELECT * FROM os_orders WHERE id = ?',
+      `SELECT o.*,
+              COALESCE(v.vr_total, o.total_amount) AS total_amount,
+              COALESCE(ABS(v.vr_adicional), o.discount_amount, 0) AS discount_amount
+       FROM os_orders o
+       LEFT JOIN mv_vendas v ON v.controle = o.venda_controle
+       WHERE o.id = ?`,
       [req.params.id],
     );
     const order = (orders as Record<string, unknown>[])[0];
