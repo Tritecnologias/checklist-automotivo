@@ -9,9 +9,10 @@ const nav: NavItem[] = [
   { to: '/erp',           label: 'Dashboard',  icon: '📊', end: true },
   { to: '/erp/pdv',       label: 'PDV',         icon: '🛒' },
   { to: '/erp/caixa',     label: 'Caixa',       icon: '🏦' },
+  { to: '/erp/produtos',  label: 'Produtos',    icon: '🏷️', roles: ['owner', 'manager'] },
+  { to: '/erp/estoque',   label: 'Estoque',     icon: '📦', roles: ['owner', 'manager'] },
   { to: '/erp/vendas',    label: 'Vendas',      icon: '📋', roles: ['owner', 'manager'] },
   { to: '/erp/contas',    label: 'Financeiro',  icon: '💰', roles: ['owner', 'manager'] },
-  { to: '/erp/estoque',   label: 'Estoque',     icon: '📦', roles: ['owner', 'manager'] },
   { to: '/erp/clientes',  label: 'Clientes',    icon: '👥', roles: ['owner', 'manager'] },
 ]
 
@@ -184,7 +185,7 @@ export default function ErpLayout() {
               <span className="text-base leading-none">🔩</span> Instalações
             </NavLink>
             <NavLink
-              to="/admin/products"
+              to="/erp/produtos"
               className={({ isActive }) =>
                 `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'

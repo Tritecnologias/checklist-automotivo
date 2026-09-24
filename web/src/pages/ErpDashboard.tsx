@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -80,9 +81,14 @@ export default function ErpDashboard() {
 
         {/* Estoque baixo */}
         <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">
-            Estoque baixo / crítico
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
+              Estoque baixo / crítico
+            </h2>
+            <Link to="/erp/produtos" className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">
+              Ver produtos →
+            </Link>
+          </div>
           {data.estoque_baixo.length === 0 ? (
             <p className="text-slate-600 text-sm text-center py-8">Estoque em dia ✓</p>
           ) : (

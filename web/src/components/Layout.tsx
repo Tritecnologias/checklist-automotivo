@@ -4,7 +4,8 @@ import { useAuth } from '../contexts/AuthContext'
 const nav = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/orders', label: 'Ordens de Serviço', end: false },
-  { to: '/admin', label: '⚙️ Admin', end: false },
+  { to: '/erp', label: '🏪 ERP', end: false, roles: ['owner', 'manager', 'caixa'] },
+  { to: '/erp/produtos', label: '⚙️ Admin', end: false, roles: ['owner', 'manager'] },
 ]
 
 export default function Layout() {
@@ -16,6 +17,8 @@ export default function Layout() {
     navigate('/login')
   }
 
+  const visibleNav = nav.filter(item => !item.roles || item.roles.includes(user?.role ?? ''))
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       {/* Top bar */}
@@ -26,7 +29,7 @@ export default function Layout() {
               <span>🔧</span> Checklist Automotivo
             </span>
             <nav className="flex items-center gap-1">
-              {nav.map(({ to, label, end }) => (
+              {visibleNav.map(({ to, label, end }) => (
                 <NavLink
                   key={to}
                   to={to}

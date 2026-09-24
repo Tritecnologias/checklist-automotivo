@@ -39,18 +39,19 @@ export default function App() {
           {/* ERP + Admin — exige JWT e role != operator */}
           <Route element={<ErpGuard />}>
             <Route element={<AdminLayout />}>
-              <Route path="/admin/products" element={<AdminProducts />} />
+              <Route path="/admin/products" element={<Navigate to="/erp/produtos" replace />} />
               <Route path="/admin/clients"  element={<AdminClients />} />
-              <Route path="/admin" element={<Navigate to="/admin/products" replace />} />
+              <Route path="/admin" element={<Navigate to="/erp/produtos" replace />} />
             </Route>
 
             <Route element={<ErpLayout />}>
               <Route path="/erp"              element={<ErpDashboard />} />
               <Route path="/erp/pdv"          element={<Pdv />} />
-              <Route path="/erp/vendas"       element={<Vendas />} />
-              <Route path="/erp/contas"       element={<Contas />} />
+              <Route path="/erp/produtos"     element={<AdminProducts />} />
               <Route path="/erp/estoque"      element={<Estoque />} />
               <Route path="/erp/caixa"        element={<Caixa />} />
+              <Route path="/erp/vendas"       element={<Vendas />} />
+              <Route path="/erp/contas"       element={<Contas />} />
               <Route path="/erp/clientes"     element={<Clientes />} />
               <Route path="/erp/clientes/:id" element={<ClienteHistorico />} />
               <Route path="/erp/lojas"        element={<Lojas />} />

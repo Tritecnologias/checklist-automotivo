@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { ProdutoEstoque } from '../types'
@@ -163,10 +164,18 @@ export default function Estoque() {
   return (
     <div className="space-y-4 max-w-5xl">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Estoque</h1>
-        {res && (
-          <span className="text-sm text-slate-500">{res.total} produtos</span>
-        )}
+        <div>
+          <h1 className="text-2xl font-bold text-white">Estoque</h1>
+          {res && (
+            <p className="text-sm text-slate-500 mt-0.5">{res.total} produtos cadastrados</p>
+          )}
+        </div>
+        <Link
+          to="/erp/produtos"
+          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow"
+        >
+          <span>🏷️</span> Cadastrar / Gerenciar Produtos
+        </Link>
       </div>
 
       <div className="flex gap-3 flex-wrap">
