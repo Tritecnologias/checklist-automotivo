@@ -27,6 +27,16 @@ async function runMigrations() {
     console.log('[migration] os_order_items.labor_price adicionada');
   }
 
+  // labor_amount em os_orders
+  const [[{ cntLabor }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntLabor FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'labor_amount'`
+  );
+  if (Number(cntLabor) === 0) {
+    await pool.query('ALTER TABLE os_orders ADD COLUMN labor_amount DECIMAL(10,2) NOT NULL DEFAULT 0');
+    console.log('[migration] os_orders.labor_amount adicionada');
+  }
+
   // closed_at em os_orders
   const [[{ cnt2 }]] = await pool.query<any>(
     `SELECT COUNT(*) as cnt2 FROM information_schema.COLUMNS

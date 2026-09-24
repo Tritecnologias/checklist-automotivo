@@ -207,6 +207,7 @@ export default function Estoque() {
                 <th className="px-4 py-3 text-center">Un.</th>
                 <th className="px-4 py-3 text-right">Custo</th>
                 <th className="px-4 py-3 text-right">Venda</th>
+                <th className="px-4 py-3 text-center">Markup</th>
                 <th className="px-4 py-3 text-center">Mín.</th>
                 <th className="px-4 py-3 text-right">Estoque</th>
                 <th className="px-4 py-3"></th>
@@ -216,6 +217,10 @@ export default function Estoque() {
               {produtos.map((p: ProdutoEstoque) => {
                 const zerado = p.estoque <= 0
                 const baixo  = !zerado && p.estoque <= p.min_estoque
+                const custo  = Number(p.vr_custo) || 0
+                const venda  = Number(p.vr_venda) || 0
+                const markup = custo > 0 ? ((venda - custo) / custo) * 100 : null
+
                 return (
                   <tr key={p.id} className="hover:bg-slate-800/30">
                     <td className="px-4 py-3">
@@ -224,8 +229,21 @@ export default function Estoque() {
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-400">{p.cod_barra || '—'}</td>
                     <td className="px-4 py-3 text-center text-slate-400">{p.unidade}</td>
-                    <td className="px-4 py-3 text-right text-slate-400">{R(Number(p.vr_custo))}</td>
-                    <td className="px-4 py-3 text-right font-medium text-slate-200">{R(Number(p.vr_venda))}</td>
+                    <td className="px-4 py-3 text-right text-slate-400">{R(custo)}</td>
+                    <td className="px-4 py-3 text-right font-medium text-slate-200">{R(venda)}</td>
+                    <td className="px-4 py-3 text-center">
+                      {markup !== null ? (
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-bold ${
+                          markup >= 0
+                            ? 'bg-emerald-900/40 text-emerald-400'
+                            : 'bg-red-900/40 text-red-400'
+                        }`}>
+                          {markup >= 0 ? `+${markup.toFixed(1)}%` : `${markup.toFixed(1)}%`}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-center text-slate-500">{p.min_estoque}</td>
                     <td className="px-4 py-3 text-right">
                       <span className={`font-bold ${

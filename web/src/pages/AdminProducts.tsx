@@ -125,6 +125,7 @@ export default function AdminProducts() {
                   <th className="px-4 py-3 font-medium">Un.</th>
                   <th className="px-4 py-3 font-medium text-right">Compra</th>
                   <th className="px-4 py-3 font-medium text-right">Venda</th>
+                  <th className="px-4 py-3 font-medium text-center">Markup</th>
                   <th className="px-4 py-3 font-medium text-right">Estoque</th>
                   <th className="px-4 py-3 font-medium text-center">Status</th>
                   <th className="px-4 py-3"></th>
@@ -138,6 +139,20 @@ export default function AdminProducts() {
                     <td className="px-4 py-3 text-slate-400">{p.unidade}</td>
                     <td className="px-4 py-3 text-slate-300 text-right">{BRL(p.vr_compra)}</td>
                     <td className="px-4 py-3 text-green-400 font-semibold text-right">{BRL(p.vr_venda)}</td>
+                    <td className="px-4 py-3 text-center">
+                      {p.vr_compra > 0 && p.vr_venda > 0 ? (
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-bold ${
+                          p.vr_venda >= p.vr_compra
+                            ? 'bg-emerald-900/40 text-emerald-400'
+                            : 'bg-red-900/40 text-red-400'
+                        }`}>
+                          {p.vr_venda >= p.vr_compra ? '+' : ''}
+                          {(((p.vr_venda - p.vr_compra) / p.vr_compra) * 100).toFixed(1)}%
+                        </span>
+                      ) : (
+                        <span className="text-slate-600 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right text-slate-300">{Number(p.estoque).toFixed(0)}</td>
                     <td className="px-4 py-3 text-center">
                       <button
@@ -314,6 +329,68 @@ function ProductForm({
           <input type="number" step="0.01" value={value.vr_venda_2} onChange={set('vr_venda_2')} className={input} />
         </Field>
       </div>
+
+      {/* Indicador de Porcentagem / Markup aplicada */}
+      {(() => {
+        const compra = Number(value.vr_compra) || 0
+        const venda  = Number(value.vr_venda) || 0
+        const venda2 = Number(value.vr_venda_2) || 0
+
+        if (compra <= 0 && venda <= 0) return null
+
+        const markup1 = compra > 0 ? ((venda - compra) / compra) * 100 : null
+        const margem1 = venda > 0 ? ((venda - compra) / venda) * 100 : null
+        const lucro1  = venda - compra
+
+        const markup2 = compra > 0 && venda2 > 0 ? ((venda2 - compra) / compra) * 100 : null
+        const lucro2  = venda2 > 0 ? venda2 - compra : null
+
+        return (
+          <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs flex-wrap gap-1">
+              <span className="text-slate-300 font-medium flex items-center gap-1.5">
+                <span>📈</span> Porcentagem aplicada (Markup):
+              </span>
+              <div className="flex items-center gap-2">
+                {markup1 !== null ? (
+                  <span className={`px-2 py-0.5 rounded-md font-bold text-xs ${
+                    markup1 >= 0
+                      ? 'bg-emerald-900/60 text-emerald-400 border border-emerald-700/50'
+                      : 'bg-red-900/60 text-red-400 border border-red-700/50'
+                  }`}>
+                    {markup1 >= 0 ? `+${markup1.toFixed(1)}%` : `${markup1.toFixed(1)}%`}
+                  </span>
+                ) : null}
+                <span className="text-slate-400 text-xs">
+                  (Lucro: <strong className={lucro1 >= 0 ? 'text-emerald-400' : 'text-red-400'}>{BRL(lucro1)}</strong>
+                  {margem1 !== null ? ` · Margem: ${margem1.toFixed(1)}%` : ''})
+                </span>
+              </div>
+            </div>
+
+            {venda2 > 0 && markup2 !== null && (
+              <div className="flex items-center justify-between text-xs border-t border-slate-700/50 pt-2 flex-wrap gap-1">
+                <span className="text-slate-400 font-medium">Porcentagem (Venda 2):</span>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded-md font-bold text-xs ${
+                    markup2 >= 0
+                      ? 'bg-blue-900/60 text-blue-400 border border-blue-700/50'
+                      : 'bg-red-900/60 text-red-400 border border-red-700/50'
+                  }`}>
+                    {markup2 >= 0 ? `+${markup2.toFixed(1)}%` : `${markup2.toFixed(1)}%`}
+                  </span>
+                  {lucro2 !== null && (
+                    <span className="text-slate-400 text-xs">
+                      (Lucro: <strong className={lucro2 >= 0 ? 'text-blue-400' : 'text-red-400'}>{BRL(lucro2)}</strong>)
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       <Field label="Estoque">
         <input type="number" step="1" value={value.estoque} onChange={set('estoque')} className={input} />
       </Field>
