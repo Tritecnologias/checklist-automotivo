@@ -385,26 +385,8 @@ router.post('/vendas', async (req, res) => {
     );
     const id_venda = vendaResult.insertId;
 
-    // Determina o tenant_id da loja onde o caixa está aberto (ou da requisição)
-    let tenantId = getErpWriteTenantId(req);
-    const { clause: tf, params: tp } = getErpTenantFilter(req, true);
-    const [[caixaAberto]] = await pool.query<any>(
-      `SELECT id, tenant_id, terminal, turno FROM mv_caixa WHERE status_caixa = 'A'${tf} ORDER BY id DESC LIMIT 1`,
-      tp
-    );
-    if (caixaAberto?.tenant_id) {
-      tenantId = Number(caixaAberto.tenant_id);
-    }
-
-    const avisosEstoque: string[] = [];
-    const prodMo = await getMaoDeObraProduto();
-
     for (const item of itens) {
-      const pid = Number(item.id_produto);
-      const val = Number(item.valor);
-      const qty = Number(item.quant);
-      const item_total = val * qty;
-
+      const item_total = Number(item.valor) * Number(item.quant);
       await pool.query(
         `INSERT INTO mv_vendas_movimento
            (data_venda, controle, modo_venda, cod_lancamento, id_login,
@@ -412,55 +394,24 @@ router.post('/vendas', async (req, res) => {
             modo_lancamento, terminal, turno, valor, quant, vr_total, vr_cotacao, desconto_total_venda)
          VALUES (?,?,1,?,?,?,0,?,0,0,?,?,?,?,?,1,'N')`,
         [data_venda, controle, codLancamento, id_login, finalClienteId,
-         pid, terminal, turno, val, qty, item_total]
+         item.id_produto, terminal, turno, item.valor, item.quant, item_total]
       );
-
-      // Consulta dados do produto e estoque atual da loja do caixa
-      const [[prod]] = await pool.query<any>(
-        `SELECT p.id, p.nome_produto, p.id_tipo,
-                COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS saldo_atual
+      const tenantId = getErpWriteTenantId(req);
+      await pool.query(
+        `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
+         SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) - ?)
          FROM cad_produtos p
          LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-         WHERE p.id = ?`,
-        [tenantId, tenantId, pid]
+         WHERE p.id = ?
+         ON DUPLICATE KEY UPDATE saldo = GREATEST(0, produto_saldo_tenant.saldo - ?)`,
+        [tenantId, tenantId, item.quant, tenantId, item.id_produto, item.quant]
       );
 
-      const isService = prod && (prod.id_tipo === 2 || prod.id_tipo === 9 || prod.id === prodMo.id);
-
-      // Apenas produtos físicos movimentam estoque (serviços e mão de obra não dão baixa)
-      if (!isService && prod) {
-        const saldoAnterior = Number(prod.saldo_atual ?? 0);
-
-        if (saldoAnterior <= 0) {
-          avisosEstoque.push(
-            `Produto "${prod.nome_produto}" vendido SEM ESTOQUE na loja! (Saldo em estoque: ${saldoAnterior}, Quantidade vendida: ${qty})`
-          );
-        } else if (qty > saldoAnterior) {
-          avisosEstoque.push(
-            `Produto "${prod.nome_produto}" vendido com ESTOQUE INSUFICIENTE na loja! (Saldo em estoque: ${saldoAnterior}, Quantidade vendida: ${qty})`
-          );
-        }
-
-        // Dá baixa no saldo da loja que o caixa está logado
+      if (tenantId === 1) {
         await pool.query(
-          `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
-           SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) - ?)
-           FROM cad_produtos p
-           LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-           WHERE p.id = ?
-           ON DUPLICATE KEY UPDATE saldo = GREATEST(0, produto_saldo_tenant.saldo - ?)`,
-          [tenantId, tenantId, qty, tenantId, pid, qty]
+          'UPDATE cad_produtos SET estoque = GREATEST(0, estoque - ?) WHERE id = ?',
+          [item.quant, item.id_produto]
         );
-
-        // Se for a loja 1 (legado / matriz), também dá baixa na tabela legada cad_produtos
-        if (tenantId === 1) {
-          await pool.query(
-            `UPDATE cad_produtos
-             SET estoque = GREATEST(0, estoque - ?)
-             WHERE id = ?`,
-            [qty, pid]
-          );
-        }
       }
     }
 
@@ -562,12 +513,7 @@ router.post('/vendas', async (req, res) => {
       }
     }
 
-    res.status(201).json({
-      controle,
-      id: id_venda,
-      vr_total,
-      avisos_estoque: avisosEstoque,
-    });
+    res.status(201).json({ controle, id: id_venda, vr_total });
   } catch (err: any) {
     console.error('POST /erp/vendas error:', err);
     res.status(500).json({ message: err?.message || 'Erro ao processar venda' });
@@ -642,19 +588,10 @@ router.patch('/contas/:id/receber', requireManagerUp, async (req, res) => {
 router.get('/busca/produtos', async (req, res) => {
   const q = String(req.query.q ?? '');
   if (q.length < 2) { res.json([]); return; }
-
-  let tenantId = getErpWriteTenantId(req);
-  const { clause: tf, params: tp } = getErpTenantFilter(req, true);
-  const [[caixaAberto]] = await pool.query<any>(
-    `SELECT id, tenant_id FROM mv_caixa WHERE status_caixa = 'A'${tf} ORDER BY id DESC LIMIT 1`,
-    tp
-  );
-  if (caixaAberto?.tenant_id) {
-    tenantId = Number(caixaAberto.tenant_id);
-  }
+  const tenantId = getErpWriteTenantId(req);
 
   const [rows] = await pool.query<any>(
-    `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.vr_venda, p.id_tipo,
+    `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.vr_venda,
             COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
@@ -662,15 +599,7 @@ router.get('/busca/produtos', async (req, res) => {
      ORDER BY p.nome_produto LIMIT 20`,
     [tenantId, tenantId, `%${q}%`, `%${q}%`]
   );
-  res.json(rows.map((r: any) => {
-    const isService = r.id_tipo === 2 || r.id_tipo === 9;
-    return {
-      ...r,
-      vr_venda: Number(r.vr_venda),
-      estoque: isService ? 999 : Number(r.estoque),
-      is_service: isService,
-    };
-  }));
+  res.json(rows.map((r: any) => ({ ...r, vr_venda: Number(r.vr_venda), estoque: Number(r.estoque) })));
 });
 
 router.get('/busca/clientes', async (req, res) => {
@@ -796,27 +725,14 @@ router.get('/pdv/os/:id', async (req, res) => {
       return;
     }
 
-    // Determina a loja ativa onde o caixa está aberto (ou da requisição)
-    let tenantId = getErpWriteTenantId(req);
-    const [[caixaAberto]] = await pool.query<any>(
-      `SELECT id, tenant_id FROM mv_caixa WHERE status_caixa = 'A'${tenantClause} ORDER BY id DESC LIMIT 1`,
-      tenantParams
-    );
-    if (caixaAberto?.tenant_id) {
-      tenantId = Number(caixaAberto.tenant_id);
-    }
-
-    // Busca itens da OS com saldo da loja ativa
+    // Busca itens da OS
     const [rawItems] = await pool.query<any>(
-      `SELECT oi.*, p.unidade, p.id_tipo,
-              COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque,
-              p.cod_barra AS prod_cod_barra
+      `SELECT oi.*, p.unidade, p.estoque, p.cod_barra AS prod_cod_barra
        FROM os_order_items oi
        LEFT JOIN cad_produtos p ON p.id = oi.product_id
-       LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
        WHERE oi.order_id = ?
        ORDER BY oi.created_at`,
-      [tenantId, tenantId, order.id]
+      [order.id]
     );
 
     // Resolve dados do cliente prioritariamente da OS e cad_clientes
@@ -883,8 +799,6 @@ router.get('/pdv/os/:id', async (req, res) => {
       const lp = Number(item.labor_price ?? 0);
       totalLabor += lp;
 
-      const isService = item.id_tipo === 2 || item.id_tipo === 9;
-
       itensPdv.push({
         produto: {
           id: Number(item.product_id),
@@ -892,8 +806,7 @@ router.get('/pdv/os/:id', async (req, res) => {
           cod_barra: item.code || item.prod_cod_barra || '',
           unidade: item.unidade || 'UN',
           vr_venda: unitPrice,
-          estoque: isService ? 999 : Number(item.estoque ?? 0),
-          is_service: isService,
+          estoque: Number(item.estoque ?? 0),
         },
         quant: qty,
         valor: unitPrice,
@@ -913,8 +826,7 @@ router.get('/pdv/os/:id', async (req, res) => {
           cod_barra: prodMo.cod_barra,
           unidade: 'UN',
           vr_venda: finalLabor,
-          estoque: 999,
-          is_service: true,
+          estoque: 0,
         },
         quant: 1,
         valor: finalLabor,
@@ -1185,6 +1097,10 @@ router.patch('/estoque/:id/ajustar', requireManagerUp, async (req, res) => {
     [prodId, tenantId, novoSaldo]
   );
 
+  if (tenantId === 1) {
+    await pool.query('UPDATE cad_produtos SET estoque = ? WHERE id = ?', [novoSaldo, prodId]);
+  }
+
   res.json({ estoque: novoSaldo });
 });
 
@@ -1233,6 +1149,17 @@ router.post('/estoque/importar-sql', requireManagerUp, async (req, res) => {
      ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)`,
     [insertRows]
   );
+
+  if (tenantId === 1) {
+    const prodIds = insertRows.map(r => r[0]);
+    await pool.query(
+      `UPDATE cad_produtos p
+       JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = 1
+       SET p.estoque = pst.saldo
+       WHERE p.id IN (?)`,
+      [prodIds]
+    );
+  }
 
   res.json({
     importados:      insertRows.length,

@@ -38,6 +38,7 @@ function AjusteModal({
       erpApi.ajustarEstoque(produto.id, tipo, Number(quantidade)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['estoque'] })
+      qc.invalidateQueries({ queryKey: ['admin-products'] })
       onClose()
     },
   })

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { adminApi } from '../lib/api'
 import Modal from '../components/Modal'
+import { useAuth } from '../contexts/AuthContext'
 import type { Instalacao } from '../types'
 
 type Product = {
@@ -24,9 +25,18 @@ const empty: Omit<Product, 'id'> = {
 
 const BRL = (v: number) => `R$ ${Number(v).toFixed(2).replace('.', ',')}`
 
+const STATUS_OPTIONS: { value: 'ativos' | 'inativos' | 'todos'; label: string }[] = [
+  { value: 'ativos',   label: 'Ativos' },
+  { value: 'todos',    label: 'Todos' },
+  { value: 'inativos', label: 'Inativos' },
+]
+
 export default function AdminProducts() {
   const qc = useQueryClient()
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
   const [search, setSearch] = useState('')
+  const [status, setStatus] = useState<'ativos' | 'inativos' | 'todos'>('ativos')
   const [page, setPage]     = useState(1)
   const [editing, setEditing]     = useState<Product | null>(null)
   const [adding, setAdding]       = useState(false)
@@ -36,8 +46,8 @@ export default function AdminProducts() {
   const [addingInstIds, setAddingInstIds]   = useState<number[]>([])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-products', search, page],
-    queryFn: () => adminApi.listProducts(search, page),
+    queryKey: ['admin-products', tid, search, status, page],
+    queryFn: () => adminApi.listProducts(search, page, status),
   })
 
   const { data: todasInstalacoes = [] } = useQuery<Instalacao[]>({
@@ -57,7 +67,11 @@ export default function AdminProducts() {
       await adminApi.updateProduct(p.id, p)
       await adminApi.setProductInstalacoes(p.id, editingInstIds)
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-products'] }); setEditing(null) },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-products'] })
+      qc.invalidateQueries({ queryKey: ['estoque'] })
+      setEditing(null)
+    },
   })
 
   const createMut = useMutation({
@@ -69,6 +83,7 @@ export default function AdminProducts() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-products'] })
+      qc.invalidateQueries({ queryKey: ['estoque'] })
       setAdding(false)
       setForm(empty)
       setAddingInstIds([])
@@ -77,13 +92,17 @@ export default function AdminProducts() {
 
   const toggleMut = useMutation({
     mutationFn: (id: number) => adminApi.toggleProduct(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-products'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-products'] })
+      qc.invalidateQueries({ queryKey: ['estoque'] })
+    },
   })
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => adminApi.deleteProduct(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-products'] })
+      qc.invalidateQueries({ queryKey: ['estoque'] })
       setConfirmDelete(null)
     },
   })
@@ -95,7 +114,12 @@ export default function AdminProducts() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">📦 Produtos</h1>
-          {data && <p className="text-sm text-slate-400 mt-0.5">{data.total.toLocaleString('pt-BR')} produtos cadastrados</p>}
+          {data && (
+            <p className="text-sm text-slate-400 mt-0.5">
+              {data.total.toLocaleString('pt-BR')} produtos {status === 'ativos' ? 'ativos' : status === 'inativos' ? 'inativos' : 'cadastrados'}
+              {currentTenant?.nome && <span className="text-slate-500 ml-1.5">• Loja: {currentTenant.nome}</span>}
+            </p>
+          )}
         </div>
         <button
           onClick={() => { setForm(empty); setAdding(true) }}
@@ -105,12 +129,40 @@ export default function AdminProducts() {
         </button>
       </div>
 
-      <input
-        value={search}
-        onChange={e => onSearch(e.target.value)}
-        placeholder="Buscar por nome ou código de barras..."
-        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white mb-4 focus:outline-none focus:border-blue-500"
-      />
+      <div className="flex gap-3 mb-4 flex-wrap">
+        <div className="flex rounded-lg overflow-hidden border border-slate-700">
+          {STATUS_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => { setStatus(opt.value); setPage(1) }}
+              className={`px-3 py-1.5 text-xs sm:text-sm font-medium transition-colors ${
+                status === opt.value
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+              }`}
+            >
+              {opt.label}
+              {data?.counts && (
+                <span className="ml-1 opacity-75 text-xs">
+                  (
+                  {opt.value === 'ativos'
+                    ? data.counts.total_ativos.toLocaleString('pt-BR')
+                    : opt.value === 'inativos'
+                    ? data.counts.total_inativos.toLocaleString('pt-BR')
+                    : data.counts.total.toLocaleString('pt-BR')}
+                  )
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <input
+          value={search}
+          onChange={e => onSearch(e.target.value)}
+          placeholder="Buscar por nome ou código de barras..."
+          className="flex-1 min-w-48 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
+        />
+      </div>
 
       {isLoading ? (
         <p className="text-slate-400 py-8 text-center">Carregando produtos...</p>
