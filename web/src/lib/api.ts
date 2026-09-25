@@ -121,7 +121,7 @@ export const erpApi = {
     vr_adicional?: number
     parcelas?: number
     id_os?: string
-  }) => adminRequest<{ controle: string; id: number; vr_total: number }>(
+  }) => adminRequest<{ controle: string; id: number; vr_total: number; avisos_estoque?: string[] }>(
     '/erp/vendas', { method: 'POST', body: JSON.stringify(data) }
   ),
 

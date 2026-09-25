@@ -42,6 +42,7 @@ export default function Pdv() {
   const [showPagamento, setShowPagamento] = useState(false)
   const [desconto, setDesconto] = useState('')
   const [sucesso, setSucesso] = useState<string | null>(null)
+  const [avisosEstoqueVenda, setAvisosEstoqueVenda] = useState<string[] | null>(null)
 
   // ── Estado de Integração com OS Encerradas ──────────────────────────────────
   const [showOsModal, setShowOsModal]               = useState(false)
@@ -122,6 +123,9 @@ export default function Pdv() {
     },
     onSuccess: (data) => {
       setSucesso(data.controle)
+      if (data.avisos_estoque && data.avisos_estoque.length > 0) {
+        setAvisosEstoqueVenda(data.avisos_estoque)
+      }
       setCart([])
       setPagamento(PAG_VAZIO)
       setDesconto('')
@@ -132,6 +136,9 @@ export default function Pdv() {
       setShowPagamento(false)
       qc.invalidateQueries({ queryKey: ['erp-dashboard'] })
       qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['pdv-produtos'] })
+      qc.invalidateQueries({ queryKey: ['pdv-os-encerradas'] })
+      qc.invalidateQueries({ queryKey: ['estoque'] })
       setTimeout(() => { setSucesso(null); searchRef.current?.focus() }, 4000)
     },
   })
@@ -176,6 +183,9 @@ export default function Pdv() {
   const totalPagto = Object.values(pagamento).reduce((s, v) => s + parseNum(v), 0)
   const troco = Math.max(0, totalPagto - total)
   const podeFinalizar = cart.length > 0 && totalPagto >= total
+  const itensComAlertaEstoque = cart.filter(
+    c => !c.produto.is_service && (c.produto.estoque <= 0 || c.quant > c.produto.estoque)
+  )
 
   if (!statusCaixa) {
     return (
@@ -237,9 +247,13 @@ export default function Pdv() {
                       </div>
                       <div className="text-right ml-4 shrink-0">
                         <p className="text-sm font-bold text-emerald-400">{R(p.vr_venda)}</p>
-                        <p className={`text-xs ${p.estoque <= 0 ? 'text-red-400' : 'text-slate-500'}`}>
-                          Estq: {p.estoque}
-                        </p>
+                        {p.is_service ? (
+                          <span className="text-[10px] text-indigo-400 font-medium">Serviço</span>
+                        ) : (
+                          <p className={`text-xs ${p.estoque <= 0 ? 'text-red-400 font-semibold' : 'text-slate-500'}`}>
+                            {p.estoque <= 0 ? '⚠️ Sem estoque' : `Estq: ${p.estoque}`}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </button>
@@ -320,7 +334,26 @@ export default function Pdv() {
                   {cart.map((c, idx) => (
                     <tr key={idx} className="hover:bg-slate-800/30">
                       <td className="px-4 py-2">
-                        <p className="text-slate-200 text-sm">{c.produto.nome_produto}</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-slate-200 text-sm font-medium">{c.produto.nome_produto}</p>
+                          {c.produto.is_service ? (
+                            <span className="text-[10px] bg-indigo-900/60 text-indigo-300 border border-indigo-700/60 rounded px-1.5 py-0.5">
+                              Serviço
+                            </span>
+                          ) : c.produto.estoque <= 0 ? (
+                            <span className="text-[10px] bg-red-900/60 text-red-300 border border-red-700/60 rounded px-1.5 py-0.5 font-semibold">
+                              ⚠️ Sem estoque (0)
+                            </span>
+                          ) : c.quant > c.produto.estoque ? (
+                            <span className="text-[10px] bg-amber-900/60 text-amber-300 border border-amber-700/60 rounded px-1.5 py-0.5 font-semibold">
+                              ⚠️ Qtd ({c.quant}) &gt; Estoque ({c.produto.estoque})
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              Estq: {c.produto.estoque}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-slate-500 font-mono">{c.produto.cod_barra || 'S/ COD'}</p>
                       </td>
                       <td className="px-4 py-2">
@@ -466,6 +499,18 @@ export default function Pdv() {
             </div>
           )}
         </div>
+
+        {itensComAlertaEstoque.length > 0 && (
+          <div className="bg-amber-950/50 border border-amber-600/70 rounded-xl p-3 text-amber-200 text-xs space-y-1">
+            <div className="flex items-center gap-1.5 font-semibold text-amber-300">
+              <span>⚠️</span>
+              <span>Atenção: Saldo de estoque insuficiente</span>
+            </div>
+            <p className="text-[11px] text-amber-200/90 leading-relaxed">
+              {itensComAlertaEstoque.length} produto(s) no carrinho estão sem estoque ou com quantidade superior ao saldo na loja. A venda pode ser realizada normalmente.
+            </p>
+          </div>
+        )}
 
         {/* Botão finalizar */}
         <button
@@ -614,6 +659,40 @@ export default function Pdv() {
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm"
               >
                 Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: AVISOS DE ESTOQUE APÓS VENDA ── */}
+      {avisosEstoqueVenda && avisosEstoqueVenda.length > 0 && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
+          <div className="bg-slate-900 border border-amber-500 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-amber-400">
+              <span className="text-3xl">⚠️</span>
+              <div>
+                <h3 className="text-base font-bold text-white">Alerta de Estoque</h3>
+                <p className="text-xs text-amber-400/80">Venda finalizada com produtos sem estoque na loja</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-300">
+              A venda foi registrada com sucesso, mas os seguintes itens apresentaram pendência de estoque na loja:
+            </p>
+            <div className="bg-amber-950/30 border border-amber-800/60 rounded-xl p-3 space-y-2 max-h-56 overflow-y-auto">
+              {avisosEstoqueVenda.map((aviso, i) => (
+                <div key={i} className="text-xs text-amber-200 flex items-start gap-2">
+                  <span className="text-amber-400 font-bold">•</span>
+                  <span>{aviso}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setAvisosEstoqueVenda(null)}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-amber-950/40"
+              >
+                Entendido
               </button>
             </div>
           </div>

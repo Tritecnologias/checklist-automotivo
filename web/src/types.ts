@@ -63,6 +63,7 @@ export interface ProdutoPdv {
   unidade: string
   vr_venda: number
   estoque: number
+  is_service?: boolean
 }
 
 export interface ClientePdv {
