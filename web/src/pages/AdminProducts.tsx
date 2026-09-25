@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { adminApi } from '../lib/api'
 import Modal from '../components/Modal'
 import { useAuth } from '../contexts/AuthContext'
+import { Tag, Plus } from 'lucide-react'
 import type { Instalacao } from '../types'
 
 type Product = {
@@ -113,7 +114,10 @@ export default function AdminProducts() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">📦 Produtos</h1>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
+            <Tag className="w-6 h-6 text-blue-500 shrink-0" />
+            <span>Produtos</span>
+          </h1>
           {data && (
             <p className="text-sm text-slate-400 mt-0.5">
               {data.total.toLocaleString('pt-BR')} produtos {status === 'ativos' ? 'ativos' : status === 'inativos' ? 'inativos' : 'cadastrados'}
@@ -123,9 +127,10 @@ export default function AdminProducts() {
         </div>
         <button
           onClick={() => { setForm(empty); setAdding(true) }}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-sm shadow-blue-500/20"
         >
-          + Novo Produto
+          <Plus className="w-4 h-4 shrink-0" />
+          <span>Novo Produto</span>
         </button>
       </div>
 

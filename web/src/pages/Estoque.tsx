@@ -5,6 +5,7 @@ import { erpApi } from '../lib/api'
 import type { ProdutoEstoque } from '../types'
 import Modal from '../components/Modal'
 import { useAuth } from '../contexts/AuthContext'
+import { Boxes, Tag } from 'lucide-react'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -166,16 +167,20 @@ export default function Estoque() {
     <div className="space-y-4 max-w-5xl">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Estoque</h1>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
+            <Boxes className="w-6 h-6 text-blue-500 shrink-0" />
+            <span>Estoque</span>
+          </h1>
           {res && (
             <p className="text-sm text-slate-500 mt-0.5">{res.total} produtos cadastrados</p>
           )}
         </div>
         <Link
           to="/erp/produtos"
-          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 shadow"
+          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow"
         >
-          <span>🏷️</span> Cadastrar / Gerenciar Produtos
+          <Tag className="w-4 h-4 shrink-0" />
+          <span>Cadastrar / Gerenciar Produtos</span>
         </Link>
       </div>
 
