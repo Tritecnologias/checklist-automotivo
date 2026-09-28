@@ -193,18 +193,15 @@ export const usersApi = {
 }
 
 export const adminApi = {
-  listProducts: (search: string, page: number, status?: string) => {
-    const q = new URLSearchParams()
-    if (search) q.set('search', search)
-    if (page)   q.set('page', String(page))
-    if (status) q.set('status', status)
-    return adminRequest<{
+  listProducts: (search: string, page: number, status?: string) =>
+    adminRequest<{
       data: any[]
       total: number
       pages: number
       counts?: { total: number; total_ativos: number; total_inativos: number }
-    }>(`/admin/products?${q}`)
-  },
+    }>(
+      `/admin/products?search=${encodeURIComponent(search)}&page=${page}${status ? `&status=${encodeURIComponent(status)}` : ''}`
+    ),
   updateProduct: (id: number, data: unknown) =>
     adminRequest(`/admin/products/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   createProduct: (data: unknown) =>

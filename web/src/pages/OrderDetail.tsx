@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Printer } from 'lucide-react'
 import { api } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import type { OrderItem } from '../types'
@@ -142,11 +143,275 @@ export default function OrderDetail() {
     ? Number(order.totalAmount)
     : Math.max(0, totalParts + totalLabor - discount)
 
+  const handlePrint = useCallback(() => {
+    if (!order) return
+    const printWindow = window.open('', '_blank', 'width=800,height=900')
+    if (!printWindow) return
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>${isQuote ? 'Orçamento' : 'Ordem de Serviço'} #${order.id.split('-')[0].toUpperCase()} - ${order.vehicle.plate}</title>
+        <style>
+          @page { size: A4; margin: 15mm; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            background: #fff;
+            margin: 0;
+            padding: 20px;
+            font-size: 13px;
+            line-height: 1.5;
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+          }
+          .title { font-size: 20px; font-weight: bold; color: #1e3a8a; margin: 0; }
+          .subtitle { font-size: 12px; color: #64748b; margin-top: 2px; }
+          .badge {
+            background: #f1f5f9;
+            color: #334155;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 12px;
+            text-transform: uppercase;
+          }
+          .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+          }
+          .card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px 14px;
+          }
+          .card-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 4px;
+          }
+          .info-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+          .info-label { color: #64748b; font-size: 12px; }
+          .info-value { font-weight: 600; color: #0f172a; font-size: 12px; }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 12px;
+          }
+          th {
+            background: #f1f5f9;
+            color: #475569;
+            text-align: left;
+            padding: 8px 10px;
+            font-size: 11px;
+            text-transform: uppercase;
+            border-bottom: 1px solid #cbd5e1;
+          }
+          td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #e2e8f0;
+          }
+          .text-right { text-align: right; }
+          .total-box {
+            margin-top: 25px;
+            margin-left: auto;
+            width: 280px;
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 12px 16px;
+          }
+          .total-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 4px;
+          }
+          .total-main {
+            font-size: 18px;
+            font-weight: bold;
+            color: #166534;
+            border-top: 1px solid #cbd5e1;
+            padding-top: 8px;
+            margin-top: 6px;
+          }
+          .footer {
+            margin-top: 40px;
+            padding-top: 15px;
+            border-top: 1px dashed #cbd5e1;
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #64748b;
+          }
+          .signature-box {
+            margin-top: 50px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            text-align: center;
+          }
+          .signature-line {
+            border-top: 1px solid #94a3b8;
+            padding-top: 6px;
+            font-size: 12px;
+            font-weight: 500;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 class="title">${isQuote ? 'ORÇAMENTO DE SERVIÇOS & PEÇAS' : 'ORDEM DE SERVIÇO'}</h1>
+            <p class="subtitle">Emissão: ${fmtDate(order.createdAt)} &bull; Documento #${order.id.split('-')[0].toUpperCase()}</p>
+          </div>
+          <div>
+            <span class="badge">
+              ${isQuote ? 'Proposta / Orçamento' : `OS #${order.id.split('-')[0].toUpperCase()}`}
+            </span>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <div class="card-title">Dados do Cliente</div>
+            <div class="info-row">
+              <span class="info-label">Nome:</span>
+              <span class="info-value">${order.client?.name || 'Não informado'}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Telefone / WhatsApp:</span>
+              <span class="info-value">${order.client?.phone || 'Não informado'}</span>
+            </div>
+            ${order.client?.document ? `
+            <div class="info-row">
+              <span class="info-label">CPF / CNPJ:</span>
+              <span class="info-value">${order.client.document}</span>
+            </div>` : ''}
+          </div>
+
+          <div class="card">
+            <div class="card-title">Dados do Veículo</div>
+            <div class="info-row">
+              <span class="info-label">Placa:</span>
+              <span class="info-value">${order.vehicle.plate}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Modelo:</span>
+              <span class="info-value">${order.vehicle.model}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Quilometragem:</span>
+              <span class="info-value">${order.vehicle.mileage.toLocaleString('pt-BR')} km</span>
+            </div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Item / Descrição</th>
+              <th class="text-right">Qtd</th>
+              <th class="text-right">Unitário</th>
+              <th class="text-right">M.O.</th>
+              <th class="text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(order.items || []).length === 0 ? `
+              <tr>
+                <td colspan="5" style="text-align:center; padding: 20px; color:#94a3b8;">
+                  Nenhum item adicionado ainda.
+                </td>
+              </tr>
+            ` : (order.items || []).map(i => `
+              <tr>
+                <td>
+                  <strong>${i.description}</strong>
+                  ${i.code ? `<br/><small style="color:#64748b;">Cód: ${i.code}</small>` : ''}
+                </td>
+                <td class="text-right">${i.quantity}</td>
+                <td class="text-right">${currency(i.unitPrice)}</td>
+                <td class="text-right">${(i.laborPrice || 0) > 0 ? currency(i.laborPrice) : '—'}</td>
+                <td class="text-right" style="font-weight:600;">${currency(i.total)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <div class="total-box">
+          <div class="total-row">
+            <span>Subtotal Peças:</span>
+            <span>${currency(totalParts)}</span>
+          </div>
+          <div class="total-row">
+            <span>Subtotal Mão de Obra:</span>
+            <span>${currency(totalLabor)}</span>
+          </div>
+          ${discount > 0 ? `
+          <div class="total-row" style="color:#b91c1c;">
+            <span>Desconto:</span>
+            <span>- ${currency(discount)}</span>
+          </div>` : ''}
+          <div class="total-row total-main">
+            <span>Total Geral:</span>
+            <span>${currency(totalGeral)}</span>
+          </div>
+        </div>
+
+        ${isQuote ? `
+        <div style="margin-top: 30px; font-size: 11px; color: #64748b; background: #f8fafc; padding: 10px 14px; border-radius: 6px;">
+          <strong>Condições Gerais:</strong> Este orçamento é válido por 10 dias corridos a partir da data de emissão.
+        </div>` : ''}
+
+        <div class="signature-box">
+          <div>
+            <div class="signature-line">Assinatura do Consultor / Responsável</div>
+          </div>
+          <div>
+            <div class="signature-line">Assinatura de Aprovação do Cliente</div>
+          </div>
+        </div>
+
+        <div class="footer">
+          <span>Sistema Checklist Automotivo &bull; Impresso em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</span>
+          <span>Documento #${order.id.split('-')[0].toUpperCase()}</span>
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.print();
+          };
+        </script>
+      </body>
+      </html>
+    `
+    printWindow.document.write(html)
+    printWindow.document.close()
+  }, [order, isQuote, totalParts, totalLabor, discount, totalGeral])
+
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-slate-500">
-        <Link to="/orders" className="hover:text-slate-300">
+        <Link to={isQuote ? '/quotes' : '/orders'} className="hover:text-slate-300">
           {isQuote ? 'Orçamentos' : 'Ordens de Serviço'}
         </Link>
         <span>/</span>
@@ -216,6 +481,14 @@ export default function OrderDetail() {
             </div>
 
             <div className="flex items-center gap-3">
+              <button
+                onClick={handlePrint}
+                className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-sm font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                title={isQuote ? 'Imprimir Orçamento' : 'Imprimir Ordem de Serviço'}
+              >
+                <Printer className="w-4 h-4 text-slate-400" />
+                <span>Imprimir</span>
+              </button>
               {isQuote ? (
                 <button
                   onClick={() => approveQuote()}

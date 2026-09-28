@@ -14,17 +14,22 @@ const fmtDate = (iso: string) =>
   })
 
 function StatCard({
-  label, value, sub, color,
+  label, value, sub, color, to,
 }: {
-  label: string; value: string | number; sub?: string; color: string
+  label: string; value: string | number; sub?: string; color: string; to?: string
 }) {
-  return (
-    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
-      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</p>
+  const content = (
+    <div className={`bg-slate-900 rounded-2xl border border-slate-800 p-5 ${to ? 'hover:border-slate-700 hover:bg-slate-800/40 transition-all cursor-pointer group' : ''}`}>
+      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider group-hover:text-slate-400 transition-colors">{label}</p>
       <p className={`text-3xl font-bold mt-1 ${color}`}>{value}</p>
       {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
     </div>
   )
+
+  if (to) {
+    return <Link to={to} className="block">{content}</Link>
+  }
+  return content
 }
 
 export default function Dashboard() {
@@ -71,10 +76,10 @@ export default function Dashboard() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatCard label="Orçamentos"   value={quotes}      color="text-purple-400" />
-        <StatCard label="Abertas"       value={open}        color="text-green-400" />
-        <StatCard label="Em andamento"  value={in_progress} color="text-amber-400" />
-        <StatCard label="Encerradas"    value={closed}      color="text-slate-400" />
+        <StatCard label="Orçamentos"   value={quotes}      color="text-purple-400" to="/quotes" />
+        <StatCard label="Abertas"       value={open}        color="text-green-400"  to="/orders" />
+        <StatCard label="Em andamento"  value={in_progress} color="text-amber-400"  to="/orders" />
+        <StatCard label="Encerradas"    value={closed}      color="text-slate-400"  to="/orders" />
         <StatCard label="Faturamento"   value={currency(revenue)} color="text-blue-400"
           sub={`${orders.length} OS`} />
       </div>

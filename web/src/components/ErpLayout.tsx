@@ -17,6 +17,7 @@ import {
   Wrench,
   Shield,
   ClipboardList,
+  FileText,
   LogOut,
   MapPin,
   ChevronDown,
@@ -248,7 +249,14 @@ export default function ErpLayout() {
         {/* Rodapé */}
         <div className="px-3 py-3 border-t border-slate-800/80 space-y-1 shrink-0">
           <a
-            href="/"
+            href="/quotes"
+            className="group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800/70 transition-colors"
+          >
+            <FileText className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+            <span>Orçamentos</span>
+          </a>
+          <a
+            href="/orders"
             className="group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800/70 transition-colors"
           >
             <ClipboardList className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />

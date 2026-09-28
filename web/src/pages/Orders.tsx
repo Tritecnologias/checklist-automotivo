@@ -39,7 +39,7 @@ export default function Orders() {
   const [newClientPhone, setNewClientPhone] = useState('')
   const [newClientDoc, setNewClientDoc]     = useState('')
   const [newClientId, setNewClientId]       = useState<number | null>(null)
-  const [newStatus, setNewStatus]           = useState<'quote' | 'open'>('quote')
+  const [newStatus, setNewStatus]           = useState<'quote' | 'open'>('open')
   const [createError, setCreateError]       = useState('')
   const [lookupLoading, setLookupLoading]   = useState(false)
   const [lookupFeedback, setLookupFeedback] = useState<string | null>(null)
@@ -152,7 +152,7 @@ export default function Orders() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Ordens de Serviço & Orçamentos</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Ordens de Serviço</h1>
           <p className="text-slate-400 text-sm mt-1">
             {filtered.length} de {orders.length} registros
           </p>
@@ -176,13 +176,29 @@ export default function Orders() {
               setNewClientPhone('')
               setNewClientDoc('')
               setNewClientId(null)
+              setNewStatus('open')
               setModalOpen(true)
             }}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold text-white shadow-lg shadow-blue-900/30 transition-all flex items-center gap-2"
           >
-            <span>+</span> Novo Orçamento / OS
+            <span>+</span> Nova Ordem de Serviço
           </button>
         </div>
+      </div>
+
+      {/* Banner de atalho para Orçamentos */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-3 text-xs">
+        <div className="flex items-center gap-2 text-slate-300">
+          <span className="text-base">📋</span>
+          <span>Precisa criar ou consultar propostas comerciais para aprovação do cliente?</span>
+        </div>
+        <Link
+          to="/quotes"
+          className="text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1.5 transition-colors"
+        >
+          <span>Ir para tela de Orçamentos</span>
+          <span>→</span>
+        </Link>
       </div>
 
       {/* Filters */}

@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LayoutDashboard, ClipboardList, Store, Shield, LogOut, Wrench, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, ClipboardList, FileText, Store, Shield, LogOut, Wrench, type LucideIcon } from 'lucide-react'
 
 const nav: { to: string; label: string; icon: LucideIcon; end?: boolean; roles?: string[] }[] = [
   { to: '/',             label: 'Dashboard',         icon: LayoutDashboard, end: true },
   { to: '/orders',       label: 'Ordens de Serviço', icon: ClipboardList,   end: false },
+  { to: '/quotes',       label: 'Orçamentos',        icon: FileText,        end: false },
   { to: '/erp',          label: 'ERP',               icon: Store,           end: false, roles: ['owner', 'manager', 'caixa'] },
   { to: '/erp/produtos', label: 'Admin',             icon: Shield,          end: false, roles: ['owner', 'manager'] },
 ]

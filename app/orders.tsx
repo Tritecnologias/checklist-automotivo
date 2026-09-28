@@ -1,8 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   RefreshControl,
+  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
@@ -17,16 +18,19 @@ import { useDebounce } from '@/hooks/useDebounce';
 import type { Order } from '@/types';
 
 const STATUS_LABEL: Record<string, string> = {
+  quote:       'Orçamento',
   open:        'Aberta',
   in_progress: 'Em andamento',
   closed:      'Encerrada',
 };
 const STATUS_STYLE: Record<string, string> = {
+  quote:       'bg-purple-100 dark:bg-purple-900/30',
   open:        'bg-green-100 dark:bg-green-900/30',
   in_progress: 'bg-amber-100 dark:bg-amber-900/30',
   closed:      'bg-gray-100 dark:bg-slate-700',
 };
 const STATUS_TEXT: Record<string, string> = {
+  quote:       'text-purple-700 dark:text-purple-400',
   open:        'text-green-700 dark:text-green-400',
   in_progress: 'text-amber-700 dark:text-amber-400',
   closed:      'text-gray-500 dark:text-slate-400',
@@ -57,7 +61,7 @@ function OrderCard({ order }: { order: Order }) {
       <View className="flex-row items-start justify-between">
         <View className="flex-1 mr-3">
           <Text className="text-xs font-mono text-gray-400 dark:text-slate-500">
-            OS #{order.id.split('-')[0].toUpperCase()}
+            {order.status === 'quote' ? 'ORÇAMENTO' : 'OS'} #{order.id.split('-')[0].toUpperCase()}
           </Text>
           <Text className="text-xl font-bold text-gray-900 dark:text-white mt-0.5">
             {order.vehicle.plate}
@@ -92,10 +96,19 @@ function OrderCard({ order }: { order: Order }) {
   );
 }
 
+const TABS: { key: 'all' | 'quote' | 'open' | 'in_progress' | 'closed'; label: string }[] = [
+  { key: 'all',         label: 'Todas' },
+  { key: 'quote',       label: 'Orçamentos' },
+  { key: 'open',        label: 'Abertas' },
+  { key: 'in_progress', label: 'Em andamento' },
+  { key: 'closed',      label: 'Encerradas' },
+];
+
 export default function OrdersScreen() {
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'quote' | 'open' | 'in_progress' | 'closed'>('all');
   const debouncedSearch = useDebounce(search, 400);
 
   const { data: orders, isLoading, isError, refetch, isFetching } = useQuery({
@@ -103,6 +116,12 @@ export default function OrdersScreen() {
     queryFn: () => api.listOrders(debouncedSearch || undefined),
     staleTime: 30_000,
   });
+
+  const filteredOrders = useMemo(() => {
+    if (!orders) return [];
+    if (statusFilter === 'all') return orders;
+    return orders.filter((o) => o.status === statusFilter);
+  }, [orders, statusFilter]);
 
   const handleClear = useCallback(() => {
     setSearch('');
@@ -112,7 +131,7 @@ export default function OrdersScreen() {
     return (
       <View className="flex-1 items-center justify-center bg-slate-50 dark:bg-slate-950">
         <ActivityIndicator size="large" color="#3b82f6" />
-        <Text className="mt-3 text-gray-500 dark:text-slate-400">Carregando OS…</Text>
+        <Text className="mt-3 text-gray-500 dark:text-slate-400">Carregando ordens…</Text>
       </View>
     );
   }
@@ -132,7 +151,7 @@ export default function OrdersScreen() {
   }
 
   const isSearching = debouncedSearch.length >= 2;
-  const count = orders?.length ?? 0;
+  const count = filteredOrders.length;
 
   return (
     <View className="flex-1 bg-slate-50 dark:bg-slate-950">
@@ -157,8 +176,45 @@ export default function OrdersScreen() {
         </View>
       </View>
 
+      {/* Abas de filtro por status */}
+      <View className="pb-2">
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+        >
+          {TABS.map((tab) => {
+            const active = statusFilter === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                onPress={() => setStatusFilter(tab.key)}
+                activeOpacity={0.7}
+                className={`px-3 py-1.5 rounded-xl border ${
+                  active
+                    ? tab.key === 'quote'
+                      ? 'bg-purple-600 border-purple-600'
+                      : 'bg-blue-600 border-blue-600'
+                    : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700'
+                }`}
+              >
+                <Text
+                  className={`text-xs font-semibold ${
+                    active
+                      ? 'text-white'
+                      : 'text-gray-600 dark:text-slate-300'
+                  }`}
+                >
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
       <FlatList
-        data={orders ?? []}
+        data={filteredOrders}
         keyExtractor={(o) => o.id}
         renderItem={({ item }) => <OrderCard order={item} />}
         contentContainerStyle={{ paddingBottom: 40, paddingTop: 4 }}
