@@ -92,7 +92,7 @@ router.get('/dashboard', async (req, res) => {
     `SELECT p.id, p.nome_produto, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque, p.min_estoque
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-     WHERE p.inativo = 0 AND p.min_estoque > 0
+     WHERE p.inativo = 0 AND p.min_estoque > 0 AND COALESCE(p.controla_estoque, 1) = 1
      HAVING estoque <= p.min_estoque
      ORDER BY estoque ASC LIMIT 8`,
     [tenantId, tenantId]
@@ -402,14 +402,14 @@ router.post('/vendas', async (req, res) => {
          SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) - ?)
          FROM cad_produtos p
          LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-         WHERE p.id = ?
+         WHERE p.id = ? AND COALESCE(p.controla_estoque, 1) = 1
          ON DUPLICATE KEY UPDATE saldo = GREATEST(0, produto_saldo_tenant.saldo - ?)`,
         [tenantId, tenantId, item.quant, tenantId, item.id_produto, item.quant]
       );
 
       if (tenantId === 1) {
         await pool.query(
-          'UPDATE cad_produtos SET estoque = GREATEST(0, estoque - ?) WHERE id = ?',
+          'UPDATE cad_produtos SET estoque = GREATEST(0, estoque - ?) WHERE id = ? AND COALESCE(controla_estoque, 1) = 1',
           [item.quant, item.id_produto]
         );
       }
@@ -592,14 +592,20 @@ router.get('/busca/produtos', async (req, res) => {
 
   const [rows] = await pool.query<any>(
     `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.vr_venda,
-            COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque
+            COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque,
+            COALESCE(p.controla_estoque, 1) AS controla_estoque
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
      WHERE p.inativo = 0 AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
      ORDER BY p.nome_produto LIMIT 20`,
     [tenantId, tenantId, `%${q}%`, `%${q}%`]
   );
-  res.json(rows.map((r: any) => ({ ...r, vr_venda: Number(r.vr_venda), estoque: Number(r.estoque) })));
+  res.json(rows.map((r: any) => ({
+    ...r,
+    vr_venda: Number(r.vr_venda),
+    estoque: Number(r.estoque),
+    controla_estoque: Number(r.controla_estoque ?? 1),
+  })));
 });
 
 router.get('/busca/clientes', async (req, res) => {
@@ -1017,8 +1023,8 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
   const where = 'WHERE ' + whereParts.join(' AND ');
 
   const havingParts: string[] = [];
-  if (filtro === 'baixo')  havingParts.push('estoque <= p.min_estoque AND p.min_estoque > 0');
-  if (filtro === 'zerado') havingParts.push('estoque <= 0');
+  if (filtro === 'baixo')  havingParts.push('estoque <= p.min_estoque AND p.min_estoque > 0 AND COALESCE(p.controla_estoque, 1) = 1');
+  if (filtro === 'zerado') havingParts.push('estoque <= 0 AND COALESCE(p.controla_estoque, 1) = 1');
   const having = havingParts.length ? 'HAVING ' + havingParts.join(' AND ') : '';
 
   const baseSelect = `
@@ -1040,6 +1046,7 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
   const [rows] = await pool.query<any>(
     `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade,
             ${saldoExpr} AS estoque,
+            COALESCE(p.controla_estoque, 1) AS controla_estoque,
             p.min_estoque, p.vr_compra, p.vr_venda
      ${baseSelect} ${having}
      ORDER BY p.nome_produto LIMIT ? OFFSET ?`,
@@ -1051,6 +1058,7 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
       ...r,
       grupo: '',
       estoque: Number(r.estoque),
+      controla_estoque: Number(r.controla_estoque ?? 1),
       min_estoque: Number(r.min_estoque),
       vr_compra: Number(r.vr_compra),
       vr_custo: Number(r.vr_compra),

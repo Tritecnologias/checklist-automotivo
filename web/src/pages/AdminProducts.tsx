@@ -17,11 +17,13 @@ type Product = {
   vr_venda_2: number
   estoque: number
   inativo: number
+  controla_estoque: number
 }
 
 const empty: Omit<Product, 'id'> = {
   nome_produto: '', cod_barra: '', unidade: 'UN', id_tipo: 1,
   vr_compra: 0, vr_venda: 0, vr_venda_2: 0, estoque: 0, inativo: 0,
+  controla_estoque: 1,
 }
 
 const BRL = (v: number) => `R$ ${Number(v).toFixed(2).replace('.', ',')}`
@@ -210,7 +212,18 @@ export default function AdminProducts() {
                         <span className="text-slate-600 text-xs">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right text-slate-300">{Number(p.estoque).toFixed(0)}</td>
+                    <td className="px-4 py-3 text-right">
+                      {p.controla_estoque === 0 ? (
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-purple-950/70 text-purple-300 border border-purple-800/60"
+                          title="Não controla estoque (Estoque infinito)"
+                        >
+                          ∞ Infinito
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">{Number(p.estoque).toFixed(0)}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-center">
                       <button
                         onClick={() => toggleMut.mutate(p.id)}
@@ -448,9 +461,52 @@ function ProductForm({
         )
       })()}
 
-      <Field label="Estoque">
-        <input type="number" step="1" value={value.estoque} onChange={set('estoque')} className={input} />
-      </Field>
+      {/* Controle de estoque / Estoque infinito */}
+      <div className="bg-slate-800/70 border border-slate-700/80 rounded-xl p-3">
+        <label className="flex items-start gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={value.controla_estoque === 0}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                controla_estoque: e.target.checked ? 0 : 1,
+              })
+            }
+            className="w-4 h-4 mt-0.5 rounded text-blue-600 bg-slate-700 border-slate-600 focus:ring-blue-500 focus:ring-offset-slate-900"
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-white">
+                Não controla estoque (Estoque infinito)
+              </span>
+              {value.controla_estoque === 0 && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-950/90 text-purple-300 border border-purple-700">
+                  ∞ ATIVADO
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Ideal para serviços, mão de obra ou produtos sem limite de quantidade. As vendas não baixarão e não haverá restrição de estoque.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      {value.controla_estoque !== 0 ? (
+        <Field label="Estoque atual">
+          <input type="number" step="1" value={value.estoque} onChange={set('estoque')} className={input} />
+        </Field>
+      ) : (
+        <Field label="Estoque atual">
+          <div className="w-full bg-slate-800/40 border border-slate-700/50 rounded-lg px-3 py-2 text-slate-400 text-sm flex items-center justify-between">
+            <span className="flex items-center gap-1.5 font-medium text-slate-300">
+              <span className="text-purple-400 font-bold text-base">∞</span> Não se aplica (Estoque infinito)
+            </span>
+            <span className="text-xs text-slate-500 italic">Vendas ilimitadas</span>
+          </div>
+        </Field>
+      )}
       {todasInstalacoes.length > 0 && (
         <Field label="Instalações">
           <div className="flex flex-wrap gap-2 pt-1">

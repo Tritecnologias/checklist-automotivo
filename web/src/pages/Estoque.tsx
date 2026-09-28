@@ -57,14 +57,22 @@ function AjusteModal({
     <Modal title={`Ajuste de Estoque — ${produto.nome_produto}`} onClose={onClose}>
       <div className="space-y-5">
 
+        {produto.controla_estoque === 0 && (
+          <div className="bg-purple-950/60 border border-purple-800 text-purple-300 text-xs px-3.5 py-2.5 rounded-lg flex items-center gap-2">
+            <span>ℹ️</span>
+            <span>Este produto possui <strong>Estoque Infinito</strong> (não controla estoque). Vendas não abatem quantidade.</span>
+          </div>
+        )}
+
         {/* Estoque atual */}
         <div className="flex items-center justify-between bg-slate-800 rounded-lg px-4 py-3">
           <span className="text-sm text-slate-400">Estoque atual</span>
           <span className={`text-xl font-bold ${
+            produto.controla_estoque === 0 ? 'text-purple-400' :
             produto.estoque <= 0 ? 'text-red-400' :
             produto.estoque <= produto.min_estoque ? 'text-amber-400' : 'text-emerald-400'
           }`}>
-            {produto.estoque} {produto.unidade}
+            {produto.controla_estoque === 0 ? '∞ Infinito' : `${produto.estoque} ${produto.unidade}`}
           </span>
         </div>
 
@@ -230,8 +238,9 @@ export default function Estoque() {
             </thead>
             <tbody className="divide-y divide-slate-800">
               {produtos.map((p: ProdutoEstoque) => {
-                const zerado = p.estoque <= 0
-                const baixo  = !zerado && p.estoque <= p.min_estoque
+                const infinito = p.controla_estoque === 0
+                const zerado = !infinito && p.estoque <= 0
+                const baixo  = !infinito && !zerado && p.estoque <= p.min_estoque
                 const custo  = Number(p.vr_custo) || 0
                 const venda  = Number(p.vr_venda) || 0
                 const markup = custo > 0 ? ((venda - custo) / custo) * 100 : null
@@ -261,13 +270,24 @@ export default function Estoque() {
                     </td>
                     <td className="px-4 py-3 text-center text-slate-500">{p.min_estoque}</td>
                     <td className="px-4 py-3 text-right">
-                      <span className={`font-bold ${
-                        zerado ? 'text-red-400' : baixo ? 'text-amber-400' : 'text-emerald-400'
-                      }`}>
-                        {p.estoque}
-                      </span>
-                      {zerado && <span className="ml-1 text-xs text-red-500 font-normal">zerado</span>}
-                      {baixo  && <span className="ml-1 text-xs text-amber-500 font-normal">baixo</span>}
+                      {infinito ? (
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-purple-950/70 text-purple-300 border border-purple-800/60"
+                          title="Não controla estoque (Estoque infinito)"
+                        >
+                          ∞ Infinito
+                        </span>
+                      ) : (
+                        <>
+                          <span className={`font-bold ${
+                            zerado ? 'text-red-400' : baixo ? 'text-amber-400' : 'text-emerald-400'
+                          }`}>
+                            {p.estoque}
+                          </span>
+                          {zerado && <span className="ml-1 text-xs text-red-500 font-normal">zerado</span>}
+                          {baixo  && <span className="ml-1 text-xs text-amber-500 font-normal">baixo</span>}
+                        </>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <button

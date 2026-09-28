@@ -249,6 +249,8 @@ export default function Pdv() {
                         <p className="text-sm font-bold text-emerald-400">{R(p.vr_venda)}</p>
                         {p.is_service ? (
                           <span className="text-[10px] text-indigo-400 font-medium">Serviço</span>
+                        ) : p.controla_estoque === 0 ? (
+                          <span className="text-[10px] text-purple-400 font-medium font-mono">∞ Estoque Livre</span>
                         ) : (
                           <p className={`text-xs ${p.estoque <= 0 ? 'text-red-400 font-semibold' : 'text-slate-500'}`}>
                             {p.estoque <= 0 ? '⚠️ Sem estoque' : `Estq: ${p.estoque}`}

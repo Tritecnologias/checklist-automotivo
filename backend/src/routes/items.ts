@@ -20,7 +20,8 @@ router.get('/', async (req: Request, res: Response) => {
          CONVERT(p.nome_produto USING utf8mb4) AS description,
          CASE WHEN p.id_tipo IN (2, 9) THEN 'service' ELSE 'part' END AS type,
          CAST(p.vr_venda  AS DECIMAL(18,4)) AS unitPrice,
-         CAST(p.estoque   AS DECIMAL(18,4)) AS stock
+         CAST(p.estoque   AS DECIMAL(18,4)) AS stock,
+         COALESCE(p.controla_estoque, 1)    AS controlaEstoque
        FROM cad_produtos p
        WHERE p.inativo = 0
          AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
@@ -36,6 +37,7 @@ router.get('/', async (req: Request, res: Response) => {
       type: r.type as string,
       unitPrice: Number(r.unitPrice),
       stock: Number(r.stock),
+      controlaEstoque: Number(r.controlaEstoque ?? 1) === 1,
     }));
 
     // Buscar instalações separadamente para evitar problemas com JSON_ARRAYAGG

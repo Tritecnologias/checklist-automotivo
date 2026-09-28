@@ -873,7 +873,11 @@ export default function OrderDetail() {
                           </div>
                           <div className="flex items-center gap-3 text-xs text-slate-400 mt-0.5">
                             <span className="font-mono text-slate-500">Cód: {item.code}</span>
-                            {item.stock !== undefined && (
+                            {item.controlaEstoque === false ? (
+                              <span className="font-semibold text-purple-400">
+                                Estoque: ∞ Infinito
+                              </span>
+                            ) : item.stock !== undefined ? (
                               <span
                                 className={`font-medium ${
                                   item.stock > 0 ? 'text-emerald-400' : 'text-slate-500'
@@ -881,7 +885,7 @@ export default function OrderDetail() {
                               >
                                 Estoque: {item.stock} un
                               </span>
-                            )}
+                            ) : null}
                             {item.instalacoes && item.instalacoes.length > 0 && (
                               <span className="text-blue-400/90 text-[11px] font-medium">
                                 📍 {item.instalacoes.length} posições disponíveis

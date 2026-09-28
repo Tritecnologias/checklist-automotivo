@@ -64,6 +64,7 @@ export interface ProdutoPdv {
   vr_venda: number
   estoque: number
   is_service?: boolean
+  controla_estoque?: number
 }
 
 export interface ClientePdv {
@@ -100,6 +101,7 @@ export interface ProdutoEstoque {
   grupo: string
   estoque: number
   min_estoque: number
+  controla_estoque?: number
   vr_compra: number
   vr_custo: number
   vr_venda: number
@@ -221,6 +223,7 @@ export interface CatalogItem {
   type: 'part' | 'service'
   unitPrice: number
   stock?: number
+  controlaEstoque?: boolean
   instalacoes: InstItem[]
 }
 

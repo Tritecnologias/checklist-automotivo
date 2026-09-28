@@ -243,6 +243,16 @@ async function runMigrations() {
     `);
   }
 
+  // controla_estoque em cad_produtos (1 = controla, 0 = não controla / estoque infinito)
+  const [[{ cntControlaEstoque }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntControlaEstoque FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_produtos' AND COLUMN_NAME = 'controla_estoque'`
+  );
+  if (Number(cntControlaEstoque) === 0) {
+    await pool.query('ALTER TABLE cad_produtos ADD COLUMN controla_estoque TINYINT(1) NOT NULL DEFAULT 1');
+    console.log('[migration] cad_produtos.controla_estoque adicionada');
+  }
+
   console.log('[migration] tabelas de multi-tenant OK');
 }
 

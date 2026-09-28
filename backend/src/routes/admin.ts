@@ -83,6 +83,7 @@ router.get('/products', async (req, res) => {
     `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.id_tipo,
             p.vr_compra, p.vr_venda, p.vr_venda_2,
             ${saldoExpr} AS estoque,
+            COALESCE(p.controla_estoque, 1) AS controla_estoque,
             p.inativo
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
@@ -95,6 +96,7 @@ router.get('/products', async (req, res) => {
     data: rows.map((r: any) => ({
       ...r,
       estoque: Number(r.estoque ?? 0),
+      controla_estoque: Number(r.controla_estoque ?? 1),
       vr_compra: Number(r.vr_compra ?? 0),
       vr_venda: Number(r.vr_venda ?? 0),
       vr_venda_2: Number(r.vr_venda_2 ?? 0),
@@ -113,15 +115,21 @@ router.get('/products', async (req, res) => {
 router.put('/products/:id', async (req, res) => {
   const tenantId = getAdminTenantId(req);
   const prodId = Number(req.params.id);
-  const { nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, estoque } = req.body;
+  const {
+    nome_produto, cod_barra, unidade, id_tipo,
+    vr_compra, vr_venda, vr_venda_2, estoque,
+    controla_estoque,
+  } = req.body;
+  const ctrlEstoque = controla_estoque !== undefined ? (Number(controla_estoque) === 0 ? 0 : 1) : 1;
+
   await pool.query(
     `UPDATE cad_produtos
      SET nome_produto=?, cod_barra=?, unidade=?, id_tipo=?,
-         vr_compra=?, vr_venda=?, vr_venda_2=?, estoque=?
+         vr_compra=?, vr_venda=?, vr_venda_2=?, estoque=?, controla_estoque=?
      WHERE id=?`,
-    [nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, estoque, prodId]
+    [nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, estoque, ctrlEstoque, prodId]
   );
-  if (estoque !== undefined && !isNaN(Number(estoque))) {
+  if (ctrlEstoque === 1 && estoque !== undefined && !isNaN(Number(estoque))) {
     await pool.query(
       `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo) VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)`,
@@ -133,15 +141,21 @@ router.put('/products/:id', async (req, res) => {
 
 router.post('/products', async (req, res) => {
   const tenantId = getAdminTenantId(req);
-  const { nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, estoque } = req.body;
+  const {
+    nome_produto, cod_barra, unidade, id_tipo,
+    vr_compra, vr_venda, vr_venda_2, estoque,
+    controla_estoque,
+  } = req.body;
+  const ctrlEstoque = controla_estoque !== undefined ? (Number(controla_estoque) === 0 ? 0 : 1) : 1;
+
   const [result] = await pool.query<any>(
     `INSERT INTO cad_produtos
-       (nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, estoque, inativo)
-     VALUES (?,?,?,?,?,?,?,?,0)`,
-    [nome_produto, cod_barra, unidade, id_tipo ?? 1, vr_compra ?? 0, vr_venda ?? 0, vr_venda_2 ?? 0, estoque ?? 0]
+       (nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, estoque, controla_estoque, inativo)
+     VALUES (?,?,?,?,?,?,?,?,?,0)`,
+    [nome_produto, cod_barra, unidade, id_tipo ?? 1, vr_compra ?? 0, vr_venda ?? 0, vr_venda_2 ?? 0, estoque ?? 0, ctrlEstoque]
   );
   const newId = result.insertId;
-  if (estoque !== undefined && Number(estoque) > 0) {
+  if (ctrlEstoque === 1 && estoque !== undefined && Number(estoque) > 0) {
     await pool.query(
       `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo) VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)`,
