@@ -145,6 +145,7 @@ export const erpApi = {
     vr_cartao?: number
     vr_pix?: number
     vr_nota?: number
+    vr_outros?: number
     vr_cheque?: number
     vr_carne?: number
     vr_ticket?: number

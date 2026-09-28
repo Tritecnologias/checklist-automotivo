@@ -321,6 +321,7 @@ router.post('/vendas', async (req, res) => {
       vr_ticket = 0,
       vr_pix = 0,
       vr_nota = 0,
+      vr_outros = 0,
       vr_adicional = 0,
       parcelas = 1,
       id_login = 1,
@@ -337,6 +338,7 @@ router.post('/vendas', async (req, res) => {
       vr_ticket?: number;
       vr_pix?: number;
       vr_nota?: number;
+      vr_outros?: number;
       vr_adicional?: number;
       parcelas?: number;
       id_login?: number;
@@ -345,8 +347,21 @@ router.post('/vendas', async (req, res) => {
       id_os?: string;
     };
 
-    if (!itens.length) {
-      res.status(400).json({ message: 'Venda sem itens' });
+    const itensArray = Array.isArray(itens) ? itens : [];
+    const hasItens = itensArray.length > 0;
+    const finalVrTicket = Number(vr_ticket || 0) + Number(vr_outros || 0);
+
+    const vr_pagto_total =
+      Number(vr_dinheiro || 0) +
+      Number(vr_cartao || 0) +
+      Number(vr_pix || 0) +
+      Number(vr_nota || 0) +
+      finalVrTicket +
+      Number(vr_cheque || 0) +
+      Number(vr_carne || 0);
+
+    if (!hasItens && vr_pagto_total <= 0) {
+      res.status(400).json({ message: 'Informe os itens ou um valor de pagamento' });
       return;
     }
 
@@ -355,18 +370,19 @@ router.post('/vendas', async (req, res) => {
     const controle = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
     const data_venda = now.toISOString().slice(0, 10);
 
-    const vr_total = itens.reduce((s, i) => s + i.valor * i.quant, 0) + Number(vr_adicional);
+    const vr_itens = hasItens ? itensArray.reduce((s, i) => s + i.valor * i.quant, 0) : 0;
+    const vr_total = hasItens ? (vr_itens + Number(vr_adicional)) : vr_pagto_total;
     const em_aberto = (vr_nota > 0 || vr_carne > 0) ? 1 : 0;
 
     // Detect primary payment mode for cod_lancamento mapping
-    // 1: Dinheiro, 7: Cartão, 11: PIX/Transferência, 10: Duplicata/Nota, 2: Cheque, 5: Carnê, 8: Ticket
+    // 1: Dinheiro, 7: Cartão, 11: PIX/Transferência, 10: Duplicata/Nota, 2: Cheque, 5: Carnê, 8: Outros/Ticket
     const codLancamento =
       vr_pix > 0 ? 11 :
       vr_cartao > 0 ? (vr_cartao === vr_total ? 7 : 1) :
       vr_nota > 0 ? 10 :
+      finalVrTicket > 0 ? 8 :
       vr_cheque > 0 ? 2 :
-      vr_carne > 0 ? 5 :
-      vr_ticket > 0 ? 8 : 1;
+      vr_carne > 0 ? 5 : 1;
 
     let finalClienteId = Number(id_cliente ?? 0);
     if (finalClienteId === 0 && id_os) {
@@ -384,43 +400,47 @@ router.post('/vendas', async (req, res) => {
           em_aberto, vr_pagto_parcial, cod_lancamento)
        VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
       [controle, data_venda, parcelas, finalClienteId, id_login, terminal, turno,
-       vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket, vr_pix, vr_nota,
+       vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, finalVrTicket, vr_pix, vr_nota,
        em_aberto, codLancamento]
     );
     const id_venda = vendaResult.insertId;
 
-    for (const item of itens) {
-      const item_total = Number(item.valor) * Number(item.quant);
-      await pool.query(
-        `INSERT INTO mv_vendas_movimento
-           (data_venda, controle, modo_venda, cod_lancamento, id_login,
-            id_cliente, id_cliente_convenio, id_produto, id_grade,
-            modo_lancamento, terminal, turno, valor, quant, vr_total, vr_cotacao, desconto_total_venda)
-         VALUES (?,?,1,?,?,?,0,?,0,0,?,?,?,?,?,1,'N')`,
-        [data_venda, controle, codLancamento, id_login, finalClienteId,
-         item.id_produto, terminal, turno, item.valor, item.quant, item_total]
-      );
-      const tenantId = getErpWriteTenantId(req);
-      await pool.query(
-        `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
-         SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) - ?)
-         FROM cad_produtos p
-         LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-         WHERE p.id = ? AND COALESCE(p.controla_estoque, 1) = 1
-         ON DUPLICATE KEY UPDATE saldo = GREATEST(0, produto_saldo_tenant.saldo - ?)`,
-        [tenantId, tenantId, item.quant, tenantId, item.id_produto, item.quant]
-      );
-
-      if (tenantId === 1) {
+    if (hasItens) {
+      for (const item of itensArray) {
+        const item_total = Number(item.valor) * Number(item.quant);
         await pool.query(
-          'UPDATE cad_produtos SET estoque = GREATEST(0, estoque - ?) WHERE id = ? AND COALESCE(controla_estoque, 1) = 1',
-          [item.quant, item.id_produto]
+          `INSERT INTO mv_vendas_movimento
+             (data_venda, controle, modo_venda, cod_lancamento, id_login,
+              id_cliente, id_cliente_convenio, id_produto, id_grade,
+              modo_lancamento, terminal, turno, valor, quant, vr_total, vr_cotacao, desconto_total_venda)
+           VALUES (?,?,1,?,?,?,0,?,0,0,?,?,?,?,?,1,'N')`,
+          [data_venda, controle, codLancamento, id_login, finalClienteId,
+           item.id_produto, terminal, turno, item.valor, item.quant, item_total]
         );
+        const tenantId = getErpWriteTenantId(req);
+        await pool.query(
+          `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
+           SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) - ?)
+           FROM cad_produtos p
+           LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+           WHERE p.id = ? AND COALESCE(p.controla_estoque, 1) = 1
+           ON DUPLICATE KEY UPDATE saldo = GREATEST(0, produto_saldo_tenant.saldo - ?)`,
+          [tenantId, tenantId, item.quant, tenantId, item.id_produto, item.quant]
+        );
+
+        if (tenantId === 1) {
+          await pool.query(
+            'UPDATE cad_produtos SET estoque = GREATEST(0, estoque - ?) WHERE id = ? AND COALESCE(controla_estoque, 1) = 1',
+            [item.quant, item.id_produto]
+          );
+        }
       }
     }
 
     // Lançamento financeiro
-    const hist = `VENDA REALIZADA [ ${controle} ]`;
+    const hist = hasItens
+      ? `VENDA REALIZADA [ ${controle} ]`
+      : `VENDA AVULSA [ ${controle} ]`;
     await pool.query(
       `INSERT INTO cad_lancamentos
          (id_planejamento, id_conta, id_modo_lancamento, status_lancamento,
@@ -640,7 +660,7 @@ router.get('/contas', requireManagerUp, async (req, res) => {
       5: 'CARNÊ',
       6: 'CARTÃO DÉBITO',
       7: 'CARTÃO CRÉDITO',
-      8: 'TICKET',
+      8: 'OUTROS',
       9: 'PROMISSÓRIA',
       10: 'NOTA / A PRAZO',
       11: 'PIX',

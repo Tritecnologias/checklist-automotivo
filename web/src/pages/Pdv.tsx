@@ -26,9 +26,10 @@ interface Pagamento {
   cartao: string
   pix: string
   nota: string
+  outros: string
 }
 
-const PAG_VAZIO: Pagamento = { dinheiro: '', cartao: '', pix: '', nota: '' }
+const PAG_VAZIO: Pagamento = { dinheiro: '', cartao: '', pix: '', nota: '', outros: '' }
 
 export default function Pdv() {
   const { currentTenant } = useAuth()
@@ -111,11 +112,13 @@ export default function Pdv() {
   const { mutate: finalizar, isPending: finalizando } = useMutation({
     mutationFn: () => {
       const itens = cart.map(c => ({ id_produto: c.produto.id, valor: c.valor, quant: c.quant }))
+      const outrosVal = parseNum(pagamento.outros)
       const pag = {
         vr_dinheiro: parseNum(pagamento.dinheiro),
         vr_cartao:   parseNum(pagamento.cartao),
         vr_pix:      parseNum(pagamento.pix),
         vr_nota:     parseNum(pagamento.nota),
+        vr_outros:   outrosVal,
         vr_adicional: -(descontoVal),
         id_cliente: cliente?.id ?? 0,
         itens,
@@ -136,12 +139,21 @@ export default function Pdv() {
           plate: osImportada.plate,
           model: osImportada.model,
         } : null,
-        itens: cart.map(c => ({
-          nome: c.produto.nome_produto,
-          quant: c.quant,
-          valorUnit: c.valor,
-          total: c.valor * c.quant,
-        })),
+        itens: cart.length > 0
+          ? cart.map(c => ({
+              nome: c.produto.nome_produto,
+              quant: c.quant,
+              valorUnit: c.valor,
+              total: c.valor * c.quant,
+            }))
+          : [
+              {
+                nome: 'LANÇAMENTO AVULSO (OUTROS)',
+                quant: 1,
+                valorUnit: outrosVal,
+                total: outrosVal,
+              },
+            ],
         subtotal,
         desconto: descontoVal,
         total,
@@ -150,6 +162,7 @@ export default function Pdv() {
           { nome: 'Cartão', valor: parseNum(pagamento.cartao) },
           { nome: 'PIX CNPJ', valor: parseNum(pagamento.pix) },
           { nome: 'NOTA', valor: parseNum(pagamento.nota) },
+          { nome: 'Outros', valor: outrosVal },
         ].filter(p => p.valor > 0),
         troco,
       }
@@ -216,12 +229,15 @@ export default function Pdv() {
 
   const remover = (idx: number) => setCart(prev => prev.filter((_, i) => i !== idx))
 
-  const subtotal = cart.reduce((s, c) => s + c.valor * c.quant, 0)
+  const cartSubtotal = cart.reduce((s, c) => s + c.valor * c.quant, 0)
+  const outrosVal = parseNum(pagamento.outros)
+  const isVendaAvulsa = cart.length === 0 && outrosVal > 0
+  const subtotal = cart.length > 0 ? cartSubtotal : outrosVal
   const descontoVal = parseDesconto(subtotal, desconto)
   const total = Math.max(0, subtotal - descontoVal)
   const totalPagto = Object.values(pagamento).reduce((s, v) => s + parseNum(v), 0)
   const troco = Math.max(0, totalPagto - total)
-  const podeFinalizar = cart.length > 0 && totalPagto >= total
+  const podeFinalizar = (cart.length > 0 && totalPagto >= total) || (isVendaAvulsa && totalPagto >= total)
   const itensComAlertaEstoque = cart.filter(
     c => !c.produto.is_service && c.produto.controla_estoque !== 0 && (c.produto.estoque <= 0 || c.quant > c.produto.estoque)
   )
@@ -384,9 +400,24 @@ export default function Pdv() {
           )}
 
           {cart.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-sm gap-2">
-              <p>Nenhum item no carrinho.</p>
-              <p className="text-xs text-slate-600">Busque um produto acima ou importe uma Ordem de Serviço encerrada.</p>
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-sm gap-2 p-6">
+              {outrosVal > 0 ? (
+                <div className="bg-purple-950/40 border border-purple-500/40 rounded-2xl p-6 text-center space-y-2 max-w-sm w-full shadow-lg">
+                  <span className="text-3xl">🔄</span>
+                  <p className="text-white font-bold text-base">Lançamento Avulso (Outros)</p>
+                  <p className="text-3xl font-black text-emerald-400 font-mono">
+                    {R(outrosVal)}
+                  </p>
+                  <p className="text-xs text-purple-200/80">
+                    Valor informado no campo Outros. Pronto para finalizar a venda sem OS ou orçamento.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p>Nenhum item no carrinho.</p>
+                  <p className="text-xs text-slate-600">Busque um produto acima, importe uma OS ou lance um valor em Outros.</p>
+                </>
+              )}
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto">
@@ -536,12 +567,13 @@ export default function Pdv() {
         <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 space-y-2.5 flex-1">
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Pagamento</p>
 
-          {(['dinheiro', 'cartao', 'pix', 'nota'] as (keyof Pagamento)[]).map(key => {
+          {(['dinheiro', 'cartao', 'pix', 'nota', 'outros'] as (keyof Pagamento)[]).map(key => {
             const labels: Record<keyof Pagamento, string> = {
               dinheiro: '💵 Dinheiro',
               cartao:   '💳 Cartão',
               pix:      '⚡ PIX CNPJ',
               nota:     '📝 NOTA',
+              outros:   '🔄 Outros',
             }
             return (
               <div key={key} className="flex items-center justify-between gap-2">
