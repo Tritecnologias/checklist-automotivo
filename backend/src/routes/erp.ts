@@ -1031,36 +1031,35 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
   const search = String(req.query.search ?? '');
   const filtro = req.query.filtro;
 
+  const saldoExpr = `COALESCE(pst.saldo, IF(? = 1, p.estoque, 0))`;
+
   // Para lojas novas (tenant != 1), só exibe produtos que já têm linha em produto_saldo_tenant
   const whereParts: string[] = ['p.inativo = 0', '(? = 1 OR pst.produto_id IS NOT NULL)'];
-  const baseParams: any[] = [tenantId, tenantId];
+  const whereParams: any[] = [tenantId];
 
-  if (search.length >= 2) {
+  if (search.length > 0) {
     whereParts.push('(p.nome_produto LIKE ? OR p.cod_barra LIKE ?)');
-    baseParams.push(`%${search}%`, `%${search}%`);
+    whereParams.push(`%${search}%`, `%${search}%`);
+  }
+
+  if (filtro === 'baixo') {
+    whereParts.push(`${saldoExpr} <= p.min_estoque AND p.min_estoque > 0 AND COALESCE(p.controla_estoque, 1) = 1`);
+    whereParams.push(tenantId);
+  } else if (filtro === 'zerado') {
+    whereParts.push(`${saldoExpr} <= 0 AND COALESCE(p.controla_estoque, 1) = 1`);
+    whereParams.push(tenantId);
   }
 
   const where = 'WHERE ' + whereParts.join(' AND ');
 
-  const havingParts: string[] = [];
-  if (filtro === 'baixo')  havingParts.push('estoque <= p.min_estoque AND p.min_estoque > 0 AND COALESCE(p.controla_estoque, 1) = 1');
-  if (filtro === 'zerado') havingParts.push('estoque <= 0 AND COALESCE(p.controla_estoque, 1) = 1');
-  const having = havingParts.length ? 'HAVING ' + havingParts.join(' AND ') : '';
-
-  const baseSelect = `
+  const fromJoin = `
     FROM cad_produtos p
     LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
     ${where}`;
 
-  // tenantId = 1 (Veneza/loja-principal) usa fallback do legado; lojas novas começam em 0
-  const saldoExpr = `COALESCE(pst.saldo, IF(? = 1, p.estoque, 0))`;
-
   const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total FROM (
-       SELECT ${saldoExpr} AS estoque, p.min_estoque
-       ${baseSelect} ${having}
-     ) AS sub`,
-    [tenantId, ...baseParams]
+    `SELECT COUNT(*) as total ${fromJoin}`,
+    [tenantId, ...whereParams]
   );
 
   const [rows] = await pool.query<any>(
@@ -1068,9 +1067,9 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
             ${saldoExpr} AS estoque,
             COALESCE(p.controla_estoque, 1) AS controla_estoque,
             p.min_estoque, p.vr_compra, p.vr_venda
-     ${baseSelect} ${having}
+     ${fromJoin}
      ORDER BY p.nome_produto LIMIT ? OFFSET ?`,
-    [tenantId, ...baseParams, limit, offset]
+    [tenantId, tenantId, ...whereParams, limit, offset]
   );
 
   res.json({

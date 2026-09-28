@@ -253,6 +253,20 @@ async function runMigrations() {
     console.log('[migration] cad_produtos.controla_estoque adicionada');
   }
 
+  // Índice de busca em cad_produtos para acelerar listagens de estoque e produtos
+  try {
+    const [[{ cntIdxBusca }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdxBusca FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_produtos' AND INDEX_NAME = 'idx_cad_produtos_busca'`
+    );
+    if (Number(cntIdxBusca) === 0) {
+      await pool.query('ALTER TABLE cad_produtos ADD INDEX idx_cad_produtos_busca (inativo, nome_produto(50))');
+      console.log('[migration] idx_cad_produtos_busca adicionada');
+    }
+  } catch (idxErr) {
+    console.warn('[migration] Aviso ao criar idx_cad_produtos_busca:', idxErr);
+  }
+
   console.log('[migration] tabelas de multi-tenant OK');
 }
 

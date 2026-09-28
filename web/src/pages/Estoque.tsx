@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { ProdutoEstoque } from '../types'
 import Modal from '../components/Modal'
@@ -160,13 +160,23 @@ export default function Estoque() {
   const { currentTenant } = useAuth()
   const tid = currentTenant?.id ?? null
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filtro, setFiltro] = useState('')
   const [page, setPage] = useState(1)
   const [ajustando, setAjustando] = useState<ProdutoEstoque | null>(null)
 
-  const { data: res, isLoading } = useQuery({
-    queryKey: ['estoque', tid, search, filtro, page],
-    queryFn: () => erpApi.estoque({ search, filtro, page }),
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  const { data: res, isLoading, isFetching } = useQuery({
+    queryKey: ['estoque', tid, debouncedSearch, filtro, page],
+    queryFn: () => erpApi.estoque({ search: debouncedSearch, filtro, page }),
+    placeholderData: keepPreviousData,
   })
 
   const produtos = res?.data ?? []
@@ -208,12 +218,25 @@ export default function Estoque() {
             </button>
           ))}
         </div>
-        <input
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1) }}
-          placeholder="Buscar produto…"
-          className="flex-1 min-w-48 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
-        />
+        <div className="relative flex-1 min-w-48">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                setDebouncedSearch(search)
+                setPage(1)
+              }
+            }}
+            placeholder="Buscar produto por nome ou código…"
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
+          />
+          {(isFetching || search !== debouncedSearch) && (
+            <span className="absolute right-3 top-2.5 text-xs text-blue-400 animate-pulse font-medium">
+              Buscando…
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
