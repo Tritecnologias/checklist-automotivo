@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Printer } from 'lucide-react'
@@ -134,16 +134,17 @@ export default function OrderDetail() {
 
   const isQuote  = order.status === 'quote'
   const isClosed = order.status === 'closed'
-  const parts    = order.items.filter((i) => i.type === 'part')
-  const services = order.items.filter((i) => i.type === 'service')
-  const totalParts  = order.items.reduce((s, i) => s + i.total, 0)
-  const totalLabor  = order.items.reduce((s, i) => s + (i.laborPrice ?? 0), 0)
+  const items    = order.items || []
+  const parts    = items.filter((i) => i.type === 'part')
+  const services = items.filter((i) => i.type === 'service')
+  const totalParts  = items.reduce((s, i) => s + i.total, 0)
+  const totalLabor  = items.reduce((s, i) => s + (i.laborPrice ?? 0), 0)
   const discount    = Number(order.discountAmount ?? 0)
   const totalGeral  = order.vendaControle
     ? Number(order.totalAmount)
     : Math.max(0, totalParts + totalLabor - discount)
 
-  const handlePrint = useCallback(() => {
+  const handlePrint = () => {
     if (!order) return
     const printWindow = window.open('', '_blank', 'width=800,height=900')
     if (!printWindow) return
@@ -405,7 +406,7 @@ export default function OrderDetail() {
     `
     printWindow.document.write(html)
     printWindow.document.close()
-  }, [order, isQuote, totalParts, totalLabor, discount, totalGeral])
+  }
 
   return (
     <div className="space-y-6">
