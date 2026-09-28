@@ -93,6 +93,20 @@ export interface Lancamento {
   modo_lancamento: string
 }
 
+export interface TotaisContas {
+  total: number
+  total_recebido: number
+  total_pendente: number
+  total_vencido: number
+  por_forma_pagamento: {
+    dinheiro: number
+    cartao: number
+    pix: number
+    nota: number
+    outros: number
+  }
+}
+
 export interface ProdutoEstoque {
   id: number
   nome_produto: string

@@ -1,10 +1,15 @@
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { Lancamento } from '../types'
 import { useAuth } from '../contexts/AuthContext'
+import {
+  DollarSign, CheckCircle2, Clock, AlertTriangle,
+  CreditCard, Banknote, Zap, FileText, Calendar, Filter, X
+} from 'lucide-react'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
 const fmtDate = (d?: string | null) => {
   if (!d) return '—'
   const dateStr = String(d).split('T')[0]
@@ -19,22 +24,95 @@ const fmtDate = (d?: string | null) => {
 }
 
 const STATUS_OPTS = [
-  { value: '',  label: 'Todos' },
+  { value: '',  label: 'Todos os status' },
   { value: '0', label: 'Em aberto' },
   { value: '1', label: 'Recebido' },
 ]
+
+const getDatesPreset = (preset: string) => {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const today = `${y}-${pad(m + 1)}-${pad(now.getDate())}`
+
+  if (preset === 'hoje') {
+    return { inicio: today, fim: today }
+  }
+  if (preset === '7dias') {
+    const d = new Date()
+    d.setDate(d.getDate() - 6)
+    return {
+      inicio: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      fim: today,
+    }
+  }
+  if (preset === 'mes') {
+    const inicio = `${y}-${pad(m + 1)}-01`
+    const lastDay = new Date(y, m + 1, 0).getDate()
+    const fim = `${y}-${pad(m + 1)}-${pad(lastDay)}`
+    return { inicio, fim }
+  }
+  if (preset === 'mes_anterior') {
+    const prevMonth = new Date(y, m - 1, 1)
+    const py = prevMonth.getFullYear()
+    const pm = prevMonth.getMonth()
+    const inicio = `${py}-${pad(pm + 1)}-01`
+    const lastDay = new Date(py, pm + 1, 0).getDate()
+    const fim = `${py}-${pad(pm + 1)}-${pad(lastDay)}`
+    return { inicio, fim }
+  }
+  return { inicio: '', fim: '' }
+}
 
 export default function Contas() {
   const { currentTenant } = useAuth()
   const tid = currentTenant?.id ?? null
   const qc = useQueryClient()
+
   const [status, setStatus] = useState('0')
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
 
-  const { data: res, isLoading } = useQuery({
-    queryKey: ['contas', tid, status, search, page],
-    queryFn: () => erpApi.contas({ status, search, page }),
+  // Filtros de Data
+  const [dataPreset, setDataPreset] = useState<string>('')
+  const [dataInicio, setDataInicio] = useState('')
+  const [dataFim, setDataFim]       = useState('')
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  const aplicarPreset = (p: string) => {
+    setDataPreset(p)
+    const { inicio, fim } = getDatesPreset(p)
+    setDataInicio(inicio)
+    setDataFim(fim)
+    setPage(1)
+  }
+
+  const limparDatas = () => {
+    setDataPreset('')
+    setDataInicio('')
+    setDataFim('')
+    setPage(1)
+  }
+
+  const { data: res, isLoading, isFetching } = useQuery({
+    queryKey: ['contas', tid, status, debouncedSearch, dataInicio, dataFim, page],
+    queryFn: () => erpApi.contas({
+      status,
+      search: debouncedSearch,
+      data_inicio: dataInicio,
+      data_fim: dataFim,
+      page,
+    }),
+    placeholderData: keepPreviousData,
   })
 
   const { mutate: receber, isPending: recebendo } = useMutation({
@@ -43,83 +121,358 @@ export default function Contas() {
   })
 
   const lancamentos = res?.data ?? []
+  const totais = res?.totais
 
   return (
-    <div className="space-y-4 max-w-5xl">
-      <h1 className="text-2xl font-bold text-white">Financeiro — Contas a Receber</h1>
-
-      <div className="flex gap-3 flex-wrap">
-        <div className="flex rounded-lg overflow-hidden border border-slate-700">
-          {STATUS_OPTS.map(o => (
-            <button
-              key={o.value}
-              onClick={() => { setStatus(o.value); setPage(1) }}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
-                status === o.value
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-              }`}
-            >
-              {o.label}
-            </button>
-          ))}
+    <div className="space-y-6 max-w-6xl">
+      {/* ── CABEÇALHO ── */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
+            <DollarSign className="w-7 h-7 text-emerald-400" />
+            <span>Financeiro — Contas a Receber</span>
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Gestão de recebimentos, fluxo de caixa e formas de pagamento
+          </p>
         </div>
-        <input
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1) }}
-          placeholder="Buscar cliente ou histórico…"
-          className="flex-1 min-w-48 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
-        />
       </div>
 
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+      {/* ── CARDS DE TOTAIS GERAIS ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* Total Filtrado */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-1 shadow-lg">
+          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
+            <span>Total Geral</span>
+            <DollarSign className="w-4 h-4 text-slate-400" />
+          </div>
+          <p className="text-xl font-bold text-white">
+            {R(totais?.total ?? 0)}
+          </p>
+          <p className="text-[11px] text-slate-500 font-mono">
+            {res?.total ?? 0} lançamento(s)
+          </p>
+        </div>
+
+        {/* Total Recebido */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-1 shadow-lg">
+          <div className="flex items-center justify-between text-emerald-400 text-xs font-semibold uppercase tracking-wider">
+            <span>Recebido</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          </div>
+          <p className="text-xl font-bold text-emerald-400">
+            {R(totais?.total_recebido ?? 0)}
+          </p>
+          <p className="text-[11px] text-emerald-500/80 font-medium">
+            Confirmados em caixa
+          </p>
+        </div>
+
+        {/* Total Em Aberto / Pendente */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-1 shadow-lg">
+          <div className="flex items-center justify-between text-amber-400 text-xs font-semibold uppercase tracking-wider">
+            <span>A Receber</span>
+            <Clock className="w-4 h-4 text-amber-400" />
+          </div>
+          <p className="text-xl font-bold text-amber-400">
+            {R(totais?.total_pendente ?? 0)}
+          </p>
+          <p className="text-[11px] text-amber-500/80 font-medium">
+            Pendentes de recebimento
+          </p>
+        </div>
+
+        {/* Total Vencido */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-1 shadow-lg">
+          <div className="flex items-center justify-between text-red-400 text-xs font-semibold uppercase tracking-wider">
+            <span>Vencidos</span>
+            <AlertTriangle className="w-4 h-4 text-red-400" />
+          </div>
+          <p className="text-xl font-bold text-red-400">
+            {R(totais?.total_vencido ?? 0)}
+          </p>
+          <p className="text-[11px] text-red-500/80 font-medium">
+            Com prazo expirado
+          </p>
+        </div>
+      </div>
+
+      {/* ── CARDS DE FORMAS DE PAGAMENTO SOMADAS ── */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+            <span>💳 Formas de Pagamento Somadas no Período</span>
+          </h2>
+          <span className="text-[11px] text-slate-500">Valores consolidados</span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
+          {/* Dinheiro */}
+          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center text-emerald-400 shrink-0">
+              <Banknote className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-slate-400 font-medium truncate">Dinheiro</p>
+              <p className="text-sm font-bold text-white truncate">
+                {R(totais?.por_forma_pagamento?.dinheiro ?? 0)}
+              </p>
+            </div>
+          </div>
+
+          {/* Cartão */}
+          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-blue-950/60 border border-blue-800/60 flex items-center justify-center text-blue-400 shrink-0">
+              <CreditCard className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-slate-400 font-medium truncate">Cartão</p>
+              <p className="text-sm font-bold text-white truncate">
+                {R(totais?.por_forma_pagamento?.cartao ?? 0)}
+              </p>
+            </div>
+          </div>
+
+          {/* PIX */}
+          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-teal-950/60 border border-teal-800/60 flex items-center justify-center text-teal-400 shrink-0">
+              <Zap className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-slate-400 font-medium truncate">PIX</p>
+              <p className="text-sm font-bold text-white truncate">
+                {R(totais?.por_forma_pagamento?.pix ?? 0)}
+              </p>
+            </div>
+          </div>
+
+          {/* Nota / A Prazo */}
+          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-amber-950/60 border border-amber-800/60 flex items-center justify-center text-amber-400 shrink-0">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] text-slate-400 font-medium truncate">Nota / A Prazo</p>
+              <p className="text-sm font-bold text-white truncate">
+                {R(totais?.por_forma_pagamento?.nota ?? 0)}
+              </p>
+            </div>
+          </div>
+
+          {/* Outros / Cheque (se > 0 ou tela larga) */}
+          {(Number(totais?.por_forma_pagamento?.outros ?? 0) > 0 || window.innerWidth > 1024) && (
+            <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-purple-950/60 border border-purple-800/60 flex items-center justify-center text-purple-400 shrink-0">
+                <DollarSign className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] text-slate-400 font-medium truncate">Outros</p>
+                <p className="text-sm font-bold text-white truncate">
+                  {R(totais?.por_forma_pagamento?.outros ?? 0)}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── BARRA DE FILTROS (STATUS, DATAS E BUSCA) ── */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        {/* Linha 1: Status + Atalhos de Data */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          {/* Status Tabs */}
+          <div className="flex rounded-xl overflow-hidden border border-slate-700 bg-slate-800">
+            {STATUS_OPTS.map(o => (
+              <button
+                key={o.value}
+                onClick={() => { setStatus(o.value); setPage(1) }}
+                className={`px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  status === o.value
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-700/60'
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Atalhos Rápidos de Data */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-slate-400 flex items-center gap-1 mr-1">
+              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <span>Período:</span>
+            </span>
+            {[
+              { id: '',             label: 'Todas as datas' },
+              { id: 'hoje',         label: 'Hoje' },
+              { id: '7dias',        label: '7 dias' },
+              { id: 'mes',          label: 'Este mês' },
+              { id: 'mes_anterior', label: 'Mês anterior' },
+            ].map(preset => (
+              <button
+                key={preset.id}
+                onClick={() => aplicarPreset(preset.id)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                  dataPreset === preset.id && (dataInicio || preset.id === '')
+                    ? 'bg-indigo-600 text-white border-indigo-500'
+                    : 'bg-slate-800/70 border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Linha 2: Inputs de Data Customizada + Campo de Busca */}
+        <div className="flex items-center gap-3 flex-wrap pt-1 border-t border-slate-800/80">
+          {/* De: */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">De:</span>
+            <input
+              type="date"
+              value={dataInicio}
+              onChange={e => {
+                setDataInicio(e.target.value)
+                setDataPreset('custom')
+                setPage(1)
+              }}
+              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* Até: */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">Até:</span>
+            <input
+              type="date"
+              value={dataFim}
+              onChange={e => {
+                setDataFim(e.target.value)
+                setDataPreset('custom')
+                setPage(1)
+              }}
+              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {(dataInicio || dataFim) && (
+            <button
+              onClick={limparDatas}
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-white rounded-lg text-xs flex items-center gap-1 transition-colors"
+              title="Limpar filtro de datas"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Limpar data</span>
+            </button>
+          )}
+
+          {/* Busca por cliente, histórico ou controle */}
+          <div className="relative flex-1 min-w-56">
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  setDebouncedSearch(search)
+                  setPage(1)
+                }
+              }}
+              placeholder="Buscar por cliente, histórico ou controle…"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-blue-500"
+            />
+            {(isFetching || search !== debouncedSearch) && (
+              <span className="absolute right-3 top-2 text-[10px] text-blue-400 animate-pulse font-medium">
+                Buscando…
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── TABELA DE LANÇAMENTOS ── */}
+      <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
         {isLoading ? (
-          <div className="py-12 text-center text-slate-500 text-sm">Carregando…</div>
+          <div className="py-12 text-center text-slate-500 text-sm">Carregando lançamentos…</div>
         ) : lancamentos.length === 0 ? (
-          <div className="py-12 text-center text-slate-500 text-sm">Nenhum lançamento encontrado</div>
+          <div className="py-12 text-center text-slate-500 text-sm space-y-1">
+            <p>Nenhum lançamento encontrado para os filtros selecionados.</p>
+            <p className="text-xs text-slate-600">Tente ajustar o período ou o status da busca.</p>
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-800">
-                <th className="px-4 py-3">Vencimento</th>
-                <th className="px-4 py-3">Cliente</th>
-                <th className="px-4 py-3">Histórico</th>
-                <th className="px-4 py-3 text-right">Valor</th>
-                <th className="px-4 py-3 text-center w-28">Status</th>
-                <th className="px-4 py-3 w-24"></th>
+                <th className="px-5 py-3">Vencimento</th>
+                <th className="px-5 py-3">Cliente</th>
+                <th className="px-5 py-3">Histórico / Controle</th>
+                <th className="px-5 py-3 text-center">Forma Pagto</th>
+                <th className="px-5 py-3 text-right">Valor</th>
+                <th className="px-5 py-3 text-center w-28">Status</th>
+                <th className="px-5 py-3 w-24"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {lancamentos.map((l: Lancamento) => {
                 const vencido = l.status === 0 && new Date(l.data_lancamento) < new Date()
+                const modo = String(l.modo_lancamento || '').toUpperCase()
+
                 return (
-                  <tr key={l.id} className="hover:bg-slate-800/30">
-                    <td className="px-4 py-3">
+                  <tr key={l.id} className="hover:bg-slate-800/30 transition-colors">
+                    <td className="px-5 py-3">
                       <span className={vencido ? 'text-red-400 font-medium' : 'text-slate-300'}>
                         {fmtDate(l.data_lancamento)}
                       </span>
-                      {vencido && <span className="ml-1 text-xs text-red-500">vencido</span>}
+                      {vencido && <span className="ml-1 text-[10px] text-red-500 uppercase font-semibold">(vencido)</span>}
                     </td>
-                    <td className="px-4 py-3 text-slate-200 max-w-[180px] truncate">{l.nome_cliente || '—'}</td>
-                    <td className="px-4 py-3 text-slate-400 text-xs max-w-[200px] truncate">{l.historico || '—'}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-emerald-400">{R(Number(l.valor))}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+
+                    <td className="px-5 py-3 text-slate-200 max-w-[200px] truncate font-medium">
+                      {l.nome_cliente || 'Consumidor Final'}
+                    </td>
+
+                    <td className="px-5 py-3 text-slate-400 text-xs max-w-[240px] truncate">
+                      <span>{l.historico || '—'}</span>
+                    </td>
+
+                    <td className="px-5 py-3 text-center">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                        modo.includes('PIX')
+                          ? 'bg-teal-950/70 text-teal-300 border-teal-800/60'
+                          : modo.includes('CART')
+                          ? 'bg-blue-950/70 text-blue-300 border-blue-800/60'
+                          : modo.includes('DINHEIRO')
+                          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60'
+                          : modo.includes('NOTA') || modo.includes('DUPLICATA')
+                          ? 'bg-amber-950/70 text-amber-300 border-amber-800/60'
+                          : 'bg-slate-800 text-slate-300 border-slate-700'
+                      }`}>
+                        {l.modo_lancamento || '—'}
+                      </span>
+                    </td>
+
+                    <td className="px-5 py-3 text-right font-bold text-emerald-400">
+                      {R(Number(l.valor))}
+                    </td>
+
+                    <td className="px-5 py-3 text-center">
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                         l.status === 1
                           ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-800/40'
                           : vencido
-                            ? 'bg-red-900/30 text-red-400 border border-red-800/40'
-                            : 'bg-amber-900/20 text-amber-400 border border-amber-800/40'
+                          ? 'bg-red-900/30 text-red-400 border border-red-800/40'
+                          : 'bg-amber-900/20 text-amber-400 border border-amber-800/40'
                       }`}>
                         {l.status === 1 ? 'Recebido' : vencido ? 'Vencido' : 'Pendente'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-center">
+
+                    <td className="px-5 py-3 text-center">
                       {l.status === 0 && (
                         <button
                           onClick={() => receber(l.id)}
                           disabled={recebendo}
-                          className="px-3 py-1 rounded-lg bg-emerald-800/30 hover:bg-emerald-700/40 text-emerald-400 text-xs font-medium border border-emerald-800/40 transition-colors disabled:opacity-50"
+                          className="px-3 py-1 rounded-lg bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 text-xs font-semibold border border-emerald-700/60 transition-colors disabled:opacity-50"
                         >
                           Receber
                         </button>
@@ -133,12 +486,24 @@ export default function Contas() {
         )}
 
         {(res?.pages ?? 0) > 1 && (
-          <div className="px-4 py-3 border-t border-slate-800 flex items-center justify-between text-sm text-slate-500">
+          <div className="px-5 py-3 border-t border-slate-800 flex items-center justify-between text-sm text-slate-500">
             <span>{res?.total} lançamentos</span>
             <div className="flex gap-2">
-              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40">←</button>
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage(p => p - 1)}
+                className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 transition-colors"
+              >
+                ←
+              </button>
               <span className="px-2 py-1 text-slate-400">{page} / {res?.pages}</span>
-              <button disabled={page >= (res?.pages ?? 1)} onClick={() => setPage(p => p + 1)} className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40">→</button>
+              <button
+                disabled={page >= (res?.pages ?? 1)}
+                onClick={() => setPage(p => p + 1)}
+                className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 transition-colors"
+              >
+                →
+              </button>
             </div>
           </div>
         )}

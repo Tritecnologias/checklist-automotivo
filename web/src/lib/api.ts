@@ -1,7 +1,7 @@
 import type {
   Order, OrderItem, CatalogItem, Vehicle, OrderClient, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
-  TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse,
+  TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -165,12 +165,20 @@ export const erpApi = {
   carregarOsPdv: (id: string) =>
     adminRequest<ImportarOsPdvResponse>(`/erp/pdv/os/${id}`),
 
-  contas: (params: { status?: string; page?: number; search?: string }) => {
+  contas: (params: {
+    status?: string;
+    page?: number;
+    search?: string;
+    data_inicio?: string;
+    data_fim?: string;
+  }) => {
     const q = new URLSearchParams()
     if (params.status) q.set('status', params.status)
     if (params.page)   q.set('page',   String(params.page))
     if (params.search) q.set('search', params.search)
-    return adminRequest<{ data: Lancamento[]; total: number; pages: number }>(`/erp/contas?${q}`)
+    if (params.data_inicio) q.set('data_inicio', params.data_inicio)
+    if (params.data_fim)    q.set('data_fim',    params.data_fim)
+    return adminRequest<{ data: Lancamento[]; total: number; pages: number; totais?: TotaisContas }>(`/erp/contas?${q}`)
   },
   receberConta: (id: number) =>
     adminRequest(`/erp/contas/${id}/receber`, { method: 'PATCH' }),
