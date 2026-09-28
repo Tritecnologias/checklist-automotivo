@@ -208,6 +208,22 @@ export interface OrderItem {
   instalacaoSigla?: string | null
 }
 
+export interface InstItem {
+  id: number
+  sigla: string
+  nome: string
+}
+
+export interface CatalogItem {
+  id: number
+  code: string
+  description: string
+  type: 'part' | 'service'
+  unitPrice: number
+  stock?: number
+  instalacoes: InstItem[]
+}
+
 export interface Order {
   id: string
   tenantId: number

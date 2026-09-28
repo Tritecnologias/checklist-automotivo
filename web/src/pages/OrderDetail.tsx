@@ -1,18 +1,34 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Printer } from 'lucide-react'
+import {
+  Printer,
+  Search,
+  Plus,
+  Minus,
+  Trash2,
+  Wrench,
+  Package,
+  Edit2,
+  X,
+  Check,
+  AlertCircle,
+  ShoppingCart,
+} from 'lucide-react'
 import { api } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
-import type { OrderItem } from '../types'
+import type { OrderItem, CatalogItem } from '../types'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: '2-digit',
-    hour: '2-digit', minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 
 export default function OrderDetail() {
@@ -20,12 +36,12 @@ export default function OrderDetail() {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
-  // ── estado de modais ──────────────────────────────────────────────────────
-  const [confirmClose, setConfirmClose]   = useState(false)
-  const [showReopenPin, setShowReopenPin] = useState(false)
-  const [pin, setPin]                     = useState('')
-  const [pinError, setPinError]           = useState('')
-  const [verifying, setVerifying]         = useState(false)
+  // ── estado de modais de OS ────────────────────────────────────────────────
+  const [confirmClose, setConfirmClose]     = useState(false)
+  const [showReopenPin, setShowReopenPin]   = useState(false)
+  const [pin, setPin]                       = useState('')
+  const [pinError, setPinError]             = useState('')
+  const [verifying, setVerifying]           = useState(false)
 
   // ── estado de edição de cliente ───────────────────────────────────────────
   const [editClientOpen, setEditClientOpen]   = useState(false)
@@ -34,19 +50,72 @@ export default function OrderDetail() {
   const [editClientDoc, setEditClientDoc]     = useState('')
   const [editClientError, setEditClientError] = useState('')
 
+  // ── estado de busca no catálogo ───────────────────────────────────────────
+  const [searchQuery, setSearchQuery]           = useState('')
+  const [debouncedQuery, setDebouncedQuery]     = useState('')
+  const [searchFocused, setSearchFocused]       = useState(false)
+  const searchContainerRef                      = useRef<HTMLDivElement>(null)
+
+  // ── estado do modal de adicionar item ─────────────────────────────────────
+  const [selectedCatalogItem, setSelectedCatalogItem] = useState<CatalogItem | null>(null)
+  const [addItemQty, setAddItemQty]                   = useState(1)
+  const [addItemUnitPrice, setAddItemUnitPrice]       = useState<number>(0)
+  const [addItemLabor, setAddItemLabor]               = useState<number>(0)
+  const [addItemInstId, setAddItemInstId]             = useState<number | null>(null)
+  const [addItemError, setAddItemError]               = useState('')
+
+  // ── estado do modal de exclusão de item ───────────────────────────────────
+  const [itemToDelete, setItemToDelete] = useState<OrderItem | null>(null)
+
+  // ── estado do modal de edição de mão de obra de item ──────────────────────
+  const [editingLaborItem, setEditingLaborItem] = useState<OrderItem | null>(null)
+  const [laborInputValue, setLaborInputValue]   = useState('')
+  const [laborError, setLaborError]             = useState('')
+
+  // Debounce da busca de catálogo
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery.trim())
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Fechar dropdown de busca ao clicar fora
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setSearchFocused(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // ── Queries ───────────────────────────────────────────────────────────────
   const { data: order, isLoading, isError } = useQuery({
     queryKey: ['order', id],
     queryFn: () => api.getOrder(id!),
     enabled: !!id,
   })
 
-  // ── Editar Cliente ───────────────────────────────────────────────────────
+  const isClosed = order?.status === 'closed'
+
+  const { data: searchResults, isFetching: searchingCatalog } = useQuery({
+    queryKey: ['catalog-search', debouncedQuery],
+    queryFn: () => api.searchCatalog(debouncedQuery),
+    enabled: debouncedQuery.length >= 2 && !isClosed,
+  })
+
+  // ── Mutações ──────────────────────────────────────────────────────────────
+
+  // Editar Cliente
   const { mutate: handleUpdateClient, isPending: savingClient } = useMutation({
-    mutationFn: () => api.updateOrderClient(id!, {
-      name: editClientName.trim(),
-      phone: editClientPhone.trim(),
-      document: editClientDoc.trim() || undefined,
-    }),
+    mutationFn: () =>
+      api.updateOrderClient(id!, {
+        name: editClientName.trim(),
+        phone: editClientPhone.trim(),
+        document: editClientDoc.trim() || undefined,
+      }),
     onSuccess: (updated) => {
       qc.setQueryData(['order', id], updated)
       qc.invalidateQueries({ queryKey: ['orders'] })
@@ -57,7 +126,7 @@ export default function OrderDetail() {
     },
   })
 
-  // ── Aprovar Orçamento (Virar OS) ─────────────────────────────────────────
+  // Aprovar Orçamento (Virar OS)
   const { mutate: approveQuote, isPending: approving } = useMutation({
     mutationFn: () => api.approveQuote(id!),
     onSuccess: (updated) => {
@@ -66,7 +135,7 @@ export default function OrderDetail() {
     },
   })
 
-  // ── Encerrar OS ──────────────────────────────────────────────────────────
+  // Encerrar OS
   const { mutate: closeOrder, isPending: closing } = useMutation({
     mutationFn: () => api.updateOrderStatus(id!, 'closed'),
     onSuccess: (updated) => {
@@ -76,7 +145,7 @@ export default function OrderDetail() {
     },
   })
 
-  // ── Reabrir OS ───────────────────────────────────────────────────────────
+  // Reabrir OS
   const { mutate: reopenOrder, isPending: reopening } = useMutation({
     mutationFn: () => api.reopenOrder(id!),
     onSuccess: (updated) => {
@@ -87,6 +156,107 @@ export default function OrderDetail() {
       setPinError('')
     },
   })
+
+  // Adicionar Item
+  const { mutate: handleAddItem, isPending: addingItem } = useMutation({
+    mutationFn: async () => {
+      if (!selectedCatalogItem) throw new Error('Nenhum item selecionado')
+      if (
+        selectedCatalogItem.instalacoes &&
+        selectedCatalogItem.instalacoes.length > 0 &&
+        !addItemInstId
+      ) {
+        throw new Error('Selecione o local de instalação obrigatório')
+      }
+      return api.addItem(id!, {
+        catalogItemId: selectedCatalogItem.id,
+        quantity: addItemQty,
+        unitPrice: addItemUnitPrice,
+        laborPrice: addItemLabor,
+        instalacaoId: addItemInstId,
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['order', id] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      setSelectedCatalogItem(null)
+      setSearchQuery('')
+      setDebouncedQuery('')
+      setSearchFocused(false)
+    },
+    onError: (err: any) => {
+      setAddItemError(err.message || 'Erro ao adicionar item')
+    },
+  })
+
+  // Remover Item
+  const { mutate: handleDeleteItem, isPending: deletingItem } = useMutation({
+    mutationFn: (itemId: string) => api.removeItem(id!, itemId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['order', id] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      setItemToDelete(null)
+    },
+  })
+
+  // Atualizar Quantidade
+  const { mutate: handleUpdateQuantity } = useMutation({
+    mutationFn: ({ itemId, quantity }: { itemId: string; quantity: number }) =>
+      api.updateItemQuantity(id!, itemId, quantity),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['order', id] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+
+  // Atualizar Mão de Obra do Item
+  const { mutate: handleUpdateLabor, isPending: updatingLabor } = useMutation({
+    mutationFn: () => {
+      if (!editingLaborItem) throw new Error('Nenhum item selecionado')
+      const val = parseFloat(laborInputValue.replace(',', '.'))
+      if (isNaN(val) || val < 0) throw new Error('Informe um valor válido maior ou igual a zero')
+      return api.updateItemLabor(id!, editingLaborItem.id, val)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['order', id] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      setEditingLaborItem(null)
+    },
+    onError: (err: any) => {
+      setLaborError(err.message || 'Erro ao atualizar mão de obra')
+    },
+  })
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  const handleSelectCatalogItem = (item: CatalogItem) => {
+    setSelectedCatalogItem(item)
+    setAddItemQty(1)
+    setAddItemUnitPrice(item.unitPrice)
+    setAddItemLabor(0)
+    setAddItemInstId(
+      item.instalacoes && item.instalacoes.length > 0 ? item.instalacoes[0].id : null
+    )
+    setAddItemError('')
+    setSearchFocused(false)
+  }
+
+  const handleQuantityDelta = (item: OrderItem, delta: number) => {
+    if (isClosed) return
+    const next = item.quantity + delta
+    if (next <= 0) {
+      setItemToDelete(item)
+    } else {
+      handleUpdateQuantity({ itemId: item.id, quantity: next })
+    }
+  }
+
+  const handleOpenEditLabor = (item: OrderItem) => {
+    if (isClosed) return
+    setEditingLaborItem(item)
+    setLaborInputValue(String(item.laborPrice ?? 0))
+    setLaborError('')
+  }
 
   const handleReopenClick = () => {
     setPin('')
@@ -115,7 +285,7 @@ export default function OrderDetail() {
     }
   }
 
-  // ── Renderização ─────────────────────────────────────────────────────────
+  // ── Renderização Condicional Inicial ──────────────────────────────────────
 
   if (isLoading) {
     return <div className="py-32 text-center text-slate-500">Carregando OS…</div>
@@ -125,7 +295,10 @@ export default function OrderDetail() {
     return (
       <div className="py-32 text-center">
         <p className="text-red-400 mb-4">Registro não encontrado.</p>
-        <button onClick={() => navigate('/orders')} className="text-blue-400 hover:text-blue-300 text-sm">
+        <button
+          onClick={() => navigate('/orders')}
+          className="text-blue-400 hover:text-blue-300 text-sm"
+        >
           ← Voltar para lista
         </button>
       </div>
@@ -133,14 +306,13 @@ export default function OrderDetail() {
   }
 
   const isQuote  = order.status === 'quote'
-  const isClosed = order.status === 'closed'
   const items    = order.items || []
   const parts    = items.filter((i) => i.type === 'part')
   const services = items.filter((i) => i.type === 'service')
-  const totalParts  = items.reduce((s, i) => s + i.total, 0)
-  const totalLabor  = items.reduce((s, i) => s + (i.laborPrice ?? 0), 0)
-  const discount    = Number(order.discountAmount ?? 0)
-  const totalGeral  = order.vendaControle
+  const totalParts = items.reduce((s, i) => s + i.total, 0)
+  const totalLabor = items.reduce((s, i) => s + (i.laborPrice ?? 0), 0)
+  const discount   = Number(order.discountAmount ?? 0)
+  const totalGeral = order.vendaControle
     ? Number(order.totalAmount)
     : Math.max(0, totalParts + totalLabor - discount)
 
@@ -346,6 +518,7 @@ export default function OrderDetail() {
               <tr>
                 <td>
                   <strong>${i.description}</strong>
+                  ${i.instalacaoSigla ? `<span style="font-size:10px; background:#e0f2fe; color:#0369a1; padding:2px 5px; border-radius:4px; margin-left:6px; font-weight:bold;">${i.instalacaoSigla}</span>` : ''}
                   ${i.code ? `<br/><small style="color:#64748b;">Cód: ${i.code}</small>` : ''}
                 </td>
                 <td class="text-right">${i.quantity}</td>
@@ -427,7 +600,7 @@ export default function OrderDetail() {
             <div>
               <p className="text-sm font-semibold text-purple-200">Orçamento Aguardando Aprovação</p>
               <p className="text-xs text-purple-300/80 mt-0.5">
-                O cliente aprovou o orçamento? Clique no botão para transformá-lo automaticamente em uma Ordem de Serviço em aberto.
+                Monte os itens e a proposta abaixo. Quando o cliente aprovar, clique no botão para transformar automaticamente em Ordem de Serviço.
               </p>
             </div>
           </div>
@@ -449,7 +622,7 @@ export default function OrderDetail() {
           <div>
             <p className="text-sm font-semibold text-slate-300">OS Encerrada — Somente leitura</p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Nenhuma alteração pode ser feita. Solicite a reabertura a um administrador.
+              Nenhuma alteração pode ser feita. Solicite a reabertura a um administrador para editar itens.
             </p>
           </div>
         </div>
@@ -595,6 +768,449 @@ export default function OrderDetail() {
         </div>
       </div>
 
+      {/* ── BARRA DE ADICIONAR PEÇAS E SERVIÇOS DO CATÁLOGO ────────────────────── */}
+      {!isClosed && (
+        <div
+          ref={searchContainerRef}
+          className="bg-slate-900 rounded-2xl border border-slate-800 p-5 shadow-xl relative"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                <ShoppingCart className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-white">
+                  {isQuote ? 'Adicionar Peças e Serviços ao Orçamento' : 'Adicionar Peças e Serviços à OS'}
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Busque pelo nome ou código de barras para lançar itens nesta proposta
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="relative">
+            <div className="relative flex items-center">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value)
+                  setSearchFocused(true)
+                }}
+                onFocus={() => setSearchFocused(true)}
+                placeholder="Buscar por código de barras, código ou nome (ex: Óleo, Filtro, Pastilha, Revisão)..."
+                className="w-full bg-slate-800/80 border border-slate-700 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-10 pr-10 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all shadow-inner"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('')
+                    setDebouncedQuery('')
+                  }}
+                  className="absolute right-3 text-slate-400 hover:text-white p-1 rounded-md"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Dropdown de Resultados da Busca */}
+            {searchFocused && debouncedQuery.length >= 2 && (
+              <div className="absolute left-0 right-0 top-full mt-2 bg-slate-900/98 backdrop-blur-xl border border-slate-700 rounded-2xl shadow-2xl z-40 overflow-hidden max-h-96 overflow-y-auto divide-y divide-slate-800">
+                {searchingCatalog && (
+                  <div className="p-5 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    <span>Buscando produtos e serviços no catálogo...</span>
+                  </div>
+                )}
+
+                {!searchingCatalog && (!searchResults || searchResults.length === 0) && (
+                  <div className="p-6 text-center text-slate-400 text-xs">
+                    Nenhum produto ou serviço encontrado para &ldquo;<span className="text-white font-semibold">{debouncedQuery}</span>&rdquo;.
+                  </div>
+                )}
+
+                {!searchingCatalog &&
+                  searchResults &&
+                  searchResults.map((item) => (
+                    <div
+                      key={item.id}
+                      onClick={() => handleSelectCatalogItem(item)}
+                      className="p-3.5 hover:bg-slate-800/80 transition-colors cursor-pointer flex items-center justify-between gap-4 group"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                            item.type === 'part'
+                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                          }`}
+                        >
+                          {item.type === 'part' ? (
+                            <Package className="w-4 h-4" />
+                          ) : (
+                            <Wrench className="w-4 h-4" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-white group-hover:text-blue-300 transition-colors truncate">
+                              {item.description}
+                            </span>
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${
+                                item.type === 'part'
+                                  ? 'bg-amber-950/70 text-amber-300 border-amber-800/60'
+                                  : 'bg-blue-950/70 text-blue-300 border-blue-800/60'
+                              }`}
+                            >
+                              {item.type === 'part' ? 'Peça' : 'Serviço'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-slate-400 mt-0.5">
+                            <span className="font-mono text-slate-500">Cód: {item.code}</span>
+                            {item.stock !== undefined && (
+                              <span
+                                className={`font-medium ${
+                                  item.stock > 0 ? 'text-emerald-400' : 'text-slate-500'
+                                }`}
+                              >
+                                Estoque: {item.stock} un
+                              </span>
+                            )}
+                            {item.instalacoes && item.instalacoes.length > 0 && (
+                              <span className="text-blue-400/90 text-[11px] font-medium">
+                                📍 {item.instalacoes.length} posições disponíveis
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-base font-bold text-emerald-400 font-mono">
+                          {currency(item.unitPrice)}
+                        </span>
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 bg-blue-600 group-hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow transition-all flex items-center gap-1"
+                        >
+                          <span>Incluir</span>
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: CONFIGURAR E ADICIONAR ITEM ───────────────────────────────── */}
+      {selectedCatalogItem && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-lg shadow-2xl">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider ${
+                      selectedCatalogItem.type === 'part'
+                        ? 'bg-amber-950/70 text-amber-300 border-amber-800/60'
+                        : 'bg-blue-950/70 text-blue-300 border-blue-800/60'
+                    }`}
+                  >
+                    {selectedCatalogItem.type === 'part' ? 'Peça' : 'Serviço'}
+                  </span>
+                  <span className="text-xs font-mono text-slate-400">
+                    Cód: {selectedCatalogItem.code}
+                  </span>
+                </div>
+                <h2 className="text-lg font-bold text-white leading-snug">
+                  {selectedCatalogItem.description}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCatalogItem(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {addItemError && (
+              <div className="bg-red-950/60 border border-red-800 text-red-300 text-xs px-4 py-2.5 rounded-xl mb-4 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                <span>{addItemError}</span>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {/* Seleção de Instalação (se houver posições cadastradas) */}
+              {selectedCatalogItem.instalacoes && selectedCatalogItem.instalacoes.length > 0 && (
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-2">
+                    Posição de Instalação *
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {selectedCatalogItem.instalacoes.map((inst) => (
+                      <button
+                        key={inst.id}
+                        type="button"
+                        onClick={() => setAddItemInstId(inst.id)}
+                        className={`p-2.5 rounded-xl text-left border transition-all flex items-center justify-between ${
+                          addItemInstId === inst.id
+                            ? 'bg-blue-600/20 border-blue-500 text-white shadow-sm ring-1 ring-blue-500/50'
+                            : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <span className="font-mono font-bold text-blue-400 block text-xs">
+                            {inst.sigla}
+                          </span>
+                          <span className="text-[11px] text-slate-300 truncate block">
+                            {inst.nome}
+                          </span>
+                        </div>
+                        {addItemInstId === inst.id && (
+                          <Check className="w-4 h-4 text-blue-400 shrink-0" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Quantidade e Valores */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Quantidade */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Quantidade
+                  </label>
+                  <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setAddItemQty((q) => Math.max(1, q - 1))}
+                      className="w-9 h-10 flex items-center justify-center text-slate-300 hover:bg-slate-700 transition-colors"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <input
+                      type="number"
+                      min="1"
+                      value={addItemQty}
+                      onChange={(e) => setAddItemQty(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full bg-transparent text-center font-bold text-white text-sm focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAddItemQty((q) => q + 1)}
+                      className="w-9 h-10 flex items-center justify-center text-slate-300 hover:bg-slate-700 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Preço Unitário */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Preço Unitário (R$)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={addItemUnitPrice}
+                      onChange={(e) => setAddItemUnitPrice(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Mão de Obra */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Mão de Obra (R$)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={addItemLabor}
+                      onChange={(e) => setAddItemLabor(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Pré-visualização do Cálculo do Item */}
+              <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3.5 flex items-center justify-between text-xs">
+                <div>
+                  <p className="text-slate-400">
+                    Subtotal Peça: <strong className="text-white">{currency(addItemQty * addItemUnitPrice)}</strong>
+                  </p>
+                  {addItemLabor > 0 && (
+                    <p className="text-blue-300 mt-0.5">
+                      + Mão de Obra: <strong>{currency(addItemLabor)}</strong>
+                    </p>
+                  )}
+                </div>
+                <div className="text-right">
+                  <span className="text-[11px] text-slate-400 block uppercase font-bold">Total do Item</span>
+                  <span className="text-base font-extrabold text-emerald-400 font-mono">
+                    {currency(addItemQty * addItemUnitPrice + addItemLabor)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-5 mt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSelectedCatalogItem(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddItem()}
+                disabled={
+                  addingItem ||
+                  (selectedCatalogItem.instalacoes &&
+                    selectedCatalogItem.instalacoes.length > 0 &&
+                    !addItemInstId)
+                }
+                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-900/30 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+              >
+                {addingItem ? (
+                  <span>Adicionando…</span>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    <span>{isQuote ? 'Adicionar ao Orçamento' : 'Adicionar à OS'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: CONFIRMAR EXCLUSÃO DE ITEM ─────────────────────────────────── */}
+      {itemToDelete && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-sm shadow-2xl">
+            <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 mb-3 mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h2 className="text-base font-bold text-white text-center mb-1">Remover Item?</h2>
+            <p className="text-slate-400 text-xs text-center mb-5">
+              Tem certeza que deseja remover <strong className="text-white">{itemToDelete.description}</strong>{' '}
+              {isQuote ? 'deste orçamento' : 'desta Ordem de Serviço'}?
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteItem(itemToDelete.id)}
+                disabled={deletingItem}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-semibold disabled:opacity-50"
+              >
+                {deletingItem ? 'Removendo…' : 'Sim, remover'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: EDITAR MÃO DE OBRA DE ITEM ───────────────────────────────── */}
+      {editingLaborItem && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-blue-400" />
+                <h2 className="text-base font-bold text-white">Editar Mão de Obra</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingLaborItem(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 mb-4">
+              Item: <strong className="text-slate-200">{editingLaborItem.description}</strong>
+            </p>
+
+            {laborError && (
+              <div className="bg-red-950/50 border border-red-800 rounded-xl px-3 py-2 text-red-300 text-xs mb-3">
+                {laborError}
+              </div>
+            )}
+
+            <div className="mb-5">
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Valor da Mão de Obra (R$)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                  R$
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={laborInputValue}
+                  onChange={(e) => setLaborInputValue(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl pl-10 pr-4 py-2.5 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setEditingLaborItem(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUpdateLabor()}
+                disabled={updatingLabor}
+                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold disabled:opacity-50"
+              >
+                {updatingLabor ? 'Salvando…' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAIS EXISTENTES (ENCERRAMENTO, REABERTURA E CLIENTE) ────────────── */}
       {/* Modal — Confirmar Encerramento */}
       {confirmClose && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
@@ -760,35 +1376,75 @@ export default function OrderDetail() {
         </div>
       )}
 
-      {/* Items */}
+      {/* ── LISTA DE ITENS LANÇADOS ──────────────────────────────────────────── */}
       {order.items.length === 0 ? (
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 py-16 text-center text-slate-500">
-          Nenhum item lançado nesta OS.
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 py-16 px-6 text-center shadow-lg">
+          <div className="w-14 h-14 rounded-2xl bg-slate-800/80 border border-slate-700/80 flex items-center justify-center text-slate-400 mx-auto mb-3">
+            <ShoppingCart className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-white mb-1">
+            {isQuote ? 'Nenhum item adicionado ao orçamento' : 'Nenhum item lançado nesta OS'}
+          </h3>
+          <p className="text-sm text-slate-400 max-w-md mx-auto">
+            {!isClosed ? (
+              <>
+                Utilize o campo de busca acima para pesquisar peças e serviços no catálogo e montar a proposta para o cliente.
+              </>
+            ) : (
+              'Esta Ordem de Serviço foi encerrada sem itens cadastrados.'
+            )}
+          </p>
         </div>
       ) : (
         <div className="space-y-4">
           {parts.length > 0 && (
-            <ItemsTable title="Peças" items={parts} accentColor="text-amber-400" />
+            <ItemsTable
+              title="Peças"
+              items={parts}
+              accentColor="text-amber-400"
+              isClosed={isClosed}
+              onUpdateQuantity={handleQuantityDelta}
+              onEditLabor={handleOpenEditLabor}
+              onDeleteItem={setItemToDelete}
+            />
           )}
           {services.length > 0 && (
-            <ItemsTable title="Mão de Obra" items={services} accentColor="text-blue-400" />
+            <ItemsTable
+              title="Mão de Obra e Serviços"
+              items={services}
+              accentColor="text-blue-400"
+              isClosed={isClosed}
+              onUpdateQuantity={handleQuantityDelta}
+              onEditLabor={handleOpenEditLabor}
+              onDeleteItem={setItemToDelete}
+            />
           )}
         </div>
       )}
 
       {/* Summary */}
       {order.items.length > 0 && (
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
-          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Resumo</h3>
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 shadow-xl">
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">
+            Resumo dos Valores
+          </h3>
           <div className="space-y-2.5">
-            <SummaryRow label="Total Peças"      value={currency(totalParts)} color="text-amber-400" />
-            <SummaryRow label="Total Mão de Obra" value={currency(totalLabor)} color="text-blue-400" />
+            <SummaryRow label="Total Peças" value={currency(totalParts)} color="text-amber-400" />
+            <SummaryRow
+              label="Total Mão de Obra"
+              value={currency(totalLabor)}
+              color="text-blue-400"
+            />
             {discount > 0 && (
-              <SummaryRow label="Desconto Aplicado" value={`- ${currency(discount)}`} color="text-amber-400" />
+              <SummaryRow
+                label="Desconto Aplicado"
+                value={`- ${currency(discount)}`}
+                color="text-amber-400"
+              />
             )}
             <div className="border-t border-slate-700 pt-3 mt-1">
               <SummaryRow
-                label={order.vendaControle ? "Total Faturado no PDV" : "Total Geral"}
+                label={order.vendaControle ? 'Total Faturado no PDV' : 'Total Geral'}
                 value={currency(totalGeral)}
                 color="text-green-400"
                 bold
@@ -809,14 +1465,29 @@ export default function OrderDetail() {
 }
 
 function ItemsTable({
-  title, items, accentColor,
+  title,
+  items,
+  accentColor,
+  isClosed,
+  onUpdateQuantity,
+  onEditLabor,
+  onDeleteItem,
 }: {
-  title: string; items: OrderItem[]; accentColor: string
+  title: string
+  items: OrderItem[]
+  accentColor: string
+  isClosed: boolean
+  onUpdateQuantity: (item: OrderItem, delta: number) => void
+  onEditLabor: (item: OrderItem) => void
+  onDeleteItem: (item: OrderItem) => void
 }) {
   return (
-    <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-800">
+    <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-lg">
+      <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">{title}</h3>
+        <span className="text-xs text-slate-400">
+          {items.length} {items.length === 1 ? 'item' : 'itens'}
+        </span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -825,26 +1496,99 @@ function ItemsTable({
               <th className="px-5 py-3">Código</th>
               <th className="px-5 py-3">Descrição</th>
               <th className="px-5 py-3 text-right">Qtd</th>
-              <th className="px-5 py-3 text-right">Unit.</th>
+              <th className="px-5 py-3 text-right">Unitário</th>
               <th className="px-5 py-3 text-right">Total Peça</th>
-              <th className="px-5 py-3 text-right">M.O.</th>
+              <th className="px-5 py-3 text-right">Mão de Obra</th>
+              {!isClosed && <th className="px-5 py-3 text-right w-16">Ações</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {items.map((item) => (
-              <tr key={item.id} className="hover:bg-slate-800/30">
-                <td className="px-5 py-3 font-mono text-xs text-slate-400">{item.code}</td>
-                <td className="px-5 py-3 text-slate-200">{item.description}</td>
-                <td className="px-5 py-3 text-right text-slate-300">{item.quantity}</td>
-                <td className="px-5 py-3 text-right text-slate-300">
+              <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
+                <td className="px-5 py-3 font-mono text-xs text-slate-400">{item.code || '—'}</td>
+                <td className="px-5 py-3 text-slate-200">
+                  <div className="flex items-center flex-wrap gap-2">
+                    <span className="font-medium text-white">{item.description}</span>
+                    {item.instalacaoSigla && (
+                      <span
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-mono font-bold bg-blue-950/80 text-blue-300 border border-blue-800/80"
+                        title="Posição de instalação"
+                      >
+                        {item.instalacaoSigla}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-5 py-3 text-right">
+                  {!isClosed ? (
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => onUpdateQuantity(item, -1)}
+                        className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors border border-slate-700"
+                        title="Diminuir quantidade"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="w-8 text-center font-bold text-white font-mono text-sm">
+                        {item.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateQuantity(item, 1)}
+                        className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors border border-slate-700"
+                        title="Aumentar quantidade"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-slate-300 font-mono">{item.quantity}</span>
+                  )}
+                </td>
+                <td className="px-5 py-3 text-right text-slate-300 font-mono">
                   {currency(item.unitPrice)}
                 </td>
-                <td className={`px-5 py-3 text-right font-semibold ${accentColor}`}>
+                <td className={`px-5 py-3 text-right font-semibold font-mono ${accentColor}`}>
                   {currency(item.total)}
                 </td>
-                <td className="px-5 py-3 text-right font-semibold text-blue-400">
-                  {(item.laborPrice ?? 0) > 0 ? currency(item.laborPrice) : '—'}
+                <td className="px-5 py-3 text-right">
+                  {!isClosed ? (
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span
+                        className={`font-semibold font-mono ${
+                          (item.laborPrice ?? 0) > 0 ? 'text-blue-400' : 'text-slate-500'
+                        }`}
+                      >
+                        {(item.laborPrice ?? 0) > 0 ? currency(item.laborPrice) : '—'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onEditLabor(item)}
+                        className="text-slate-500 hover:text-blue-300 p-1 rounded-md hover:bg-slate-800 transition-colors"
+                        title="Editar valor de mão de obra deste item"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="font-semibold font-mono text-blue-400">
+                      {(item.laborPrice ?? 0) > 0 ? currency(item.laborPrice) : '—'}
+                    </span>
+                  )}
                 </td>
+                {!isClosed && (
+                  <td className="px-5 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onDeleteItem(item)}
+                      className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-950/40 transition-colors inline-flex items-center"
+                      title="Excluir item desta OS"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -855,14 +1599,24 @@ function ItemsTable({
 }
 
 function SummaryRow({
-  label, value, color, bold,
+  label,
+  value,
+  color,
+  bold,
 }: {
-  label: string; value: string; color: string; bold?: boolean
+  label: string
+  value: string
+  color: string
+  bold?: boolean
 }) {
   return (
     <div className="flex justify-between items-center">
-      <span className={`text-sm ${bold ? 'font-bold text-white' : 'text-slate-400'}`}>{label}</span>
-      <span className={`text-sm font-semibold ${color} ${bold ? 'text-base' : ''}`}>{value}</span>
+      <span className={`text-sm ${bold ? 'font-bold text-white' : 'text-slate-400'}`}>
+        {label}
+      </span>
+      <span className={`text-sm font-semibold font-mono ${color} ${bold ? 'text-base' : ''}`}>
+        {value}
+      </span>
     </div>
   )
 }

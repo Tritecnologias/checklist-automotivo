@@ -1,5 +1,5 @@
 import type {
-  Order, Vehicle, OrderClient, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
+  Order, OrderItem, CatalogItem, Vehicle, OrderClient, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse,
 } from '../types'
@@ -70,6 +70,36 @@ export const api = {
     request<{ authorized: boolean; supervisorName?: string }>('/auth/verify-supervisor-pin', {
       method: 'POST',
       body: JSON.stringify({ pin }),
+    }),
+  searchCatalog: (query: string) =>
+    request<CatalogItem[]>(`/items?search=${encodeURIComponent(query)}`),
+  addItem: (
+    orderId: string,
+    payload: {
+      catalogItemId: number | string
+      quantity?: number
+      unitPrice?: number
+      laborPrice?: number
+      instalacaoId?: number | null
+    }
+  ) =>
+    request<OrderItem>(`/orders/${orderId}/items`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  removeItem: (orderId: string, itemId: string) =>
+    request<void>(`/orders/${orderId}/items/${itemId}`, {
+      method: 'DELETE',
+    }),
+  updateItemQuantity: (orderId: string, itemId: string, quantity: number) =>
+    request<OrderItem>(`/orders/${orderId}/items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ quantity }),
+    }),
+  updateItemLabor: (orderId: string, itemId: string, laborPrice: number) =>
+    request<Order>(`/orders/${orderId}/items/${itemId}/labor`, {
+      method: 'PATCH',
+      body: JSON.stringify({ laborPrice }),
     }),
 }
 
