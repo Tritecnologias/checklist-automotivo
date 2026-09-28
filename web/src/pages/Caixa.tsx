@@ -5,7 +5,18 @@ import type { CaixaSession } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR')
+const fmtDate = (d?: string | null) => {
+  if (!d) return '—'
+  const dateStr = String(d).split('T')[0]
+  if (dateStr.includes('-')) {
+    const [ano, mes, dia] = dateStr.split('-')
+    if (ano && mes && dia) {
+      return `${dia.padStart(2, '0')}/${mes.padStart(2, '0')}/${ano}`
+    }
+  }
+  const parsed = new Date(d)
+  return isNaN(parsed.getTime()) ? '—' : parsed.toLocaleDateString('pt-BR')
+}
 
 export default function Caixa() {
   const { currentTenant } = useAuth()
