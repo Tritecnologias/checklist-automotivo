@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { Venda } from '../types'
 import { useAuth } from '../contexts/AuthContext'
+import { printThermalReceipt, type ThermalReceiptData } from '../lib/thermalPrint'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const today = () => new Date().toISOString().slice(0, 10)
@@ -163,6 +164,49 @@ export default function Vendas() {
                     <span className="text-emerald-400">{R(Number(detalhe.vr_total))}</span>
                   </div>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const receiptData: ThermalReceiptData = {
+                      empresa: currentTenant?.nome || '4Rodas Centro Automotivo',
+                      controle: detalhe.controle,
+                      dataHora: `${detalhe.data_venda} ${detalhe.hora_venda || ''}`.trim(),
+                      cliente: detalhe.nome_cliente ? {
+                        nome: detalhe.nome_cliente,
+                        documento: (detalhe as any).cpf_cnpj,
+                        telefone: (detalhe as any).telefone || (detalhe as any).celular,
+                      } : null,
+                      os: (detalhe as any).os_plate ? {
+                        plate: (detalhe as any).os_plate,
+                        model: (detalhe as any).os_model,
+                      } : null,
+                      itens: (detalhe.itens ?? []).map(i => ({
+                        nome: i.nome_produto,
+                        quant: Number(i.quant),
+                        valorUnit: Number(i.valor),
+                        total: Number(i.vr_total),
+                      })),
+                      subtotal: (detalhe.itens ?? []).reduce((s, i) => s + Number(i.vr_total), 0),
+                      desconto: Number(detalhe.vr_adicional) < 0 ? Math.abs(Number(detalhe.vr_adicional)) : 0,
+                      total: Number(detalhe.vr_total),
+                      pagamentos: [
+                        { nome: 'Dinheiro', valor: Number(detalhe.vr_dinheiro || 0) },
+                        { nome: 'Cartão', valor: Number(detalhe.vr_cartao || 0) },
+                        { nome: 'PIX CNPJ', valor: Number(detalhe.vr_pix || 0) },
+                        { nome: 'NOTA', valor: Number(detalhe.vr_nota || 0) },
+                        { nome: 'Cheque', valor: Number(detalhe.vr_cheque || 0) },
+                        { nome: 'Carnê', valor: Number(detalhe.vr_carne || 0) },
+                        { nome: 'Ticket', valor: Number(detalhe.vr_ticket || 0) },
+                      ].filter(p => p.valor > 0),
+                    }
+                    printThermalReceipt(receiptData)
+                  }}
+                  className="w-full mt-3 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-950/40 hover:scale-[1.02] active:scale-95"
+                >
+                  <span>🖨️</span>
+                  <span>Imprimir 2ª Via do Cupom</span>
+                </button>
               </div>
             )}
           </div>

@@ -276,8 +276,12 @@ router.get('/vendas', async (req, res) => {
 
 router.get('/vendas/:controle', async (req, res) => {
   const [[venda]] = await pool.query<any>(
-    `SELECT v.*, COALESCE(c.nome_cliente,'Consumidor') as nome_cliente
-     FROM mv_vendas v LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+    `SELECT v.*, COALESCE(c.nome_cliente,'Consumidor') as nome_cliente,
+            c.cpf_cnpj, c.telefone, c.celular,
+            o.plate as os_plate, o.model as os_model
+     FROM mv_vendas v
+     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+     LEFT JOIN os_orders o ON o.venda_controle = v.controle
      WHERE v.controle = ?`,
     [req.params.controle]
   );

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { ProdutoPdv, ClientePdv, OsEncerradaPdv } from '../types'
 import { useAuth } from '../contexts/AuthContext'
+import { printThermalReceipt, type ThermalReceiptData } from '../lib/thermalPrint'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -42,6 +43,7 @@ export default function Pdv() {
   const [showPagamento, setShowPagamento] = useState(false)
   const [desconto, setDesconto] = useState('')
   const [sucesso, setSucesso] = useState<string | null>(null)
+  const [vendaRecente, setVendaRecente] = useState<ThermalReceiptData | null>(null)
   const [avisosEstoqueVenda, setAvisosEstoqueVenda] = useState<string[] | null>(null)
 
   // ── Estado de Integração com OS Encerradas ──────────────────────────────────
@@ -119,10 +121,47 @@ export default function Pdv() {
         itens,
         id_os: osImportada?.id,
       }
-      return erpApi.criarVenda(pag)
+
+      // Prepara snapshot da venda para impressão térmica
+      const snapshot: ThermalReceiptData = {
+        empresa: currentTenant?.nome || '4Rodas Centro Automotivo',
+        controle: '',
+        dataHora: new Date().toLocaleString('pt-BR'),
+        cliente: cliente ? {
+          nome: cliente.nome_cliente,
+          documento: cliente.cpf_cnpj,
+          telefone: cliente.telefone || cliente.celular,
+        } : null,
+        os: osImportada ? {
+          plate: osImportada.plate,
+          model: osImportada.model,
+        } : null,
+        itens: cart.map(c => ({
+          nome: c.produto.nome_produto,
+          quant: c.quant,
+          valorUnit: c.valor,
+          total: c.valor * c.quant,
+        })),
+        subtotal,
+        desconto: descontoVal,
+        total,
+        pagamentos: [
+          { nome: 'Dinheiro', valor: parseNum(pagamento.dinheiro) },
+          { nome: 'Cartão', valor: parseNum(pagamento.cartao) },
+          { nome: 'PIX CNPJ', valor: parseNum(pagamento.pix) },
+          { nome: 'NOTA', valor: parseNum(pagamento.nota) },
+        ].filter(p => p.valor > 0),
+        troco,
+      }
+
+      return erpApi.criarVenda(pag).then(res => ({ ...res, snapshot }))
     },
     onSuccess: (data) => {
       setSucesso(data.controle)
+      if (data.snapshot) {
+        data.snapshot.controle = data.controle
+        setVendaRecente(data.snapshot)
+      }
       if (data.avisos_estoque && data.avisos_estoque.length > 0) {
         setAvisosEstoqueVenda(data.avisos_estoque)
       }
@@ -139,7 +178,7 @@ export default function Pdv() {
       qc.invalidateQueries({ queryKey: ['pdv-produtos'] })
       qc.invalidateQueries({ queryKey: ['pdv-os-encerradas'] })
       qc.invalidateQueries({ queryKey: ['estoque'] })
-      setTimeout(() => { setSucesso(null); searchRef.current?.focus() }, 4000)
+      searchRef.current?.focus()
     },
   })
 
@@ -207,8 +246,37 @@ export default function Pdv() {
       <div className="flex-1 flex flex-col gap-4 min-w-0">
 
         {sucesso && (
-          <div className="bg-green-900/30 border border-green-700 rounded-xl px-5 py-3 text-green-300 text-sm font-medium">
-            ✅ Venda finalizada! Controle: <strong className="font-mono">{sucesso}</strong>
+          <div className="bg-emerald-950/70 border border-emerald-500/80 rounded-2xl px-5 py-3.5 text-emerald-200 text-sm font-medium flex items-center justify-between gap-4 flex-wrap shadow-xl shadow-emerald-950/50">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">✅</span>
+              <div>
+                <p className="text-white font-bold text-sm">Venda finalizada com sucesso!</p>
+                <p className="text-xs text-emerald-300 font-mono">
+                  Controle: <strong className="text-white">{sucesso}</strong>
+                  {vendaRecente && <> · Total: <strong className="text-white">{R(vendaRecente.total)}</strong></>}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {vendaRecente && (
+                <button
+                  type="button"
+                  onClick={() => printThermalReceipt(vendaRecente)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-950/50 transition-all hover:scale-105 active:scale-95"
+                >
+                  <span>🖨️</span>
+                  <span>Imprimir Comprovante</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => { setSucesso(null); setVendaRecente(null); }}
+                className="text-emerald-400 hover:text-white text-xs px-2.5 py-1.5 bg-emerald-900/60 hover:bg-emerald-800 rounded-lg transition-colors"
+                title="Fechar aviso"
+              >
+                ✕
+              </button>
+            </div>
           </div>
         )}
 
