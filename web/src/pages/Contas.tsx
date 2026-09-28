@@ -24,7 +24,7 @@ const fmtDate = (d?: string | null) => {
 }
 
 const STATUS_OPTS = [
-  { value: '',  label: 'Todos os status' },
+  { value: '',  label: 'Todos' },
   { value: '0', label: 'Em aberto' },
   { value: '1', label: 'Recebido' },
 ]
@@ -103,7 +103,7 @@ export default function Contas() {
     setPage(1)
   }
 
-  const { data: res, isLoading, isFetching } = useQuery({
+  const { data: res, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['contas', tid, status, debouncedSearch, dataInicio, dataFim, page],
     queryFn: () => erpApi.contas({
       status,
@@ -382,7 +382,7 @@ export default function Contas() {
               placeholder="Buscar por cliente, histórico ou controle…"
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-blue-500"
             />
-            {(isFetching || search !== debouncedSearch) && (
+            {search !== debouncedSearch && (
               <span className="absolute right-3 top-2 text-[10px] text-blue-400 animate-pulse font-medium">
                 Buscando…
               </span>
@@ -393,7 +393,18 @@ export default function Contas() {
 
       {/* ── TABELA DE LANÇAMENTOS ── */}
       <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-        {isLoading ? (
+        {isError ? (
+          <div className="py-12 text-center text-red-400 text-sm space-y-2">
+            <p className="font-semibold">Erro ao carregar dados financeiros.</p>
+            <p className="text-xs text-slate-500">{(error as any)?.message || 'Falha de comunicação com o servidor'}</p>
+            <button
+              onClick={() => refetch()}
+              className="mt-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg transition-colors border border-slate-700"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : isLoading ? (
           <div className="py-12 text-center text-slate-500 text-sm">Carregando lançamentos…</div>
         ) : lancamentos.length === 0 ? (
           <div className="py-12 text-center text-slate-500 text-sm space-y-1">

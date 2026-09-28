@@ -527,129 +527,123 @@ router.post('/vendas', async (req, res) => {
 // ── CONTAS / FINANCEIRO ──────────────────────────────────────────────────────
 
 router.get('/contas', requireManagerUp, async (req, res) => {
-  const page   = Math.max(1, Number(req.query.page ?? 1));
-  const limit  = 50;
-  const offset = (page - 1) * limit;
-  const statusQ = req.query.status;
-  const status = statusQ === '1' || statusQ === 'pago' ? 1 : statusQ === '' || statusQ === 'todos' ? null : 0;
-  const search = String(req.query.search ?? '').trim();
-  const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
-  const dataFim = req.query.data_fim ? String(req.query.data_fim).trim() : '';
+  try {
+    const page   = Math.max(1, Number(req.query.page ?? 1));
+    const limit  = 50;
+    const offset = (page - 1) * limit;
+    const statusQ = req.query.status;
+    const status = statusQ === '1' || statusQ === 'pago' ? 1 : statusQ === '' || statusQ === 'todos' ? null : 0;
+    const search = String(req.query.search ?? '').trim();
+    const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
+    const dataFim = req.query.data_fim ? String(req.query.data_fim).trim() : '';
 
-  const whereParts: string[] = [];
-  const params: any[] = [];
+    const whereParts: string[] = [];
+    const params: any[] = [];
 
-  if (status !== null) {
-    whereParts.push('l.status_lancamento = ?');
-    params.push(status);
-  }
+    if (status !== null) {
+      whereParts.push('l.status_lancamento = ?');
+      params.push(status);
+    }
 
-  if (search.length > 0) {
-    whereParts.push('(c.nome_cliente LIKE ? OR l.historico LIKE ? OR l.controle LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
-  }
+    if (search.length > 0) {
+      whereParts.push('(c.nome_cliente LIKE ? OR l.historico LIKE ? OR l.controle LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
 
-  if (dataInicio) {
-    whereParts.push('DATE(l.data_vencimento) >= ?');
-    params.push(dataInicio);
-  }
+    if (dataInicio) {
+      whereParts.push('l.data_vencimento >= ?');
+      params.push(dataInicio);
+    }
 
-  if (dataFim) {
-    whereParts.push('DATE(l.data_vencimento) <= ?');
-    params.push(dataFim);
-  }
+    if (dataFim) {
+      whereParts.push('l.data_vencimento <= ?');
+      params.push(dataFim);
+    }
 
-  const where = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
+    const where = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
 
-  const [[totaisRow]] = await pool.query<any>(
-    `SELECT
-       COUNT(*) as total_count,
-       COALESCE(SUM(l.vr_parcela - l.vr_abatimentos), 0) as total_valor,
-       COALESCE(SUM(CASE WHEN l.status_lancamento = 1 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_recebido,
-       COALESCE(SUM(CASE WHEN l.status_lancamento = 0 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_pendente,
-       COALESCE(SUM(CASE WHEN l.status_lancamento = 0 AND l.data_vencimento < CURDATE() THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_vencido,
-       COALESCE(SUM(CASE
-         WHEN v.id IS NOT NULL THEN v.vr_dinheiro
-         WHEN l.id_modo_lancamento = 1 OR UPPER(COALESCE(m.modo_lancamento,'')) LIKE '%DINHEIRO%' THEN (l.vr_parcela - l.vr_abatimentos)
-         ELSE 0 END), 0) as total_dinheiro,
-       COALESCE(SUM(CASE
-         WHEN v.id IS NOT NULL THEN v.vr_cartao
-         WHEN l.id_modo_lancamento = 7 OR UPPER(COALESCE(m.modo_lancamento,'')) LIKE '%CART%' THEN (l.vr_parcela - l.vr_abatimentos)
-         ELSE 0 END), 0) as total_cartao,
-       COALESCE(SUM(CASE
-         WHEN v.id IS NOT NULL THEN v.vr_pix
-         WHEN l.id_modo_lancamento = 11 OR UPPER(COALESCE(m.modo_lancamento,'')) LIKE '%PIX%' THEN (l.vr_parcela - l.vr_abatimentos)
-         ELSE 0 END), 0) as total_pix,
-       COALESCE(SUM(CASE
-         WHEN v.id IS NOT NULL THEN v.vr_nota
-         WHEN l.id_modo_lancamento IN (5, 10) OR UPPER(COALESCE(m.modo_lancamento,'')) LIKE '%NOTA%' OR UPPER(COALESCE(m.modo_lancamento,'')) LIKE '%DUPLICATA%' OR UPPER(COALESCE(m.modo_lancamento,'')) LIKE '%PRAZO%' THEN (l.vr_parcela - l.vr_abatimentos)
-         ELSE 0 END), 0) as total_nota,
-       COALESCE(SUM(CASE
-         WHEN v.id IS NOT NULL THEN (COALESCE(v.vr_cheque,0) + COALESCE(v.vr_carne,0) + COALESCE(v.vr_ticket,0))
-         WHEN l.id_modo_lancamento IN (2, 8) OR UPPER(COALESCE(m.modo_lancamento,'')) LIKE '%CHEQUE%' OR UPPER(COALESCE(m.modo_lancamento,'')) LIKE '%TICKET%' THEN (l.vr_parcela - l.vr_abatimentos)
-         ELSE 0 END), 0) as total_outros
-     FROM cad_lancamentos l
-     LEFT JOIN cad_clientes c ON c.id = l.id_cliente
-     LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
-     LEFT JOIN mv_vendas v ON v.id = l.id_venda
-     ${where}`,
-    params
-  );
+    const [[totaisRow]] = await pool.query<any>(
+      `SELECT
+         COUNT(*) as total_count,
+         COALESCE(SUM(l.vr_parcela - l.vr_abatimentos), 0) as total_valor,
+         COALESCE(SUM(CASE WHEN l.status_lancamento = 1 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_recebido,
+         COALESCE(SUM(CASE WHEN l.status_lancamento = 0 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_pendente,
+         COALESCE(SUM(CASE WHEN l.status_lancamento = 0 AND l.data_vencimento < CURDATE() THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_vencido,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_dinheiro,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento IN (6, 7) THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_cartao,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 11 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_pix,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento IN (4, 5, 9, 10) THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_nota,
+         COALESCE(SUM(CASE WHEN (l.id_modo_lancamento NOT IN (1, 4, 5, 6, 7, 9, 10, 11) OR l.id_modo_lancamento IS NULL) THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_outros
+       FROM cad_lancamentos l
+       LEFT JOIN cad_clientes c ON c.id = l.id_cliente
+       ${where}`,
+      params
+    );
 
-  const [rows] = await pool.query<any>(
-    `SELECT l.id, l.controle, l.historico, l.data_vencimento, l.data_confirmacao,
-            l.vr_parcela, l.vr_abatimentos, l.status_lancamento,
-            l.id_cliente, COALESCE(c.nome_cliente,'Consumidor') as nome_cliente,
-            l.id_modo_lancamento,
-            COALESCE(
-              NULLIF(TRIM(m.modo_lancamento), ''),
-              CASE
-                WHEN v.vr_pix > 0 AND v.vr_dinheiro = 0 AND v.vr_cartao = 0 AND v.vr_nota = 0 THEN 'PIX'
-                WHEN v.vr_cartao > 0 AND v.vr_dinheiro = 0 AND v.vr_pix = 0 AND v.vr_nota = 0 THEN 'CARTÃO'
-                WHEN v.vr_dinheiro > 0 AND v.vr_cartao = 0 AND v.vr_pix = 0 AND v.vr_nota = 0 THEN 'DINHEIRO'
-                WHEN v.vr_nota > 0 AND v.vr_dinheiro = 0 AND v.vr_cartao = 0 AND v.vr_pix = 0 THEN 'NOTA'
-                WHEN v.id IS NOT NULL THEN 'MISTO'
-                ELSE 'DIVERSOS'
-              END
-            ) AS modo_lancamento
-     FROM cad_lancamentos l
-     LEFT JOIN cad_clientes c ON c.id = l.id_cliente
-     LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
-     LEFT JOIN mv_vendas v ON v.id = l.id_venda
-     ${where}
-     ORDER BY l.id DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
+    const [rows] = await pool.query<any>(
+      `SELECT l.id, l.controle, l.historico, l.data_vencimento, l.data_confirmacao,
+              l.vr_parcela, l.vr_abatimentos, l.status_lancamento,
+              l.id_cliente, COALESCE(c.nome_cliente,'Consumidor') as nome_cliente,
+              l.id_modo_lancamento,
+              m.modo_lancamento
+       FROM cad_lancamentos l
+       LEFT JOIN cad_clientes c ON c.id = l.id_cliente
+       LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
+       ${where}
+       ORDER BY l.id DESC LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
 
-  const total = Number(totaisRow?.total_count ?? 0);
+    const total = Number(totaisRow?.total_count ?? 0);
 
-  res.json({
-    data: rows.map((r: any) => ({
-      ...r,
-      status: Number(r.status_lancamento),
-      data_lancamento: r.data_vencimento,
-      valor: Number(r.vr_parcela) - Number(r.vr_abatimentos),
-      vr_parcela: Number(r.vr_parcela),
-      vr_abatimentos: Number(r.vr_abatimentos),
-      vr_liquido: Number(r.vr_parcela) - Number(r.vr_abatimentos),
-      modo_lancamento: r.modo_lancamento || '—',
-    })),
-    total,
-    pages: Math.ceil(total / limit),
-    totais: {
-      total: Number(totaisRow?.total_valor ?? 0),
-      total_recebido: Number(totaisRow?.total_recebido ?? 0),
-      total_pendente: Number(totaisRow?.total_pendente ?? 0),
-      total_vencido: Number(totaisRow?.total_vencido ?? 0),
-      por_forma_pagamento: {
-        dinheiro: Number(totaisRow?.total_dinheiro ?? 0),
-        cartao: Number(totaisRow?.total_cartao ?? 0),
-        pix: Number(totaisRow?.total_pix ?? 0),
-        nota: Number(totaisRow?.total_nota ?? 0),
-        outros: Number(totaisRow?.total_outros ?? 0),
+    const FORMAS_MAP: Record<number, string> = {
+      1: 'DINHEIRO',
+      2: 'CHEQUE',
+      4: 'BOLETO',
+      5: 'CARNÊ',
+      6: 'CARTÃO DÉBITO',
+      7: 'CARTÃO CRÉDITO',
+      8: 'TICKET',
+      9: 'PROMISSÓRIA',
+      10: 'NOTA / A PRAZO',
+      11: 'PIX',
+    };
+
+    res.json({
+      data: rows.map((r: any) => {
+        const modoId = Number(r.id_modo_lancamento);
+        const modoNome = FORMAS_MAP[modoId] || r.modo_lancamento || '—';
+        return {
+          ...r,
+          status: Number(r.status_lancamento),
+          data_lancamento: r.data_vencimento,
+          valor: Number(r.vr_parcela) - Number(r.vr_abatimentos),
+          vr_parcela: Number(r.vr_parcela),
+          vr_abatimentos: Number(r.vr_abatimentos),
+          vr_liquido: Number(r.vr_parcela) - Number(r.vr_abatimentos),
+          modo_lancamento: modoNome,
+        };
+      }),
+      total,
+      pages: Math.ceil(total / limit),
+      totais: {
+        total: Number(totaisRow?.total_valor ?? 0),
+        total_recebido: Number(totaisRow?.total_recebido ?? 0),
+        total_pendente: Number(totaisRow?.total_pendente ?? 0),
+        total_vencido: Number(totaisRow?.total_vencido ?? 0),
+        por_forma_pagamento: {
+          dinheiro: Number(totaisRow?.total_dinheiro ?? 0),
+          cartao: Number(totaisRow?.total_cartao ?? 0),
+          pix: Number(totaisRow?.total_pix ?? 0),
+          nota: Number(totaisRow?.total_nota ?? 0),
+          outros: Number(totaisRow?.total_outros ?? 0),
+        },
       },
-    },
-  });
+    });
+  } catch (err: any) {
+    console.error('GET /erp/contas error:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao carregar contas' });
+  }
 });
 
 router.patch('/contas/:id/receber', requireManagerUp, async (req, res) => {
