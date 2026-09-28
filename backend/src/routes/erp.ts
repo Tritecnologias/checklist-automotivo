@@ -17,18 +17,26 @@ function getErpWriteTenantId(req: Request): number {
   return (h > 0 && user.tenantIds.includes(h)) ? h : (user.tenantIds[0] ?? 1);
 }
 
-function getErpTenantFilter(req: Request, existingWhere = false): { clause: string; params: any[] } {
+function getErpTenantCondition(req: Request, column = 'tenant_id'): { condition: string; params: any[] } {
   const user = req.user as JwtPayload | undefined;
-  if (!user) return { clause: '', params: [] };
-  const prefix = existingWhere ? ' AND ' : ' WHERE ';
-  if (user.role === 'owner') {
-    const h = Number(req.headers['x-tenant-id']);
-    if (h > 0) return { clause: `${prefix}tenant_id = ?`, params: [h] };
-    return { clause: '', params: [] };
-  }
   const h = Number(req.headers['x-tenant-id']);
+
+  if (!user) {
+    if (h > 0) return { condition: `${column} = ?`, params: [h] };
+    return { condition: '', params: [] };
+  }
+  if (user.role === 'owner') {
+    if (h > 0) return { condition: `${column} = ?`, params: [h] };
+    return { condition: '', params: [] };
+  }
   const tid = (h > 0 && user.tenantIds.includes(h)) ? h : (user.tenantIds[0] ?? 1);
-  return { clause: `${prefix}tenant_id = ?`, params: [tid] };
+  return { condition: `${column} = ?`, params: [tid] };
+}
+
+function getErpTenantFilter(req: Request, existingWhere = false, column = 'tenant_id'): { clause: string; params: any[] } {
+  const { condition, params } = getErpTenantCondition(req, column);
+  if (!condition) return { clause: '', params: [] };
+  return { clause: (existingWhere ? ' AND ' : ' WHERE ') + condition, params };
 }
 
 const router = Router();
@@ -69,24 +77,32 @@ router.use(requireAdmin);
 
 router.get('/dashboard', async (req, res) => {
   const tenantId = getErpWriteTenantId(req);
+  const { clause: vClause, params: vParams } = getErpTenantFilter(req, true, 'tenant_id');
+  const { clause: lClause, params: lParams } = getErpTenantFilter(req, true, 'tenant_id');
+
   const [[hoje]] = await pool.query<any>(
     `SELECT COUNT(*) as count_vendas, COALESCE(SUM(vr_total),0) as total_dia
-     FROM mv_vendas WHERE data_venda = CURDATE()`
+     FROM mv_vendas WHERE data_venda = CURDATE()${vClause}`,
+    vParams
   );
   const [[semana]] = await pool.query<any>(
     `SELECT COALESCE(SUM(vr_total),0) as total_semana
-     FROM mv_vendas WHERE data_venda >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)`
+     FROM mv_vendas WHERE data_venda >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)${vClause}`,
+    vParams
   );
   const [[mes]] = await pool.query<any>(
     `SELECT COALESCE(SUM(vr_total),0) as total_mes
-     FROM mv_vendas WHERE MONTH(data_venda)=MONTH(CURDATE()) AND YEAR(data_venda)=YEAR(CURDATE())`
+     FROM mv_vendas WHERE MONTH(data_venda)=MONTH(CURDATE()) AND YEAR(data_venda)=YEAR(CURDATE())${vClause}`,
+    vParams
   );
   const [top_produtos] = await pool.query<any>(
     `SELECT p.nome_produto, SUM(m.quant) as quant, SUM(m.vr_total) as total
      FROM mv_vendas_movimento m
      JOIN cad_produtos p ON p.id = m.id_produto
-     WHERE m.data_venda = CURDATE()
-     GROUP BY m.id_produto ORDER BY total DESC LIMIT 5`
+     JOIN mv_vendas v ON v.controle = m.controle
+     WHERE m.data_venda = CURDATE()${vClause.replace(/tenant_id/g, 'v.tenant_id')}
+     GROUP BY m.id_produto ORDER BY total DESC LIMIT 5`,
+    vParams
   );
   const [estoque_baixo] = await pool.query<any>(
     `SELECT p.id, p.nome_produto, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque, p.min_estoque
@@ -105,7 +121,8 @@ router.get('/dashboard', async (req, res) => {
   );
   const [[contas_pendentes]] = await pool.query<any>(
     `SELECT COUNT(*) as count_pendentes, COALESCE(SUM(vr_parcela - vr_abatimentos),0) as vr_pendente
-     FROM cad_lancamentos WHERE status_lancamento = 0`
+     FROM cad_lancamentos WHERE status_lancamento = 0${lClause}`,
+    lParams
   );
 
   res.json({
@@ -228,18 +245,22 @@ router.get('/vendas', async (req, res) => {
   const data  = String(req.query.data ?? new Date().toISOString().slice(0, 10));
   const search = String(req.query.search ?? '');
 
+  const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true, 'v.tenant_id');
+
   const where = search.length >= 2
     ? 'AND (c.nome_cliente LIKE ? OR v.controle LIKE ?)'
     : '';
-  const params: any[] = search.length >= 2
-    ? [data, `%${search}%`, `%${search}%`]
-    : [data];
+  const searchParams: any[] = search.length >= 2
+    ? [`%${search}%`, `%${search}%`]
+    : [];
+
+  const baseParams = [data, ...tenantParams, ...searchParams];
 
   const [[{ total }]] = await pool.query<any>(
     `SELECT COUNT(*) as total FROM mv_vendas v
      LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-     WHERE v.data_venda = ? ${where}`,
-    params
+     WHERE v.data_venda = ? ${tenantClause} ${where}`,
+    baseParams
   );
 
   const [rows] = await pool.query<any>(
@@ -250,9 +271,9 @@ router.get('/vendas', async (req, res) => {
             COALESCE(c.nome_cliente, 'Consumidor') as nome_cliente
      FROM mv_vendas v
      LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-     WHERE v.data_venda = ? ${where}
+     WHERE v.data_venda = ? ${tenantClause} ${where}
      ORDER BY v.id DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+    [...baseParams, limit, offset]
   );
 
   res.json({
@@ -365,6 +386,7 @@ router.post('/vendas', async (req, res) => {
       return;
     }
 
+    const tenantId = getErpWriteTenantId(req);
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const controle = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
@@ -397,11 +419,11 @@ router.post('/vendas', async (req, res) => {
          (controle, data_venda, parcelas, id_cliente, id_cliente_convenio,
           id_login, terminal, turno, vr_total, vr_adicional,
           vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket, vr_pix, vr_nota,
-          em_aberto, vr_pagto_parcial, cod_lancamento)
-       VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)`,
+          em_aberto, vr_pagto_parcial, cod_lancamento, tenant_id)
+       VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`,
       [controle, data_venda, parcelas, finalClienteId, id_login, terminal, turno,
        vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, finalVrTicket, vr_pix, vr_nota,
-       em_aberto, codLancamento]
+       em_aberto, codLancamento, tenantId]
     );
     const id_venda = vendaResult.insertId;
 
@@ -417,7 +439,6 @@ router.post('/vendas', async (req, res) => {
           [data_venda, controle, codLancamento, id_login, finalClienteId,
            item.id_produto, terminal, turno, item.valor, item.quant, item_total]
         );
-        const tenantId = getErpWriteTenantId(req);
         await pool.query(
           `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
            SELECT p.id, ?, GREATEST(0, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) - ?)
@@ -446,12 +467,12 @@ router.post('/vendas', async (req, res) => {
          (id_planejamento, id_conta, id_modo_lancamento, status_lancamento,
           controle, documento, historico, parcela, data_vencimento,
           vr_parcela, vr_abatimentos, vr_acrescimo, transferido,
-          id_cliente, id_venda, data_confirmacao, dias_atraso)
-       VALUES (2,1,?,?,?,?,?,1,?,?,0,0,0,?,?,?,0)`,
+          id_cliente, id_venda, data_confirmacao, dias_atraso, tenant_id)
+       VALUES (2,1,?,?,?,?,?,1,?,?,0,0,0,?,?,?,?,?)`,
       [codLancamento, em_aberto === 0 ? 1 : 0,
        controle, controle, hist, data_venda,
        vr_total, finalClienteId, id_venda,
-       em_aberto === 0 ? data_venda : null]
+       em_aberto === 0 ? data_venda : null, tenantId]
     );
 
     // Se a venda é de uma OS, sincroniza a OS completamente (itens, total e desconto)
@@ -557,11 +578,17 @@ router.get('/contas', requireManagerUp, async (req, res) => {
     const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
     const dataFim = req.query.data_fim ? String(req.query.data_fim).trim() : '';
     const formaPagto = req.query.forma_pagto ? String(req.query.forma_pagto).trim().toLowerCase() : '';
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'l.tenant_id');
 
     const whereParts: string[] = [
       "(pl.plane_tipo = 'E' OR pl.plane_tipo IS NULL OR l.id_venda IS NOT NULL OR l.id_planejamento IN (1, 2, 3))"
     ];
     const params: any[] = [];
+
+    if (tenantCond) {
+      whereParts.push(tenantCond);
+      params.push(...tenantParams);
+    }
 
     if (status !== null) {
       whereParts.push('l.status_lancamento = ?');
@@ -709,10 +736,12 @@ router.get('/contas', requireManagerUp, async (req, res) => {
 });
 
 router.patch('/contas/:id/receber', requireManagerUp, async (req, res) => {
+  const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
+  const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
   const data_confirmacao = new Date().toISOString().slice(0, 10);
   await pool.query(
-    'UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=? WHERE id=?',
-    [data_confirmacao, req.params.id]
+    `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=? WHERE id=?${whereTenant}`,
+    [data_confirmacao, req.params.id, ...tenantParams]
   );
   res.json({ ok: true });
 });
@@ -759,11 +788,17 @@ router.get('/contas-pagar', requireManagerUp, async (req, res) => {
     const dataFim = req.query.data_fim ? String(req.query.data_fim).trim() : '';
     const formaPagto = req.query.forma_pagto ? String(req.query.forma_pagto).trim().toLowerCase() : '';
     const categoriaId = req.query.categoria ? Number(req.query.categoria) : null;
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'l.tenant_id');
 
     const whereParts: string[] = [
       "(pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))"
     ];
     const params: any[] = [];
+
+    if (tenantCond) {
+      whereParts.push(tenantCond);
+      params.push(...tenantParams);
+    }
 
     if (status !== null) {
       whereParts.push('l.status_lancamento = ?');
@@ -943,6 +978,7 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
       return;
     }
 
+    const tenantId = getErpWriteTenantId(req);
     const numParcelas = Math.max(1, Math.min(60, Number(parcelas || 1)));
     const valorParcela = Number((valNum / numParcelas).toFixed(2));
     const now = new Date();
@@ -965,8 +1001,8 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
            (id_planejamento, id_conta, id_modo_lancamento, status_lancamento,
             controle, documento, historico, favorecido, parcela, data_vencimento,
             vr_parcela, vr_abatimentos, vr_acrescimo, transferido,
-            id_cliente, data_confirmacao, dias_atraso)
-         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, 0)`,
+            id_cliente, data_confirmacao, dias_atraso, tenant_id)
+         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, 0, ?)`,
         [
           Number(id_planejamento || 4),
           Number(id_modo_lancamento || 4),
@@ -978,7 +1014,8 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
           p,
           dueStr,
           valorParcela,
-          dataConf
+          dataConf,
+          tenantId
         ]
       );
     }
@@ -992,18 +1029,20 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
 
 router.patch('/contas-pagar/:id/pagar', requireManagerUp, async (req, res) => {
   try {
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
+    const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
     const dataConfirmacao = req.body.data_pagamento || new Date().toISOString().slice(0, 10);
     const modoId = req.body.id_modo_lancamento ? Number(req.body.id_modo_lancamento) : null;
 
     if (modoId) {
       await pool.query(
-        'UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=?, id_modo_lancamento=? WHERE id=?',
-        [dataConfirmacao, modoId, req.params.id]
+        `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=?, id_modo_lancamento=? WHERE id=?${whereTenant}`,
+        [dataConfirmacao, modoId, req.params.id, ...tenantParams]
       );
     } else {
       await pool.query(
-        'UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=? WHERE id=?',
-        [dataConfirmacao, req.params.id]
+        `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=? WHERE id=?${whereTenant}`,
+        [dataConfirmacao, req.params.id, ...tenantParams]
       );
     }
     res.json({ ok: true });
@@ -1014,9 +1053,11 @@ router.patch('/contas-pagar/:id/pagar', requireManagerUp, async (req, res) => {
 
 router.patch('/contas-pagar/:id/estornar', requireManagerUp, async (req, res) => {
   try {
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
+    const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
     await pool.query(
-      'UPDATE cad_lancamentos SET status_lancamento=0, data_confirmacao=NULL WHERE id=?',
-      [req.params.id]
+      `UPDATE cad_lancamentos SET status_lancamento=0, data_confirmacao=NULL WHERE id=?${whereTenant}`,
+      [req.params.id, ...tenantParams]
     );
     res.json({ ok: true });
   } catch (err: any) {
@@ -1026,6 +1067,8 @@ router.patch('/contas-pagar/:id/estornar', requireManagerUp, async (req, res) =>
 
 router.put('/contas-pagar/:id', requireManagerUp, async (req, res) => {
   try {
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
+    const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
     const {
       descricao,
       valor,
@@ -1045,7 +1088,7 @@ router.put('/contas-pagar/:id', requireManagerUp, async (req, res) => {
          id_modo_lancamento = COALESCE(?, id_modo_lancamento),
          favorecido = COALESCE(?, favorecido),
          documento = COALESCE(?, documento)
-       WHERE id = ?`,
+       WHERE id = ?${whereTenant}`,
       [
         descricao,
         valor ? Number(valor) : null,
@@ -1054,7 +1097,8 @@ router.put('/contas-pagar/:id', requireManagerUp, async (req, res) => {
         id_modo_lancamento ? Number(id_modo_lancamento) : null,
         favorecido,
         documento,
-        req.params.id
+        req.params.id,
+        ...tenantParams
       ]
     );
     res.json({ ok: true });
@@ -1065,7 +1109,9 @@ router.put('/contas-pagar/:id', requireManagerUp, async (req, res) => {
 
 router.delete('/contas-pagar/:id', requireManagerUp, async (req, res) => {
   try {
-    await pool.query('DELETE FROM cad_lancamentos WHERE id = ?', [req.params.id]);
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
+    const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
+    await pool.query(`DELETE FROM cad_lancamentos WHERE id = ?${whereTenant}`, [req.params.id, ...tenantParams]);
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ message: err?.message || 'Erro ao excluir conta a pagar' });

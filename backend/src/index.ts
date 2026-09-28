@@ -180,6 +180,34 @@ async function runMigrations() {
     console.log('[migration] mv_vendas.vr_nota adicionada');
   }
 
+  // tenant_id em mv_vendas
+  const [[{ cntVendasTenant }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntVendasTenant FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_vendas' AND COLUMN_NAME = 'tenant_id'`
+  );
+  if (Number(cntVendasTenant) === 0) {
+    await pool.query('ALTER TABLE mv_vendas ADD COLUMN tenant_id INT NOT NULL DEFAULT 1');
+    console.log('[migration] mv_vendas.tenant_id adicionada (registros existentes → tenant 1)');
+  }
+
+  // Sincroniza tenant_id em vendas e lançamentos financeiros legados baseados na OS de origem
+  try {
+    await pool.query(`
+      UPDATE mv_vendas v
+      JOIN os_orders o ON o.venda_controle = v.controle
+      SET v.tenant_id = o.tenant_id
+      WHERE o.tenant_id IS NOT NULL AND v.tenant_id = 1
+    `);
+    await pool.query(`
+      UPDATE cad_lancamentos l
+      JOIN mv_vendas v ON v.id = l.id_venda
+      SET l.tenant_id = v.tenant_id
+      WHERE v.tenant_id IS NOT NULL AND l.tenant_id = 1
+    `);
+  } catch (syncErr) {
+    console.warn('[migration] Aviso ao sincronizar tenant_id de vendas/lançamentos:', syncErr);
+  }
+
   // Adiciona role 'caixa' ao ENUM se ainda não existir
   await pool.query(
     `ALTER TABLE users MODIFY COLUMN role ENUM('owner','manager','operator','caixa') NOT NULL DEFAULT 'operator'`

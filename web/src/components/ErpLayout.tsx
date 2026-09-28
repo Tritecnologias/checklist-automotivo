@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../contexts/AuthContext'
 import type { Tenant } from '../contexts/AuthContext'
 import {
@@ -119,6 +120,7 @@ function TenantSwitcher({ tenants, current, onSwitch }: {
 
 export default function ErpLayout() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const { user, tenants, currentTenant, switchTenant, logout, isOwner } = useAuth()
   const visibleNav = nav.filter(item => !item.roles || item.roles.includes(user?.role ?? ''))
 
@@ -159,7 +161,10 @@ export default function ErpLayout() {
               : tenants
             }
             current={currentTenant}
-            onSwitch={switchTenant}
+            onSwitch={(t) => {
+              switchTenant(t)
+              qc.invalidateQueries()
+            }}
           />
         </div>
 
