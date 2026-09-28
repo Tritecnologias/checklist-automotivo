@@ -593,7 +593,8 @@ router.get('/busca/produtos', async (req, res) => {
   const [rows] = await pool.query<any>(
     `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.vr_venda,
             COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque,
-            COALESCE(p.controla_estoque, 1) AS controla_estoque
+            COALESCE(p.controla_estoque, 1) AS controla_estoque,
+            CASE WHEN p.id_tipo IN (2, 9) THEN 1 ELSE 0 END AS is_service
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
      WHERE p.inativo = 0 AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
@@ -605,6 +606,7 @@ router.get('/busca/produtos', async (req, res) => {
     vr_venda: Number(r.vr_venda),
     estoque: Number(r.estoque),
     controla_estoque: Number(r.controla_estoque ?? 1),
+    is_service: Boolean(r.is_service),
   })));
 });
 
@@ -732,13 +734,19 @@ router.get('/pdv/os/:id', async (req, res) => {
     }
 
     // Busca itens da OS
+    const orderTenantId = Number(order.tenant_id || 1);
     const [rawItems] = await pool.query<any>(
-      `SELECT oi.*, p.unidade, p.estoque, p.cod_barra AS prod_cod_barra
+      `SELECT oi.*, p.unidade,
+              COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque,
+              COALESCE(p.controla_estoque, 1) AS controla_estoque,
+              CASE WHEN oi.type = 'service' OR p.id_tipo IN (2, 9) THEN 1 ELSE 0 END AS is_service,
+              p.cod_barra AS prod_cod_barra
        FROM os_order_items oi
        LEFT JOIN cad_produtos p ON p.id = oi.product_id
+       LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
        WHERE oi.order_id = ?
        ORDER BY oi.created_at`,
-      [order.id]
+      [orderTenantId, orderTenantId, order.id]
     );
 
     // Resolve dados do cliente prioritariamente da OS e cad_clientes
@@ -805,6 +813,9 @@ router.get('/pdv/os/:id', async (req, res) => {
       const lp = Number(item.labor_price ?? 0);
       totalLabor += lp;
 
+      const isService = Boolean(item.is_service || item.type === 'service');
+      const controlaEstoque = Number(item.controla_estoque ?? 1);
+
       itensPdv.push({
         produto: {
           id: Number(item.product_id),
@@ -813,6 +824,8 @@ router.get('/pdv/os/:id', async (req, res) => {
           unidade: item.unidade || 'UN',
           vr_venda: unitPrice,
           estoque: Number(item.estoque ?? 0),
+          is_service: isService,
+          controla_estoque: isService ? 0 : controlaEstoque,
         },
         quant: qty,
         valor: unitPrice,
@@ -833,6 +846,8 @@ router.get('/pdv/os/:id', async (req, res) => {
           unidade: 'UN',
           vr_venda: finalLabor,
           estoque: 0,
+          is_service: true,
+          controla_estoque: 0,
         },
         quant: 1,
         valor: finalLabor,
@@ -848,6 +863,7 @@ router.get('/pdv/os/:id', async (req, res) => {
         status: order.status,
         totalAmount: Number(order.total_amount),
         laborAmount: Number(order.labor_amount ?? 0),
+        discountAmount: Number(order.discount_amount ?? 0),
         vendaControle: order.venda_controle ?? null,
         closedAt: order.closed_at,
       },

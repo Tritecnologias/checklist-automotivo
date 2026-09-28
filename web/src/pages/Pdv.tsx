@@ -184,7 +184,7 @@ export default function Pdv() {
   const troco = Math.max(0, totalPagto - total)
   const podeFinalizar = cart.length > 0 && totalPagto >= total
   const itensComAlertaEstoque = cart.filter(
-    c => !c.produto.is_service && (c.produto.estoque <= 0 || c.quant > c.produto.estoque)
+    c => !c.produto.is_service && c.produto.controla_estoque !== 0 && (c.produto.estoque <= 0 || c.quant > c.produto.estoque)
   )
 
   if (!statusCaixa) {
@@ -341,6 +341,10 @@ export default function Pdv() {
                           {c.produto.is_service ? (
                             <span className="text-[10px] bg-indigo-900/60 text-indigo-300 border border-indigo-700/60 rounded px-1.5 py-0.5">
                               Serviço
+                            </span>
+                          ) : c.produto.controla_estoque === 0 ? (
+                            <span className="text-[10px] bg-purple-950/70 text-purple-300 border border-purple-800/60 rounded px-1.5 py-0.5 font-semibold">
+                              ∞ Estoque Livre
                             </span>
                           ) : c.produto.estoque <= 0 ? (
                             <span className="text-[10px] bg-red-900/60 text-red-300 border border-red-700/60 rounded px-1.5 py-0.5 font-semibold">
