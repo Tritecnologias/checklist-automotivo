@@ -29,6 +29,15 @@ const STATUS_OPTS = [
   { value: '1', label: 'Recebido' },
 ]
 
+const FORMAS_OPTS = [
+  { value: '',         label: 'Todas as formas' },
+  { value: 'dinheiro', label: '💵 Dinheiro' },
+  { value: 'cartao',   label: '💳 Cartão' },
+  { value: 'pix',      label: '⚡ PIX' },
+  { value: 'nota',     label: '📝 Nota / A Prazo' },
+  { value: 'outros',   label: '🔄 Outros' },
+]
+
 const getDatesPreset = (preset: string) => {
   const now = new Date()
   const y = now.getFullYear()
@@ -75,10 +84,11 @@ export default function Contas() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
 
-  // Filtros de Data
+  // Filtros de Data e Forma de Pagamento
   const [dataPreset, setDataPreset] = useState<string>('')
   const [dataInicio, setDataInicio] = useState('')
   const [dataFim, setDataFim]       = useState('')
+  const [formaPagto, setFormaPagto] = useState<string>('')
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -103,13 +113,19 @@ export default function Contas() {
     setPage(1)
   }
 
+  const toggleForma = (forma: string) => {
+    setFormaPagto(prev => (prev === forma ? '' : forma))
+    setPage(1)
+  }
+
   const { data: res, isLoading, isFetching, isError, error, refetch } = useQuery({
-    queryKey: ['contas', tid, status, debouncedSearch, dataInicio, dataFim, page],
+    queryKey: ['contas', tid, status, debouncedSearch, dataInicio, dataFim, formaPagto, page],
     queryFn: () => erpApi.contas({
       status,
       search: debouncedSearch,
       data_inicio: dataInicio,
       data_fim: dataFim,
+      forma_pagto: formaPagto,
       page,
     }),
     placeholderData: keepPreviousData,
@@ -143,7 +159,7 @@ export default function Contas() {
         {/* Total Filtrado */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-1 shadow-lg">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Total Geral</span>
+            <span>Total Geral {formaPagto ? `(${FORMAS_OPTS.find(f => f.value === formaPagto)?.label || ''})` : ''}</span>
             <DollarSign className="w-4 h-4 text-slate-400" />
           </div>
           <p className="text-xl font-bold text-white">
@@ -197,82 +213,155 @@ export default function Contas() {
         </div>
       </div>
 
-      {/* ── CARDS DE FORMAS DE PAGAMENTO SOMADAS ── */}
+      {/* ── CARDS DE FORMAS DE PAGAMENTO SOMADAS (INTERATIVOS) ── */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <span>💳 Formas de Pagamento Somadas no Período</span>
-          </h2>
-          <span className="text-[11px] text-slate-500">Valores consolidados</span>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-slate-400" />
+              <span>Formas de Pagamento Somadas no Período</span>
+            </h2>
+            {formaPagto && (
+              <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full font-semibold">
+                Filtro ativo: {FORMAS_OPTS.find(f => f.value === formaPagto)?.label}
+              </span>
+            )}
+          </div>
+          <span className="text-[11px] text-slate-500">
+            Clique em uma forma para filtrar ou desmarcar
+          </span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
           {/* Dinheiro */}
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => toggleForma('dinheiro')}
+            className={`text-left rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer ${
+              formaPagto === 'dinheiro'
+                ? 'bg-emerald-950/80 border-2 border-emerald-400 shadow-lg shadow-emerald-950/40 ring-2 ring-emerald-500/30 scale-[1.02]'
+                : 'bg-slate-800/60 border border-slate-700/60 hover:border-slate-500 hover:bg-slate-800/90'
+            }`}
+          >
             <div className="w-9 h-9 rounded-lg bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center text-emerald-400 shrink-0">
               <Banknote className="w-5 h-5" />
             </div>
-            <div className="min-w-0">
-              <p className="text-[11px] text-slate-400 font-medium truncate">Dinheiro</p>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-[11px] text-slate-400 font-medium truncate">Dinheiro</p>
+                {formaPagto === 'dinheiro' && (
+                  <span className="text-[9px] bg-emerald-400 text-slate-950 px-1 rounded font-bold uppercase">Ativo</span>
+                )}
+              </div>
               <p className="text-sm font-bold text-white truncate">
                 {R(totais?.por_forma_pagamento?.dinheiro ?? 0)}
               </p>
             </div>
-          </div>
+          </button>
 
           {/* Cartão */}
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => toggleForma('cartao')}
+            className={`text-left rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer ${
+              formaPagto === 'cartao'
+                ? 'bg-blue-950/80 border-2 border-blue-400 shadow-lg shadow-blue-950/40 ring-2 ring-blue-500/30 scale-[1.02]'
+                : 'bg-slate-800/60 border border-slate-700/60 hover:border-slate-500 hover:bg-slate-800/90'
+            }`}
+          >
             <div className="w-9 h-9 rounded-lg bg-blue-950/60 border border-blue-800/60 flex items-center justify-center text-blue-400 shrink-0">
               <CreditCard className="w-5 h-5" />
             </div>
-            <div className="min-w-0">
-              <p className="text-[11px] text-slate-400 font-medium truncate">Cartão</p>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-[11px] text-slate-400 font-medium truncate">Cartão</p>
+                {formaPagto === 'cartao' && (
+                  <span className="text-[9px] bg-blue-400 text-slate-950 px-1 rounded font-bold uppercase">Ativo</span>
+                )}
+              </div>
               <p className="text-sm font-bold text-white truncate">
                 {R(totais?.por_forma_pagamento?.cartao ?? 0)}
               </p>
             </div>
-          </div>
+          </button>
 
           {/* PIX */}
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => toggleForma('pix')}
+            className={`text-left rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer ${
+              formaPagto === 'pix'
+                ? 'bg-teal-950/80 border-2 border-teal-400 shadow-lg shadow-teal-950/40 ring-2 ring-teal-500/30 scale-[1.02]'
+                : 'bg-slate-800/60 border border-slate-700/60 hover:border-slate-500 hover:bg-slate-800/90'
+            }`}
+          >
             <div className="w-9 h-9 rounded-lg bg-teal-950/60 border border-teal-800/60 flex items-center justify-center text-teal-400 shrink-0">
               <Zap className="w-5 h-5" />
             </div>
-            <div className="min-w-0">
-              <p className="text-[11px] text-slate-400 font-medium truncate">PIX</p>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-[11px] text-slate-400 font-medium truncate">PIX</p>
+                {formaPagto === 'pix' && (
+                  <span className="text-[9px] bg-teal-400 text-slate-950 px-1 rounded font-bold uppercase">Ativo</span>
+                )}
+              </div>
               <p className="text-sm font-bold text-white truncate">
                 {R(totais?.por_forma_pagamento?.pix ?? 0)}
               </p>
             </div>
-          </div>
+          </button>
 
           {/* Nota / A Prazo */}
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => toggleForma('nota')}
+            className={`text-left rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer ${
+              formaPagto === 'nota'
+                ? 'bg-amber-950/80 border-2 border-amber-400 shadow-lg shadow-amber-950/40 ring-2 ring-amber-500/30 scale-[1.02]'
+                : 'bg-slate-800/60 border border-slate-700/60 hover:border-slate-500 hover:bg-slate-800/90'
+            }`}
+          >
             <div className="w-9 h-9 rounded-lg bg-amber-950/60 border border-amber-800/60 flex items-center justify-center text-amber-400 shrink-0">
               <FileText className="w-5 h-5" />
             </div>
-            <div className="min-w-0">
-              <p className="text-[11px] text-slate-400 font-medium truncate">Nota / A Prazo</p>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-[11px] text-slate-400 font-medium truncate">Nota / A Prazo</p>
+                {formaPagto === 'nota' && (
+                  <span className="text-[9px] bg-amber-400 text-slate-950 px-1 rounded font-bold uppercase">Ativo</span>
+                )}
+              </div>
               <p className="text-sm font-bold text-white truncate">
                 {R(totais?.por_forma_pagamento?.nota ?? 0)}
               </p>
             </div>
-          </div>
+          </button>
 
-          {/* Outros / Cheque (se > 0 ou tela larga) */}
-          {(Number(totais?.por_forma_pagamento?.outros ?? 0) > 0 || window.innerWidth > 1024) && (
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-purple-950/60 border border-purple-800/60 flex items-center justify-center text-purple-400 shrink-0">
-                <DollarSign className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] text-slate-400 font-medium truncate">Outros</p>
-                <p className="text-sm font-bold text-white truncate">
-                  {R(totais?.por_forma_pagamento?.outros ?? 0)}
-                </p>
-              </div>
+          {/* Outros / Cheque */}
+          <button
+            type="button"
+            onClick={() => toggleForma('outros')}
+            className={`text-left rounded-xl p-3 flex items-center gap-3 transition-all cursor-pointer ${
+              formaPagto === 'outros'
+                ? 'bg-purple-950/80 border-2 border-purple-400 shadow-lg shadow-purple-950/40 ring-2 ring-purple-500/30 scale-[1.02]'
+                : 'bg-slate-800/60 border border-slate-700/60 hover:border-slate-500 hover:bg-slate-800/90'
+            }`}
+          >
+            <div className="w-9 h-9 rounded-lg bg-purple-950/60 border border-purple-800/60 flex items-center justify-center text-purple-400 shrink-0">
+              <DollarSign className="w-5 h-5" />
             </div>
-          )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-[11px] text-slate-400 font-medium truncate">Outros</p>
+                {formaPagto === 'outros' && (
+                  <span className="text-[9px] bg-purple-400 text-slate-950 px-1 rounded font-bold uppercase">Ativo</span>
+                )}
+              </div>
+              <p className="text-sm font-bold text-white truncate">
+                {R(totais?.por_forma_pagamento?.outros ?? 0)}
+              </p>
+            </div>
+          </button>
         </div>
       </div>
 
@@ -325,7 +414,7 @@ export default function Contas() {
           </div>
         </div>
 
-        {/* Linha 2: Inputs de Data Customizada + Campo de Busca */}
+        {/* Linha 2: Inputs de Data Customizada + Filtro Forma Pagto + Campo de Busca */}
         <div className="flex items-center gap-3 flex-wrap pt-1 border-t border-slate-800/80">
           {/* De: */}
           <div className="flex items-center gap-2">
@@ -367,6 +456,50 @@ export default function Contas() {
               <span>Limpar data</span>
             </button>
           )}
+
+          {/* Filtro por Forma de Pagamento Select */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-400 shrink-0 flex items-center gap-1">
+              <CreditCard className="w-3.5 h-3.5 text-slate-400" />
+              <span>Forma:</span>
+            </span>
+            <div className="relative">
+              <select
+                value={formaPagto}
+                onChange={e => {
+                  setFormaPagto(e.target.value)
+                  setPage(1)
+                }}
+                className={`bg-slate-800 border rounded-lg pl-2.5 pr-7 py-1.5 text-xs font-semibold focus:outline-none focus:border-blue-500 appearance-none cursor-pointer transition-colors ${
+                  formaPagto
+                    ? 'text-blue-300 border-blue-500 bg-blue-950/50 ring-1 ring-blue-500/30'
+                    : 'text-slate-300 border-slate-700 hover:border-slate-600'
+                }`}
+              >
+                {FORMAS_OPTS.map(f => (
+                  <option key={f.value} value={f.value} className="bg-slate-900 text-white">
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+            </div>
+
+            {formaPagto && (
+              <button
+                onClick={() => { setFormaPagto(''); setPage(1) }}
+                className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-white rounded-lg text-xs flex items-center gap-1 transition-colors"
+                title="Limpar filtro de forma de pagamento"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Todas</span>
+              </button>
+            )}
+          </div>
 
           {/* Busca por cliente, histórico ou controle */}
           <div className="relative flex-1 min-w-56">

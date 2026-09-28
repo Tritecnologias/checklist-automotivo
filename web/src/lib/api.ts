@@ -171,6 +171,7 @@ export const erpApi = {
     search?: string;
     data_inicio?: string;
     data_fim?: string;
+    forma_pagto?: string;
   }) => {
     const q = new URLSearchParams()
     if (params.status) q.set('status', params.status)
@@ -178,6 +179,7 @@ export const erpApi = {
     if (params.search) q.set('search', params.search)
     if (params.data_inicio) q.set('data_inicio', params.data_inicio)
     if (params.data_fim)    q.set('data_fim',    params.data_fim)
+    if (params.forma_pagto) q.set('forma_pagto', params.forma_pagto)
     return adminRequest<{ data: Lancamento[]; total: number; pages: number; totais?: TotaisContas }>(`/erp/contas?${q}`)
   },
   receberConta: (id: number) =>

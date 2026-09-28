@@ -536,6 +536,7 @@ router.get('/contas', requireManagerUp, async (req, res) => {
     const search = String(req.query.search ?? '').trim();
     const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
     const dataFim = req.query.data_fim ? String(req.query.data_fim).trim() : '';
+    const formaPagto = req.query.forma_pagto ? String(req.query.forma_pagto).trim().toLowerCase() : '';
 
     const whereParts: string[] = [];
     const params: any[] = [];
@@ -560,8 +561,9 @@ router.get('/contas', requireManagerUp, async (req, res) => {
       params.push(dataFim);
     }
 
-    const where = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
+    const whereBase = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
 
+    // Agregação geral do período (alimenta os cards de formas de pagamento)
     const [[totaisRow]] = await pool.query<any>(
       `SELECT
          COUNT(*) as total_count,
@@ -576,9 +578,44 @@ router.get('/contas', requireManagerUp, async (req, res) => {
          COALESCE(SUM(CASE WHEN (l.id_modo_lancamento NOT IN (1, 4, 5, 6, 7, 9, 10, 11) OR l.id_modo_lancamento IS NULL) THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_outros
        FROM cad_lancamentos l
        LEFT JOIN cad_clientes c ON c.id = l.id_cliente
-       ${where}`,
+       ${whereBase}`,
       params
     );
+
+    // Filtro adicional de forma de pagamento para a listagem
+    const whereListParts = [...whereParts];
+    const paramsList = [...params];
+
+    if (formaPagto === 'dinheiro') {
+      whereListParts.push('l.id_modo_lancamento = 1');
+    } else if (formaPagto === 'cartao') {
+      whereListParts.push('l.id_modo_lancamento IN (6, 7)');
+    } else if (formaPagto === 'pix') {
+      whereListParts.push('l.id_modo_lancamento = 11');
+    } else if (formaPagto === 'nota') {
+      whereListParts.push('l.id_modo_lancamento IN (4, 5, 9, 10)');
+    } else if (formaPagto === 'outros') {
+      whereListParts.push('(l.id_modo_lancamento NOT IN (1, 4, 5, 6, 7, 9, 10, 11) OR l.id_modo_lancamento IS NULL)');
+    }
+
+    const whereList = whereListParts.length ? 'WHERE ' + whereListParts.join(' AND ') : '';
+
+    let totaisKpi = totaisRow;
+    if (formaPagto) {
+      const [[fRow]] = await pool.query<any>(
+        `SELECT
+           COUNT(*) as total_count,
+           COALESCE(SUM(l.vr_parcela - l.vr_abatimentos), 0) as total_valor,
+           COALESCE(SUM(CASE WHEN l.status_lancamento = 1 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_recebido,
+           COALESCE(SUM(CASE WHEN l.status_lancamento = 0 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_pendente,
+           COALESCE(SUM(CASE WHEN l.status_lancamento = 0 AND l.data_vencimento < CURDATE() THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_vencido
+         FROM cad_lancamentos l
+         LEFT JOIN cad_clientes c ON c.id = l.id_cliente
+         ${whereList}`,
+        paramsList
+      );
+      totaisKpi = fRow;
+    }
 
     const [rows] = await pool.query<any>(
       `SELECT l.id, l.controle, l.historico, l.data_vencimento, l.data_confirmacao,
@@ -589,12 +626,12 @@ router.get('/contas', requireManagerUp, async (req, res) => {
        FROM cad_lancamentos l
        LEFT JOIN cad_clientes c ON c.id = l.id_cliente
        LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
-       ${where}
+       ${whereList}
        ORDER BY l.id DESC LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+      [...paramsList, limit, offset]
     );
 
-    const total = Number(totaisRow?.total_count ?? 0);
+    const total = Number(totaisKpi?.total_count ?? 0);
 
     const FORMAS_MAP: Record<number, string> = {
       1: 'DINHEIRO',
@@ -627,10 +664,10 @@ router.get('/contas', requireManagerUp, async (req, res) => {
       total,
       pages: Math.ceil(total / limit),
       totais: {
-        total: Number(totaisRow?.total_valor ?? 0),
-        total_recebido: Number(totaisRow?.total_recebido ?? 0),
-        total_pendente: Number(totaisRow?.total_pendente ?? 0),
-        total_vencido: Number(totaisRow?.total_vencido ?? 0),
+        total: Number(totaisKpi?.total_valor ?? 0),
+        total_recebido: Number(totaisKpi?.total_recebido ?? 0),
+        total_pendente: Number(totaisKpi?.total_pendente ?? 0),
+        total_vencido: Number(totaisKpi?.total_vencido ?? 0),
         por_forma_pagamento: {
           dinheiro: Number(totaisRow?.total_dinheiro ?? 0),
           cartao: Number(totaisRow?.total_cartao ?? 0),
