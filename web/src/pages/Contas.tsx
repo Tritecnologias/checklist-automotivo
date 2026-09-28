@@ -138,6 +138,7 @@ export default function Contas() {
 
   const lancamentos = res?.data ?? []
   const totais = res?.totais
+  const somaPagina = lancamentos.reduce((acc, l) => acc + Number(l.valor || 0), 0)
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -626,6 +627,36 @@ export default function Contas() {
                 )
               })}
             </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-slate-700 bg-slate-800/80 text-white font-semibold">
+                <td colSpan={4} className="px-5 py-3.5 text-right text-xs uppercase tracking-wider text-slate-300 font-bold">
+                  {(res?.pages ?? 0) > 1 ? (
+                    <div className="flex flex-col items-end">
+                      <span className="font-bold text-white">Soma Total Geral:</span>
+                      <span className="text-[11px] font-normal text-slate-400">
+                        Nesta página ({lancamentos.length}): {R(somaPagina)}
+                      </span>
+                    </div>
+                  ) : (
+                    <span>Soma Total:</span>
+                  )}
+                </td>
+                <td className="px-5 py-3.5 text-right font-black text-emerald-400 text-base tabular-nums">
+                  {R(totais?.total ?? 0)}
+                </td>
+                <td colSpan={2} className="px-5 py-3.5 text-center text-xs text-slate-400">
+                  {formaPagto ? (
+                    <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full font-semibold">
+                      {FORMAS_OPTS.find(f => f.value === formaPagto)?.label}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      {res?.total ?? 0} item(ns)
+                    </span>
+                  )}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         )}
 
