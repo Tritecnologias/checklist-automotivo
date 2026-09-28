@@ -208,6 +208,8 @@ export interface OrderItem {
   total: number
   instalacaoId?: number | null
   instalacaoSigla?: string | null
+  stock?: number | null
+  controlaEstoque?: boolean
 }
 
 export interface InstItem {

@@ -106,14 +106,18 @@ async function recalcTotal(orderId: string): Promise<number> {
   return total;
 }
 
-async function fetchItems(orderId: string): Promise<Record<string, unknown>[]> {
-  const [rows] = await pool.execute(
-    `SELECT oi.*, inst.sigla AS instalacao_sigla
+async function fetchItems(orderId: string, tenantId = 1): Promise<Record<string, unknown>[]> {
+  const [rows] = await pool.query(
+    `SELECT oi.*, inst.sigla AS instalacao_sigla,
+            COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque,
+            COALESCE(p.controla_estoque, 1) AS controla_estoque
      FROM os_order_items oi
      LEFT JOIN instalacoes inst ON inst.id = oi.instalacao_id
+     LEFT JOIN cad_produtos p ON p.id = oi.product_id
+     LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
      WHERE oi.order_id = ?
      ORDER BY oi.created_at`,
-    [orderId],
+    [tenantId, tenantId, orderId],
   );
   return rows as Record<string, unknown>[];
 }
@@ -149,6 +153,8 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
       total: Number(i.total),
       instalacaoId: i.instalacao_id ? Number(i.instalacao_id) : null,
       instalacaoSigla: (i.instalacao_sigla as string | null) ?? null,
+      stock: i.estoque !== null && i.estoque !== undefined ? Number(i.estoque) : null,
+      controlaEstoque: i.controla_estoque !== null && i.controla_estoque !== undefined ? Number(i.controla_estoque) === 1 : true,
     })),
     laborAmount: Number(order.labor_amount ?? 0),
     totalAmount: Number(order.total_amount),
@@ -536,7 +542,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    const items = await fetchItems(req.params.id);
+    const items = await fetchItems(req.params.id, Number(order.tenant_id));
 
     res.json(formatOrder(order, items));
   } catch (err) {
@@ -777,7 +783,7 @@ router.patch('/:id/labor', async (req: Request, res: Response) => {
     const order = (orders as Record<string, unknown>[])[0];
     if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
 
-    const items = await fetchItems(req.params.id);
+    const items = await fetchItems(req.params.id, Number(order.tenant_id));
 
     res.json(formatOrder(order, items));
   } catch (err) {
@@ -810,7 +816,7 @@ router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => 
     const order = (orders as Record<string, unknown>[])[0];
     if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
 
-    const items = await fetchItems(req.params.id);
+    const items = await fetchItems(req.params.id, Number(order.tenant_id));
 
     res.json(formatOrder(order, items));
   } catch (err) {

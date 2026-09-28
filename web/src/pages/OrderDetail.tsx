@@ -857,7 +857,7 @@ export default function OrderDetail() {
                           )}
                         </div>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-semibold text-white group-hover:text-blue-300 transition-colors truncate">
                               {item.description}
                             </span>
@@ -870,22 +870,26 @@ export default function OrderDetail() {
                             >
                               {item.type === 'part' ? 'Peça' : 'Serviço'}
                             </span>
+                            {item.type === 'service' ? (
+                              <span className="text-[10px] bg-indigo-900/60 text-indigo-300 border border-indigo-700/60 rounded px-1.5 py-0.5 font-medium">
+                                Serviço
+                              </span>
+                            ) : item.controlaEstoque === false ? (
+                              <span className="text-[10px] bg-purple-950/70 text-purple-300 border border-purple-800/60 rounded px-1.5 py-0.5 font-semibold">
+                                ∞ Estoque Livre
+                              </span>
+                            ) : (item.stock ?? 0) <= 0 ? (
+                              <span className="text-[10px] bg-red-900/60 text-red-300 border border-red-700/60 rounded px-1.5 py-0.5 font-semibold">
+                                ⚠️ Sem estoque (0)
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                Estq: {item.stock}
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-3 text-xs text-slate-400 mt-0.5">
                             <span className="font-mono text-slate-500">Cód: {item.code}</span>
-                            {item.controlaEstoque === false ? (
-                              <span className="font-semibold text-purple-400">
-                                Estoque: ∞ Infinito
-                              </span>
-                            ) : item.stock !== undefined ? (
-                              <span
-                                className={`font-medium ${
-                                  item.stock > 0 ? 'text-emerald-400' : 'text-slate-500'
-                                }`}
-                              >
-                                Estoque: {item.stock} un
-                              </span>
-                            ) : null}
                             {item.instalacoes && item.instalacoes.length > 0 && (
                               <span className="text-blue-400/90 text-[11px] font-medium">
                                 📍 {item.instalacoes.length} posições disponíveis
@@ -953,6 +957,31 @@ export default function OrderDetail() {
                 <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
                 <span>{addItemError}</span>
               </div>
+            )}
+
+            {/* Alerta de estoque se o produto controla estoque */}
+            {selectedCatalogItem.type === 'part' && selectedCatalogItem.controlaEstoque !== false && (
+              (selectedCatalogItem.stock ?? 0) <= 0 ? (
+                <div className="bg-red-950/50 border border-red-700/70 rounded-xl p-3 text-red-200 text-xs flex items-center gap-2.5 mb-4">
+                  <span className="text-base">⚠️</span>
+                  <div>
+                    <span className="font-bold text-red-300">Produto sem estoque disponível no momento (Saldo: 0)</span>
+                    <p className="text-[11px] text-red-200/90 mt-0.5">
+                      Você pode adicionar o item ao {isQuote ? 'orçamento' : 'à OS'} normalmente.
+                    </p>
+                  </div>
+                </div>
+              ) : addItemQty > (selectedCatalogItem.stock ?? 0) ? (
+                <div className="bg-amber-950/50 border border-amber-700/70 rounded-xl p-3 text-amber-200 text-xs flex items-center gap-2.5 mb-4">
+                  <span className="text-base">⚠️</span>
+                  <div>
+                    <span className="font-bold text-amber-300">Quantidade ({addItemQty}) maior que o saldo em estoque ({selectedCatalogItem.stock})</span>
+                    <p className="text-[11px] text-amber-200/90 mt-0.5">
+                      A inclusão pode ser realizada normalmente.
+                    </p>
+                  </div>
+                </div>
+              ) : null
             )}
 
             <div className="space-y-4">
@@ -1426,6 +1455,30 @@ export default function OrderDetail() {
         </div>
       )}
 
+      {/* Alerta de Estoque Insuficiente */}
+      {(() => {
+        const itensAlerta = items.filter(
+          (i) =>
+            i.type === 'part' &&
+            i.controlaEstoque !== false &&
+            i.stock !== null &&
+            i.stock !== undefined &&
+            (i.stock <= 0 || i.quantity > i.stock)
+        )
+        if (itensAlerta.length === 0) return null
+        return (
+          <div className="bg-amber-950/50 border border-amber-600/70 rounded-xl p-3.5 text-amber-200 text-xs space-y-1 shadow-lg">
+            <div className="flex items-center gap-1.5 font-semibold text-amber-300">
+              <span>⚠️</span>
+              <span>Atenção: Saldo de estoque insuficiente</span>
+            </div>
+            <p className="text-[11px] text-amber-200/90 leading-relaxed">
+              {itensAlerta.length} produto(s) {isQuote ? 'neste orçamento' : 'nesta OS'} estão sem estoque ou com quantidade superior ao saldo na loja. O orçamento e a OS podem ser gerenciados normalmente.
+            </p>
+          </div>
+        )
+      })()}
+
       {/* Summary */}
       {order.items.length > 0 && (
         <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 shadow-xl">
@@ -1521,6 +1574,27 @@ function ItemsTable({
                         {item.instalacaoSigla}
                       </span>
                     )}
+                    {item.type === 'service' ? (
+                      <span className="text-[10px] bg-indigo-900/60 text-indigo-300 border border-indigo-700/60 rounded px-1.5 py-0.5 font-medium">
+                        Serviço
+                      </span>
+                    ) : item.controlaEstoque === false ? (
+                      <span className="text-[10px] bg-purple-950/70 text-purple-300 border border-purple-800/60 rounded px-1.5 py-0.5 font-semibold">
+                        ∞ Estoque Livre
+                      </span>
+                    ) : item.stock !== null && item.stock !== undefined && item.stock <= 0 ? (
+                      <span className="text-[10px] bg-red-900/60 text-red-300 border border-red-700/60 rounded px-1.5 py-0.5 font-semibold">
+                        ⚠️ Sem estoque (0)
+                      </span>
+                    ) : item.stock !== null && item.stock !== undefined && item.quantity > item.stock ? (
+                      <span className="text-[10px] bg-amber-900/60 text-amber-300 border border-amber-700/60 rounded px-1.5 py-0.5 font-semibold">
+                        ⚠️ Qtd ({item.quantity}) &gt; Estoque ({item.stock})
+                      </span>
+                    ) : item.stock !== null && item.stock !== undefined ? (
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        Estq: {item.stock}
+                      </span>
+                    ) : null}
                   </div>
                 </td>
                 <td className="px-5 py-3 text-right">
