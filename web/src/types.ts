@@ -107,6 +107,53 @@ export interface TotaisContas {
   }
 }
 
+export interface ContaPagar {
+  id: number
+  controle: string
+  documento: string
+  historico: string
+  favorecido: string
+  id_planejamento: number
+  categoria: string
+  data_vencimento: string
+  data_pagamento: string | null
+  status: number // 0 = Pendente / A Pagar, 1 = Pago
+  valor: number
+  vr_parcela: number
+  vr_abatimentos: number
+  vr_acrescimo: number
+  id_modo_lancamento: number
+  modo_lancamento: string
+  parcela: number
+}
+
+export interface TotaisContasPagar {
+  total: number
+  total_pago: number
+  total_pendente: number
+  total_vencido: number
+  por_forma_pagamento: {
+    boleto: number
+    pix: number
+    dinheiro: number
+    cartao: number
+    outros: number
+  }
+}
+
+export interface CategoriaContaPagar {
+  id: number
+  nome: string
+  codigo?: number
+}
+
+export interface Fornecedor {
+  id: number
+  nome: string
+  cpf_cnpj?: string
+  telefone?: string
+}
+
 export interface ProdutoEstoque {
   id: number
   nome_produto: string

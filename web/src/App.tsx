@@ -18,6 +18,7 @@ import Caixa           from './pages/Caixa'
 import Pdv             from './pages/Pdv'
 import Vendas          from './pages/Vendas'
 import Contas          from './pages/Contas'
+import ContasPagar     from './pages/ContasPagar'
 import Estoque         from './pages/Estoque'
 import Clientes        from './pages/Clientes'
 import ClienteHistorico from './pages/ClienteHistorico'
@@ -53,6 +54,7 @@ export default function App() {
               <Route path="/erp/caixa"        element={<Caixa />} />
               <Route path="/erp/vendas"       element={<Vendas />} />
               <Route path="/erp/contas"       element={<Contas />} />
+              <Route path="/erp/contas-pagar" element={<ContasPagar />} />
               <Route path="/erp/clientes"     element={<Clientes />} />
               <Route path="/erp/clientes/:id" element={<ClienteHistorico />} />
               <Route path="/erp/lojas"        element={<Lojas />} />

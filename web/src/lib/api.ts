@@ -2,6 +2,7 @@ import type {
   Order, OrderItem, CatalogItem, Vehicle, OrderClient, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
+  ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -185,6 +186,75 @@ export const erpApi = {
   },
   receberConta: (id: number) =>
     adminRequest(`/erp/contas/${id}/receber`, { method: 'PATCH' }),
+
+  contasPagar: (params: {
+    status?: string
+    page?: number
+    search?: string
+    data_inicio?: string
+    data_fim?: string
+    forma_pagto?: string
+    categoria?: number
+  }) => {
+    const q = new URLSearchParams()
+    if (params.status) q.set('status', params.status)
+    if (params.page)   q.set('page',   String(params.page))
+    if (params.search) q.set('search', params.search)
+    if (params.data_inicio) q.set('data_inicio', params.data_inicio)
+    if (params.data_fim)    q.set('data_fim',    params.data_fim)
+    if (params.forma_pagto) q.set('forma_pagto', params.forma_pagto)
+    if (params.categoria)   q.set('categoria',   String(params.categoria))
+    return adminRequest<{ data: ContaPagar[]; total: number; pages: number; totais?: TotaisContasPagar }>(`/erp/contas-pagar?${q}`)
+  },
+
+  criarContaPagar: (data: {
+    descricao: string
+    valor: number
+    data_vencimento: string
+    id_planejamento?: number
+    id_modo_lancamento?: number
+    favorecido?: string
+    documento?: string
+    parcelas?: number
+    pago_agora?: boolean
+    data_pagamento?: string
+  }) => adminRequest<{ ok: boolean; parcelas: number }>('/erp/contas-pagar', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  pagarContaPagar: (id: number, data?: { data_pagamento?: string; id_modo_lancamento?: number }) =>
+    adminRequest<{ ok: boolean }>(`/erp/contas-pagar/${id}/pagar`, {
+      method: 'PATCH',
+      body: JSON.stringify(data || {}),
+    }),
+
+  estornarContaPagar: (id: number) =>
+    adminRequest<{ ok: boolean }>(`/erp/contas-pagar/${id}/estornar`, { method: 'PATCH' }),
+
+  atualizarContaPagar: (id: number, data: {
+    descricao?: string
+    valor?: number
+    data_vencimento?: string
+    id_planejamento?: number
+    id_modo_lancamento?: number
+    favorecido?: string
+    documento?: string
+  }) => adminRequest<{ ok: boolean }>(`/erp/contas-pagar/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+
+  excluirContaPagar: (id: number) =>
+    adminRequest<{ ok: boolean }>(`/erp/contas-pagar/${id}`, { method: 'DELETE' }),
+
+  categoriasContasPagar: () =>
+    adminRequest<CategoriaContaPagar[]>('/erp/contas-pagar/categorias'),
+
+  fornecedores: (search?: string) => {
+    const q = search ? `?search=${encodeURIComponent(search)}` : ''
+    return adminRequest<Fornecedor[]>(`/erp/fornecedores${q}`)
+  },
 
   buscaProdutos: (q: string) => adminRequest<ProdutoPdv[]>(`/erp/busca/produtos?q=${encodeURIComponent(q)}`),
   buscaClientes: (q: string) => adminRequest<ClientePdv[]>(`/erp/busca/clientes?q=${encodeURIComponent(q)}`),

@@ -267,7 +267,69 @@ async function runMigrations() {
     console.warn('[migration] Aviso ao criar idx_cad_produtos_busca:', idxErr);
   }
 
-  console.log('[migration] tabelas de multi-tenant OK');
+  // favorecido e tenant_id em cad_lancamentos (Contas a Pagar / Receber)
+  const [[{ cntFav }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntFav FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_lancamentos' AND COLUMN_NAME = 'favorecido'`
+  );
+  if (Number(cntFav) === 0) {
+    await pool.query('ALTER TABLE cad_lancamentos ADD COLUMN favorecido VARCHAR(150) NULL DEFAULT NULL');
+    console.log('[migration] cad_lancamentos.favorecido adicionada');
+  }
+
+  const [[{ cntLancTenant }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntLancTenant FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_lancamentos' AND COLUMN_NAME = 'tenant_id'`
+  );
+  if (Number(cntLancTenant) === 0) {
+    await pool.query('ALTER TABLE cad_lancamentos ADD COLUMN tenant_id INT NOT NULL DEFAULT 1');
+    console.log('[migration] cad_lancamentos.tenant_id adicionada');
+  }
+
+  // Seed / garantir categorias de despesas no cad_planejamento
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`cad_planejamento\` (
+      \`id\` int(4) unsigned NOT NULL AUTO_INCREMENT,
+      \`plane_cod\` int(4) unsigned DEFAULT NULL,
+      \`plane_descricao\` varchar(50) DEFAULT NULL,
+      \`plane_tipo\` char(1) DEFAULT NULL,
+      \`protegido\` char(1) DEFAULT NULL,
+      PRIMARY KEY (\`id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await pool.query(`
+    INSERT IGNORE INTO \`cad_planejamento\` (id, plane_cod, plane_descricao, plane_tipo, protegido) VALUES
+      (1, 100000, 'RECEITAS DIVERSAS', 'E', ''),
+      (2, 110000, 'VENDA REALIZADA', 'E', 'X'),
+      (3, 120000, 'OUTROS RECEBIMENTOS', 'E', ''),
+      (4, 200000, 'DESPESAS DIVERSAS', 'S', ''),
+      (5, 210000, 'DEVOLUÇÃO REALIZADA', 'S', 'X'),
+      (6, 220000, 'CONTAS DE CONSUMO', 'S', ''),
+      (7, 230000, 'ÁGUA / CONDOMÍNIO', 'S', ''),
+      (8, 240000, 'ENERGIA ELÉTRICA', 'S', ''),
+      (9, 250000, 'INTERNET / TELEFONE', 'S', ''),
+      (10, 260000, 'ALUGUEL', 'S', ''),
+      (11, 270000, 'FORNECEDOR DE PEÇAS', 'S', ''),
+      (12, 280000, 'SALÁRIOS / PRÓ-LABORE', 'S', ''),
+      (13, 290000, 'IMPOSTOS E TAXAS', 'S', ''),
+      (14, 300000, 'MANUTENÇÃO E FERRAMENTAS', 'S', '')
+  `);
+
+  // cad_fornecedores
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`cad_fornecedores\` (
+      \`id\` int(4) unsigned NOT NULL AUTO_INCREMENT,
+      \`nome_fornecedor\` varchar(100) NOT NULL,
+      \`cpf_cnpj\` varchar(20) DEFAULT NULL,
+      \`telefone\` varchar(20) DEFAULT NULL,
+      \`email\` varchar(100) DEFAULT NULL,
+      \`inativo\` tinyint(1) NOT NULL DEFAULT 0,
+      PRIMARY KEY (\`id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  console.log('[migration] tabelas de multi-tenant e financeiro OK');
 }
 
 app.use(cors());

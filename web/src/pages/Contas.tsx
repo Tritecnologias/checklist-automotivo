@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { Lancamento } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import {
   DollarSign, CheckCircle2, Clock, AlertTriangle,
-  CreditCard, Banknote, Zap, FileText, Calendar, Filter, X
+  CreditCard, Banknote, Zap, FileText, Calendar, Filter, X, TrendingDown
 } from 'lucide-react'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -142,9 +143,24 @@ export default function Contas() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      {/* ── CABEÇALHO ── */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      {/* ── SELETOR DE ABA (RECEBER / PAGAR) & CABEÇALHO ── */}
+      <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-800 pb-5">
         <div>
+          {/* Navegação entre Módulos Financeiros */}
+          <div className="inline-flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-xl mb-3 shadow-inner">
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600/90 shadow-md">
+              <DollarSign className="w-3.5 h-3.5 text-white" />
+              <span>Contas a Receber</span>
+            </div>
+            <Link
+              to="/erp/contas-pagar"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+            >
+              <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
+              <span>Contas a Pagar</span>
+            </Link>
+          </div>
+
           <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
             <DollarSign className="w-7 h-7 text-emerald-400" />
             <span>Financeiro — Contas a Receber</span>
@@ -153,6 +169,14 @@ export default function Contas() {
             Gestão de recebimentos, fluxo de caixa e formas de pagamento
           </p>
         </div>
+
+        <Link
+          to="/erp/contas-pagar"
+          className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-sm font-semibold transition-all border border-slate-700 flex items-center gap-2"
+        >
+          <TrendingDown className="w-4 h-4 text-rose-400" />
+          <span>Ir para Contas a Pagar</span>
+        </Link>
       </div>
 
       {/* ── CARDS DE TOTAIS GERAIS ── */}

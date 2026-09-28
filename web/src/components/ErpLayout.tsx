@@ -10,6 +10,7 @@ import {
   Boxes,
   Receipt,
   CircleDollarSign,
+  TrendingDown,
   Users,
   Store,
   UserCheck,
@@ -34,14 +35,15 @@ type NavItem = {
 }
 
 const nav: NavItem[] = [
-  { to: '/erp',          label: 'Dashboard',   icon: LayoutDashboard, end: true },
-  { to: '/erp/pdv',      label: 'PDV',         icon: ShoppingCart },
-  { to: '/erp/caixa',    label: 'Caixa',       icon: Wallet },
-  { to: '/erp/produtos', label: 'Produtos',    icon: Tag,             roles: ['owner', 'manager'] },
-  { to: '/erp/estoque',  label: 'Estoque',     icon: Boxes,           roles: ['owner', 'manager'] },
-  { to: '/erp/vendas',   label: 'Vendas',      icon: Receipt,         roles: ['owner', 'manager'] },
-  { to: '/erp/contas',   label: 'Financeiro',  icon: CircleDollarSign,roles: ['owner', 'manager'] },
-  { to: '/erp/clientes', label: 'Clientes',    icon: Users,           roles: ['owner', 'manager'] },
+  { to: '/erp',              label: 'Dashboard',        icon: LayoutDashboard, end: true },
+  { to: '/erp/pdv',          label: 'PDV',              icon: ShoppingCart },
+  { to: '/erp/caixa',        label: 'Caixa',            icon: Wallet },
+  { to: '/erp/produtos',     label: 'Produtos',         icon: Tag,             roles: ['owner', 'manager'] },
+  { to: '/erp/estoque',      label: 'Estoque',          icon: Boxes,           roles: ['owner', 'manager'] },
+  { to: '/erp/vendas',       label: 'Vendas',           icon: Receipt,         roles: ['owner', 'manager'] },
+  { to: '/erp/contas',       label: 'Contas a Receber', icon: CircleDollarSign,roles: ['owner', 'manager'] },
+  { to: '/erp/contas-pagar', label: 'Contas a Pagar',   icon: TrendingDown,    roles: ['owner', 'manager'] },
+  { to: '/erp/clientes',     label: 'Clientes',         icon: Users,           roles: ['owner', 'manager'] },
 ]
 
 const ROLE_LABEL: Record<string, string> = {

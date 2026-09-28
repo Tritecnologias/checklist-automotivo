@@ -558,7 +558,9 @@ router.get('/contas', requireManagerUp, async (req, res) => {
     const dataFim = req.query.data_fim ? String(req.query.data_fim).trim() : '';
     const formaPagto = req.query.forma_pagto ? String(req.query.forma_pagto).trim().toLowerCase() : '';
 
-    const whereParts: string[] = [];
+    const whereParts: string[] = [
+      "(pl.plane_tipo = 'E' OR pl.plane_tipo IS NULL OR l.id_venda IS NOT NULL OR l.id_planejamento IN (1, 2, 3))"
+    ];
     const params: any[] = [];
 
     if (status !== null) {
@@ -598,6 +600,7 @@ router.get('/contas', requireManagerUp, async (req, res) => {
          COALESCE(SUM(CASE WHEN (l.id_modo_lancamento NOT IN (1, 4, 5, 6, 7, 9, 10, 11) OR l.id_modo_lancamento IS NULL) THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_outros
        FROM cad_lancamentos l
        LEFT JOIN cad_clientes c ON c.id = l.id_cliente
+       LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
        ${whereBase}`,
       params
     );
@@ -631,6 +634,7 @@ router.get('/contas', requireManagerUp, async (req, res) => {
            COALESCE(SUM(CASE WHEN l.status_lancamento = 0 AND l.data_vencimento < CURDATE() THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_vencido
          FROM cad_lancamentos l
          LEFT JOIN cad_clientes c ON c.id = l.id_cliente
+         LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
          ${whereList}`,
         paramsList
       );
@@ -646,6 +650,7 @@ router.get('/contas', requireManagerUp, async (req, res) => {
        FROM cad_lancamentos l
        LEFT JOIN cad_clientes c ON c.id = l.id_cliente
        LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
+       LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
        ${whereList}
        ORDER BY l.id DESC LIMIT ? OFFSET ?`,
       [...paramsList, limit, offset]
@@ -710,6 +715,361 @@ router.patch('/contas/:id/receber', requireManagerUp, async (req, res) => {
     [data_confirmacao, req.params.id]
   );
   res.json({ ok: true });
+});
+
+// ── CONTAS A PAGAR ───────────────────────────────────────────────────────────
+
+router.get('/contas-pagar/categorias', requireManagerUp, async (_req, res) => {
+  try {
+    const [rows] = await pool.query<any>(
+      "SELECT id, plane_descricao as nome, plane_cod as codigo FROM cad_planejamento WHERE plane_tipo = 'S' ORDER BY plane_descricao"
+    );
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao buscar categorias' });
+  }
+});
+
+router.get('/fornecedores', requireManagerUp, async (req, res) => {
+  try {
+    const search = String(req.query.search ?? '').trim();
+    let query = 'SELECT id, nome_fornecedor as nome, cpf_cnpj, telefone FROM cad_fornecedores WHERE inativo = 0';
+    const params: any[] = [];
+    if (search.length > 0) {
+      query += ' AND (nome_fornecedor LIKE ? OR cpf_cnpj LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    query += ' ORDER BY nome_fornecedor LIMIT 50';
+    const [rows] = await pool.query<any>(query, params);
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao listar fornecedores' });
+  }
+});
+
+router.get('/contas-pagar', requireManagerUp, async (req, res) => {
+  try {
+    const page   = Math.max(1, Number(req.query.page ?? 1));
+    const limit  = 50;
+    const offset = (page - 1) * limit;
+    const statusQ = req.query.status;
+    const status = statusQ === '1' || statusQ === 'pago' ? 1 : statusQ === '' || statusQ === 'todos' ? null : 0;
+    const search = String(req.query.search ?? '').trim();
+    const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
+    const dataFim = req.query.data_fim ? String(req.query.data_fim).trim() : '';
+    const formaPagto = req.query.forma_pagto ? String(req.query.forma_pagto).trim().toLowerCase() : '';
+    const categoriaId = req.query.categoria ? Number(req.query.categoria) : null;
+
+    const whereParts: string[] = [
+      "(pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))"
+    ];
+    const params: any[] = [];
+
+    if (status !== null) {
+      whereParts.push('l.status_lancamento = ?');
+      params.push(status);
+    }
+
+    if (categoriaId) {
+      whereParts.push('l.id_planejamento = ?');
+      params.push(categoriaId);
+    }
+
+    if (search.length > 0) {
+      whereParts.push('(l.favorecido LIKE ? OR l.historico LIKE ? OR l.documento LIKE ? OR l.controle LIKE ? OR pl.plane_descricao LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    if (dataInicio) {
+      whereParts.push('l.data_vencimento >= ?');
+      params.push(dataInicio);
+    }
+
+    if (dataFim) {
+      whereParts.push('l.data_vencimento <= ?');
+      params.push(dataFim);
+    }
+
+    const whereBase = 'WHERE ' + whereParts.join(' AND ');
+
+    // Agregações de totais gerais
+    const [[totaisRow]] = await pool.query<any>(
+      `SELECT
+         COUNT(*) as total_count,
+         COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_valor,
+         COALESCE(SUM(CASE WHEN l.status_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as total_pago,
+         COALESCE(SUM(CASE WHEN l.status_lancamento = 0 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as total_pendente,
+         COALESCE(SUM(CASE WHEN l.status_lancamento = 0 AND l.data_vencimento < CURDATE() THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as total_vencido,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 4 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0)) ELSE 0 END), 0) as total_boleto,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 11 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0)) ELSE 0 END), 0) as total_pix,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0)) ELSE 0 END), 0) as total_dinheiro,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento IN (6, 7) THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0)) ELSE 0 END), 0) as total_cartao,
+         COALESCE(SUM(CASE WHEN (l.id_modo_lancamento NOT IN (1, 4, 6, 7, 11) OR l.id_modo_lancamento IS NULL) THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0)) ELSE 0 END), 0) as total_outros
+       FROM cad_lancamentos l
+       LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+       ${whereBase}`,
+      params
+    );
+
+    const whereListParts = [...whereParts];
+    const paramsList = [...params];
+
+    if (formaPagto === 'boleto') {
+      whereListParts.push('l.id_modo_lancamento = 4');
+    } else if (formaPagto === 'pix') {
+      whereListParts.push('l.id_modo_lancamento = 11');
+    } else if (formaPagto === 'dinheiro') {
+      whereListParts.push('l.id_modo_lancamento = 1');
+    } else if (formaPagto === 'cartao') {
+      whereListParts.push('l.id_modo_lancamento IN (6, 7)');
+    } else if (formaPagto === 'outros') {
+      whereListParts.push('(l.id_modo_lancamento NOT IN (1, 4, 6, 7, 11) OR l.id_modo_lancamento IS NULL)');
+    }
+
+    const whereList = 'WHERE ' + whereListParts.join(' AND ');
+
+    let totaisKpi = totaisRow;
+    if (formaPagto) {
+      const [[fRow]] = await pool.query<any>(
+        `SELECT
+           COUNT(*) as total_count,
+           COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_valor,
+           COALESCE(SUM(CASE WHEN l.status_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as total_pago,
+           COALESCE(SUM(CASE WHEN l.status_lancamento = 0 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as total_pendente,
+           COALESCE(SUM(CASE WHEN l.status_lancamento = 0 AND l.data_vencimento < CURDATE() THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as total_vencido
+         FROM cad_lancamentos l
+         LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+         ${whereList}`,
+        paramsList
+      );
+      totaisKpi = fRow;
+    }
+
+    const [rows] = await pool.query<any>(
+      `SELECT l.id, l.controle, l.documento, l.historico, l.favorecido,
+              l.data_vencimento, l.data_confirmacao,
+              l.vr_parcela, l.vr_abatimentos, l.vr_acrescimo, l.status_lancamento,
+              l.id_planejamento, pl.plane_descricao as categoria,
+              l.id_modo_lancamento, m.modo_lancamento,
+              l.parcela
+       FROM cad_lancamentos l
+       LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+       LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
+       ${whereList}
+       ORDER BY l.data_vencimento ASC, l.id DESC LIMIT ? OFFSET ?`,
+      [...paramsList, limit, offset]
+    );
+
+    const total = Number(totaisKpi?.total_count ?? 0);
+
+    const FORMAS_MAP: Record<number, string> = {
+      1: 'DINHEIRO',
+      2: 'CHEQUE',
+      4: 'BOLETO',
+      5: 'CARNÊ',
+      6: 'CARTÃO DÉBITO',
+      7: 'CARTÃO CRÉDITO',
+      8: 'OUTROS',
+      9: 'PROMISSÓRIA',
+      10: 'DUPLICATA',
+      11: 'PIX',
+    };
+
+    res.json({
+      data: rows.map((r: any) => {
+        const modoId = Number(r.id_modo_lancamento);
+        const modoNome = FORMAS_MAP[modoId] || r.modo_lancamento || 'BOLETO';
+        const valorLiquido = Number(r.vr_parcela || 0) - Number(r.vr_abatimentos || 0) + Number(r.vr_acrescimo || 0);
+        return {
+          id: r.id,
+          controle: r.controle,
+          documento: r.documento || '',
+          historico: r.historico || '',
+          favorecido: r.favorecido || r.historico || 'Fornecedor / Favorecido',
+          id_planejamento: r.id_planejamento,
+          categoria: r.categoria || 'Despesa Diversa',
+          data_vencimento: r.data_vencimento,
+          data_pagamento: r.data_confirmacao,
+          status: Number(r.status_lancamento),
+          valor: valorLiquido,
+          vr_parcela: Number(r.vr_parcela),
+          vr_abatimentos: Number(r.vr_abatimentos || 0),
+          vr_acrescimo: Number(r.vr_acrescimo || 0),
+          id_modo_lancamento: modoId,
+          modo_lancamento: modoNome,
+          parcela: r.parcela || 1,
+        };
+      }),
+      total,
+      pages: Math.ceil(total / limit),
+      totais: {
+        total: Number(totaisKpi?.total_valor ?? 0),
+        total_pago: Number(totaisKpi?.total_pago ?? 0),
+        total_pendente: Number(totaisKpi?.total_pendente ?? 0),
+        total_vencido: Number(totaisKpi?.total_vencido ?? 0),
+        por_forma_pagamento: {
+          boleto: Number(totaisRow?.total_boleto ?? 0),
+          pix: Number(totaisRow?.total_pix ?? 0),
+          dinheiro: Number(totaisRow?.total_dinheiro ?? 0),
+          cartao: Number(totaisRow?.total_cartao ?? 0),
+          outros: Number(totaisRow?.total_outros ?? 0),
+        },
+      },
+    });
+  } catch (err: any) {
+    console.error('GET /erp/contas-pagar error:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao carregar contas a pagar' });
+  }
+});
+
+router.post('/contas-pagar', requireManagerUp, async (req, res) => {
+  try {
+    const {
+      descricao,
+      valor,
+      data_vencimento,
+      id_planejamento = 4,
+      id_modo_lancamento = 4,
+      favorecido = '',
+      documento = '',
+      parcelas = 1,
+      pago_agora = false,
+      data_pagamento,
+    } = req.body;
+
+    const valNum = Number(valor);
+    if (!descricao || !data_vencimento || isNaN(valNum) || valNum <= 0) {
+      res.status(400).json({ message: 'Descrição, valor e data de vencimento são obrigatórios.' });
+      return;
+    }
+
+    const numParcelas = Math.max(1, Math.min(60, Number(parcelas || 1)));
+    const valorParcela = Number((valNum / numParcelas).toFixed(2));
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const baseCtrl = `CP${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+
+    // Base date
+    const [y, m, d] = String(data_vencimento).slice(0, 10).split('-').map(Number);
+
+    for (let p = 1; p <= numParcelas; p++) {
+      const due = new Date(y, (m - 1) + (p - 1), d);
+      const dueStr = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`;
+      const ctrl = numParcelas > 1 ? `${baseCtrl}_${p}` : baseCtrl;
+      const hist = numParcelas > 1 ? `${descricao} (${p}/${numParcelas})` : descricao;
+      const isPago = p === 1 && Boolean(pago_agora);
+      const dataConf = isPago ? (data_pagamento || dueStr) : null;
+
+      await pool.query(
+        `INSERT INTO cad_lancamentos
+           (id_planejamento, id_conta, id_modo_lancamento, status_lancamento,
+            controle, documento, historico, favorecido, parcela, data_vencimento,
+            vr_parcela, vr_abatimentos, vr_acrescimo, transferido,
+            id_cliente, data_confirmacao, dias_atraso)
+         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, 0)`,
+        [
+          Number(id_planejamento || 4),
+          Number(id_modo_lancamento || 4),
+          isPago ? 1 : 0,
+          ctrl,
+          documento || ctrl,
+          hist,
+          favorecido || descricao,
+          p,
+          dueStr,
+          valorParcela,
+          dataConf
+        ]
+      );
+    }
+
+    res.json({ ok: true, parcelas: numParcelas });
+  } catch (err: any) {
+    console.error('POST /erp/contas-pagar error:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao criar conta a pagar' });
+  }
+});
+
+router.patch('/contas-pagar/:id/pagar', requireManagerUp, async (req, res) => {
+  try {
+    const dataConfirmacao = req.body.data_pagamento || new Date().toISOString().slice(0, 10);
+    const modoId = req.body.id_modo_lancamento ? Number(req.body.id_modo_lancamento) : null;
+
+    if (modoId) {
+      await pool.query(
+        'UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=?, id_modo_lancamento=? WHERE id=?',
+        [dataConfirmacao, modoId, req.params.id]
+      );
+    } else {
+      await pool.query(
+        'UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=? WHERE id=?',
+        [dataConfirmacao, req.params.id]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao baixar conta a pagar' });
+  }
+});
+
+router.patch('/contas-pagar/:id/estornar', requireManagerUp, async (req, res) => {
+  try {
+    await pool.query(
+      'UPDATE cad_lancamentos SET status_lancamento=0, data_confirmacao=NULL WHERE id=?',
+      [req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao estornar conta a pagar' });
+  }
+});
+
+router.put('/contas-pagar/:id', requireManagerUp, async (req, res) => {
+  try {
+    const {
+      descricao,
+      valor,
+      data_vencimento,
+      id_planejamento,
+      id_modo_lancamento,
+      favorecido,
+      documento,
+    } = req.body;
+
+    await pool.query(
+      `UPDATE cad_lancamentos SET
+         historico = COALESCE(?, historico),
+         vr_parcela = COALESCE(?, vr_parcela),
+         data_vencimento = COALESCE(?, data_vencimento),
+         id_planejamento = COALESCE(?, id_planejamento),
+         id_modo_lancamento = COALESCE(?, id_modo_lancamento),
+         favorecido = COALESCE(?, favorecido),
+         documento = COALESCE(?, documento)
+       WHERE id = ?`,
+      [
+        descricao,
+        valor ? Number(valor) : null,
+        data_vencimento,
+        id_planejamento ? Number(id_planejamento) : null,
+        id_modo_lancamento ? Number(id_modo_lancamento) : null,
+        favorecido,
+        documento,
+        req.params.id
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao atualizar conta a pagar' });
+  }
+});
+
+router.delete('/contas-pagar/:id', requireManagerUp, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM cad_lancamentos WHERE id = ?', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao excluir conta a pagar' });
+  }
 });
 
 // ── BUSCA RÁPIDA (PDV) ───────────────────────────────────────────────────────
