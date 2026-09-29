@@ -468,7 +468,7 @@ router.post('/vendas', async (req, res) => {
           controle, documento, historico, parcela, data_vencimento,
           vr_parcela, vr_abatimentos, vr_acrescimo, transferido,
           id_cliente, id_venda, data_confirmacao, dias_atraso, tenant_id)
-       VALUES (2,1,?,?,?,?,?,1,?,?,0,0,0,?,?,?,?,?)`,
+       VALUES (2,1,?,?,?,?,?,1,?,?,0,0,0,?,?,?,0,?)`,
       [codLancamento, em_aberto === 0 ? 1 : 0,
        controle, controle, hist, data_venda,
        vr_total, finalClienteId, id_venda,
