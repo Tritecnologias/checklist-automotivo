@@ -1189,7 +1189,7 @@ router.get('/pdv/os-encerradas', async (req, res) => {
   try {
     const search = String(req.query.search ?? '').trim();
     const apenasPendentes = req.query.apenas_pendentes === 'true' || req.query.apenas_pendentes === '1';
-    const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true);
+    const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true, 'o.tenant_id');
 
     const whereParts: string[] = ["o.status = 'closed'"];
     const params: any[] = [];

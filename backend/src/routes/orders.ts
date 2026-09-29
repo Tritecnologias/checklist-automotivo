@@ -33,6 +33,7 @@ function tenantWhereClause(
   user: JwtPayload,
   req: Request,
   existingWhere = false,
+  column = 'o.tenant_id',
 ): { clause: string; params: any[] } {
   const prefix = existingWhere ? ' AND ' : ' WHERE ';
   const ids = allowedTenants(user); // null = owner sem restrição
@@ -42,7 +43,7 @@ function tenantWhereClause(
   if (ids === null) {
     // owner
     if (headerTenant > 0) {
-      return { clause: `${prefix}tenant_id = ?`, params: [headerTenant] };
+      return { clause: `${prefix}${column} = ?`, params: [headerTenant] };
     }
     return { clause: '', params: [] };
   }
@@ -51,10 +52,10 @@ function tenantWhereClause(
     return { clause: `${prefix}1=0`, params: [] };
   }
   if (ids.length === 1) {
-    return { clause: `${prefix}tenant_id = ?`, params: [ids[0]] };
+    return { clause: `${prefix}${column} = ?`, params: [ids[0]] };
   }
   return {
-    clause: `${prefix}tenant_id IN (${ids.map(() => '?').join(',')})`,
+    clause: `${prefix}${column} IN (${ids.map(() => '?').join(',')})`,
     params: ids,
   };
 }
@@ -179,21 +180,21 @@ router.get('/', async (req: Request, res: Response) => {
       const clean = search.replace(/[-\s]/g, '').toUpperCase();
       const term = `%${search.trim()}%`;
       whereParts.push(`(
-        REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') LIKE ?
-        OR UPPER(model) LIKE ?
-        OR UPPER(COALESCE(client_name, '')) LIKE ?
-        OR COALESCE(client_phone, '') LIKE ?
+        REPLACE(REPLACE(UPPER(o.plate), '-', ''), ' ', '') LIKE ?
+        OR UPPER(o.model) LIKE ?
+        OR UPPER(COALESCE(o.client_name, '')) LIKE ?
+        OR COALESCE(o.client_phone, '') LIKE ?
       )`);
       params.push(`%${clean}%`, term, term, term);
     }
 
     if (status?.trim()) {
-      whereParts.push('status = ?');
+      whereParts.push('o.status = ?');
       params.push(status.trim());
     }
 
     const { clause: tenantClause, params: tenantParams } = tenantWhereClause(
-      user, req, whereParts.length > 0
+      user, req, whereParts.length > 0, 'o.tenant_id'
     );
     // Se não tem busca, tenantClause já traz o WHERE; se tem busca, traz o AND
     const whereStr = whereParts.length > 0
