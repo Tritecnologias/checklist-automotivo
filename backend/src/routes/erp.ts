@@ -2053,9 +2053,8 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
   const status = String(req.query.status ?? 'ativos');
 
   const filterTenantId = getClienteTenantId(req);
-  const tenantJoin = filterTenantId !== null
-    ? 'INNER JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id AND _ctf.tenant_id = ?'
-    : '';
+  let tenantJoin = '';
+  const baseParams: any[] = [];
 
   const whereParts: string[] = [];
   if (status === 'inativos') {
@@ -2066,7 +2065,15 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
     whereParts.push('c.inativo = 0');
   }
 
-  const baseParams: any[] = filterTenantId !== null ? [filterTenantId] : [];
+  if (filterTenantId !== null) {
+    if (filterTenantId === 1) {
+      tenantJoin = 'LEFT JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id';
+      whereParts.push('(_ctf.tenant_id = 1 OR _ctf.tenant_id IS NULL)');
+    } else {
+      tenantJoin = 'INNER JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id AND _ctf.tenant_id = ?';
+      baseParams.push(filterTenantId);
+    }
+  }
 
   if (search.length >= 2) {
     whereParts.push('(c.nome_cliente LIKE ? OR c.telefone LIKE ? OR c.celular LIKE ? OR c.cpf_cnpj LIKE ?)');

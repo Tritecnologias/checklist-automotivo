@@ -314,6 +314,13 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  // Se cliente_tenant estiver vazio, associa os clientes existentes ao tenant 1 (Loja Principal)
+  const [[{ cntCT }]] = await pool.query<any>('SELECT COUNT(*) as cntCT FROM cliente_tenant');
+  if (Number(cntCT) === 0) {
+    await pool.query('INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) SELECT id, 1 FROM cad_clientes')
+      .catch(e => console.warn('[migration] Aviso ao popular cliente_tenant inicial:', e));
+  }
+
   // instalacao_id em os_order_items
   const [[{ cntInstCol }]] = await pool.query<any>(
     `SELECT COUNT(*) as cntInstCol FROM information_schema.COLUMNS
