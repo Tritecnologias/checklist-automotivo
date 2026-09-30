@@ -18,6 +18,7 @@ import {
   UploadCloud,
   Wrench,
   Shield,
+  Layers,
   ClipboardList,
   FileText,
   LogOut,
@@ -226,6 +227,17 @@ export default function ErpLayout() {
               >
                 <UploadCloud className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
                 <span>Importar</span>
+              </NavLink>
+              <NavLink
+                to="/erp/config/tipos"
+                className={({ isActive }) =>
+                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                  }`
+                }
+              >
+                <Layers className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                <span>Tipos de Produto</span>
               </NavLink>
               <NavLink
                 to="/erp/config/instalacoes"

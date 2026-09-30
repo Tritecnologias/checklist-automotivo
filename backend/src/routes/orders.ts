@@ -570,9 +570,11 @@ router.post('/:id/items', async (req: Request, res: Response) => {
          p.id,
          COALESCE(NULLIF(TRIM(p.cod_barra), ''), CONCAT('ID', LPAD(p.id, 6, '0'))) AS code,
          CONVERT(p.nome_produto USING utf8mb4) AS description,
-         CASE WHEN p.id_tipo IN (2, 9) THEN 'service' ELSE 'part' END AS type,
+         CASE WHEN COALESCE(t.is_service, 0) = 1 OR p.id_tipo IN (2, 9) THEN 'service' ELSE 'part' END AS type,
          CAST(p.vr_venda AS DECIMAL(18,4)) AS unit_price
-       FROM cad_produtos p WHERE p.id = ?`,
+       FROM cad_produtos p
+       LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
+       WHERE p.id = ?`,
       [catalogItemId],
     );
 

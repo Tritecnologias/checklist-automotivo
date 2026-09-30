@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { adminApi } from '../lib/api'
 import Modal from '../components/Modal'
 import { useAuth } from '../contexts/AuthContext'
-import { Tag, Plus } from 'lucide-react'
-import type { Instalacao } from '../types'
+import { Tag, Plus, Layers, AlertTriangle, Check } from 'lucide-react'
+import type { Instalacao, ProdutoTipo } from '../types'
 
 type Product = {
   id: number
@@ -12,6 +13,8 @@ type Product = {
   cod_barra: string
   unidade: string
   id_tipo: number
+  tipo_nome?: string
+  is_service?: number
   vr_compra: number
   vr_venda: number
   vr_venda_2: number
@@ -38,8 +41,10 @@ export default function AdminProducts() {
   const qc = useQueryClient()
   const { currentTenant } = useAuth()
   const tid = currentTenant?.id ?? null
+  const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<'ativos' | 'inativos' | 'todos'>('ativos')
+  const [tipoFilter, setTipoFilter] = useState(searchParams.get('tipo') ?? '')
   const [page, setPage]     = useState(1)
   const [editing, setEditing]     = useState<Product | null>(null)
   const [adding, setAdding]       = useState(false)
@@ -48,9 +53,20 @@ export default function AdminProducts() {
   const [editingInstIds, setEditingInstIds] = useState<number[]>([])
   const [addingInstIds, setAddingInstIds]   = useState<number[]>([])
 
+  // Modal rápido de novo tipo
+  const [quickTipoOpen, setQuickTipoOpen] = useState(false)
+  const [quickTipoNome, setQuickTipoNome] = useState('')
+  const [quickTipoIsService, setQuickTipoIsService] = useState(0)
+  const [quickTipoErro, setQuickTipoErro] = useState('')
+
+  const { data: todosTipos = [] } = useQuery<ProdutoTipo[]>({
+    queryKey: ['product-types'],
+    queryFn: () => adminApi.getProductTypes(),
+  })
+
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-products', tid, search, status, page],
-    queryFn: () => adminApi.listProducts(search, page, status),
+    queryKey: ['admin-products', tid, search, status, tipoFilter, page],
+    queryFn: () => adminApi.listProducts(search, page, status, tipoFilter || undefined),
   })
 
   const { data: todasInstalacoes = [] } = useQuery<Instalacao[]>({
@@ -110,11 +126,30 @@ export default function AdminProducts() {
     },
   })
 
+  const quickTipoMut = useMutation({
+    mutationFn: (data: { nome_tipo: string; is_service: number }) =>
+      adminApi.createProductType(data),
+    onSuccess: (newTipo) => {
+      qc.invalidateQueries({ queryKey: ['product-types'] })
+      if (adding) {
+        setForm(f => ({ ...f, id_tipo: newTipo.id }))
+      }
+      if (editing) {
+        setEditing(e => (e ? { ...e, id_tipo: newTipo.id } : null))
+      }
+      setQuickTipoOpen(false)
+      setQuickTipoNome('')
+      setQuickTipoIsService(0)
+      setQuickTipoErro('')
+    },
+    onError: (err: Error) => setQuickTipoErro(err.message),
+  })
+
   function onSearch(v: string) { setSearch(v); setPage(1) }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
             <Tag className="w-6 h-6 text-blue-500 shrink-0" />
@@ -127,17 +162,26 @@ export default function AdminProducts() {
             </p>
           )}
         </div>
-        <button
-          onClick={() => { setForm(empty); setAdding(true) }}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-sm shadow-blue-500/20"
-        >
-          <Plus className="w-4 h-4 shrink-0" />
-          <span>Novo Produto</span>
-        </button>
+        <div className="flex items-center gap-2.5">
+          <Link
+            to="/erp/config/tipos"
+            className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3.5 py-2 rounded-lg text-sm font-medium border border-slate-700 transition-colors flex items-center gap-2"
+          >
+            <Layers className="w-4 h-4 text-blue-400" />
+            <span>Tipos de Produto</span>
+          </Link>
+          <button
+            onClick={() => { setForm(empty); setAdding(true) }}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-sm shadow-blue-500/20"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            <span>Novo Produto</span>
+          </button>
+        </div>
       </div>
 
-      <div className="flex gap-3 mb-4 flex-wrap">
-        <div className="flex rounded-lg overflow-hidden border border-slate-700">
+      <div className="flex gap-3 mb-4 flex-wrap items-center">
+        <div className="flex rounded-lg overflow-hidden border border-slate-700 shrink-0">
           {STATUS_OPTIONS.map(opt => (
             <button
               key={opt.value}
@@ -163,11 +207,31 @@ export default function AdminProducts() {
             </button>
           ))}
         </div>
+
+        <select
+          value={tipoFilter}
+          onChange={e => {
+            const val = e.target.value
+            setTipoFilter(val)
+            setPage(1)
+            if (val) setSearchParams({ tipo: val })
+            else setSearchParams({})
+          }}
+          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs sm:text-sm focus:outline-none focus:border-blue-500 shrink-0"
+        >
+          <option value="">Todos os tipos</option>
+          {todosTipos.map(t => (
+            <option key={t.id} value={t.id}>
+              {Number(t.is_service) === 1 ? '🛠️' : '📦'} {t.nome_tipo} ({Number(t.total_produtos ?? 0)})
+            </option>
+          ))}
+        </select>
+
         <input
           value={search}
           onChange={e => onSearch(e.target.value)}
           placeholder="Buscar por nome ou código de barras..."
-          className="flex-1 min-w-48 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
+          className="flex-1 min-w-48 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500 text-sm"
         />
       </div>
 
@@ -182,6 +246,7 @@ export default function AdminProducts() {
                   <th className="px-4 py-3 font-medium">Nome</th>
                   <th className="px-4 py-3 font-medium">Código</th>
                   <th className="px-4 py-3 font-medium">Un.</th>
+                  <th className="px-4 py-3 font-medium">Tipo</th>
                   <th className="px-4 py-3 font-medium text-right">Compra</th>
                   <th className="px-4 py-3 font-medium text-right">Venda</th>
                   <th className="px-4 py-3 font-medium text-center">Markup</th>
@@ -196,6 +261,16 @@ export default function AdminProducts() {
                     <td className="px-4 py-3 text-white max-w-xs truncate">{p.nome_produto}</td>
                     <td className="px-4 py-3 text-slate-400 font-mono text-xs">{p.cod_barra}</td>
                     <td className="px-4 py-3 text-slate-400">{p.unidade}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold ${
+                        Number(p.is_service) === 1
+                          ? 'bg-purple-950/60 text-purple-300 border border-purple-800/50'
+                          : 'bg-slate-800 text-slate-300 border border-slate-700/60'
+                      }`}>
+                        <span>{Number(p.is_service) === 1 ? '🛠️' : '📦'}</span>
+                        <span className="truncate max-w-[130px]">{p.tipo_nome || 'PEÇAS'}</span>
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-slate-300 text-right">{BRL(p.vr_compra)}</td>
                     <td className="px-4 py-3 text-green-400 font-semibold text-right">{BRL(p.vr_venda)}</td>
                     <td className="px-4 py-3 text-center">
@@ -291,6 +366,8 @@ export default function AdminProducts() {
             todasInstalacoes={todasInstalacoes}
             selectedInstIds={editingInstIds}
             onInstChange={setEditingInstIds}
+            todosTipos={todosTipos}
+            onOpenQuickTipo={() => setQuickTipoOpen(true)}
           />
         </Modal>
       )}
@@ -306,6 +383,8 @@ export default function AdminProducts() {
             todasInstalacoes={todasInstalacoes}
             selectedInstIds={addingInstIds}
             onInstChange={setAddingInstIds}
+            todosTipos={todosTipos}
+            onOpenQuickTipo={() => setQuickTipoOpen(true)}
           />
         </Modal>
       )}
@@ -340,6 +419,100 @@ export default function AdminProducts() {
           </div>
         </Modal>
       )}
+
+      {/* Modal Rápido de Criação de Tipo de Produto */}
+      {quickTipoOpen && (
+        <Modal title="Novo Tipo de Produto" onClose={() => setQuickTipoOpen(false)}>
+          <form
+            onSubmit={e => {
+              e.preventDefault()
+              const nome = quickTipoNome.trim()
+              if (!nome) {
+                setQuickTipoErro('Informe o nome do tipo')
+                return
+              }
+              setQuickTipoErro('')
+              quickTipoMut.mutate({ nome_tipo: nome, is_service: quickTipoIsService })
+            }}
+            className="space-y-4"
+          >
+            {quickTipoErro && (
+              <div className="bg-red-950/60 border border-red-800 rounded-xl p-3 text-xs text-red-300 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{quickTipoErro}</span>
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                Nome do Tipo *
+              </label>
+              <input
+                autoFocus
+                value={quickTipoNome}
+                onChange={e => setQuickTipoNome(e.target.value)}
+                placeholder="Ex: HIGIENIZAÇÃO, PNEUS..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                Natureza do Item *
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <div
+                  onClick={() => setQuickTipoIsService(0)}
+                  className={`p-2.5 rounded-xl border cursor-pointer text-xs font-medium flex items-center gap-2 ${
+                    quickTipoIsService === 0
+                      ? 'bg-emerald-950/40 border-emerald-500/80 text-emerald-300'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                    quickTipoIsService === 0 ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-600'
+                  }`}>
+                    {quickTipoIsService === 0 && <Check className="w-2.5 h-2.5" />}
+                  </div>
+                  <span>📦 Peça / Produto</span>
+                </div>
+
+                <div
+                  onClick={() => setQuickTipoIsService(1)}
+                  className={`p-2.5 rounded-xl border cursor-pointer text-xs font-medium flex items-center gap-2 ${
+                    quickTipoIsService === 1
+                      ? 'bg-purple-950/40 border-purple-500/80 text-purple-300'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                    quickTipoIsService === 1 ? 'border-purple-500 bg-purple-500 text-white' : 'border-slate-600'
+                  }`}>
+                    {quickTipoIsService === 1 && <Check className="w-2.5 h-2.5" />}
+                  </div>
+                  <span>🛠️ Mão de Obra</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setQuickTipoOpen(false)}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={quickTipoMut.isPending}
+                className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold shadow-md shadow-blue-600/30 transition-all"
+              >
+                {quickTipoMut.isPending ? 'Salvando...' : 'Salvar Tipo'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -347,6 +520,7 @@ export default function AdminProducts() {
 function ProductForm({
   value, onChange, onSubmit, loading, label,
   todasInstalacoes, selectedInstIds, onInstChange,
+  todosTipos, onOpenQuickTipo,
 }: {
   value: Omit<Product, 'id'>
   onChange: (v: Omit<Product, 'id'>) => void
@@ -356,6 +530,8 @@ function ProductForm({
   todasInstalacoes: Instalacao[]
   selectedInstIds: number[]
   onInstChange: (ids: number[]) => void
+  todosTipos: ProdutoTipo[]
+  onOpenQuickTipo: () => void
 }) {
   const set = (field: keyof Omit<Product, 'id'>) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     onChange({ ...value, [field]: e.target.value })
@@ -382,11 +558,24 @@ function ProductForm({
         </Field>
       </div>
       <Field label="Tipo">
-        <select value={value.id_tipo} onChange={set('id_tipo')} className={input}>
-          <option value={1}>Peça / Produto</option>
-          <option value={2}>Mão de obra</option>
-          <option value={9}>Alinhamento / Balanceamento</option>
-        </select>
+        <div className="flex gap-2">
+          <select value={value.id_tipo} onChange={set('id_tipo')} className={`${input} flex-1`}>
+            {todosTipos.map(t => (
+              <option key={t.id} value={t.id}>
+                {Number(t.is_service) === 1 ? '🛠️' : '📦'} {t.nome_tipo}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={onOpenQuickTipo}
+            title="Cadastrar novo tipo de produto"
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5 text-blue-400" />
+            <span>Novo Tipo</span>
+          </button>
+        </div>
       </Field>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Preço compra">

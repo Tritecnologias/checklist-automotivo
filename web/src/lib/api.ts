@@ -3,6 +3,7 @@ import type {
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
+  ProdutoTipo,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -362,14 +363,14 @@ export const usersApi = {
 }
 
 export const adminApi = {
-  listProducts: (search: string, page: number, status?: string) =>
+  listProducts: (search: string, page: number, status?: string, tipo?: string | number) =>
     adminRequest<{
       data: any[]
       total: number
       pages: number
       counts?: { total: number; total_ativos: number; total_inativos: number }
     }>(
-      `/admin/products?search=${encodeURIComponent(search)}&page=${page}${status ? `&status=${encodeURIComponent(status)}` : ''}`
+      `/admin/products?search=${encodeURIComponent(search)}&page=${page}${status ? `&status=${encodeURIComponent(status)}` : ''}${tipo ? `&tipo=${encodeURIComponent(String(tipo))}` : ''}`
     ),
   updateProduct: (id: number, data: unknown) =>
     adminRequest(`/admin/products/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -411,4 +412,14 @@ export const adminApi = {
     adminRequest<number[]>(`/admin/products/${id}/instalacoes`),
   setProductInstalacoes: (id: number, ids: number[]) =>
     adminRequest(`/admin/products/${id}/instalacoes`, { method: 'PUT', body: JSON.stringify({ ids }) }),
+
+  // Tipos de Produtos
+  getProductTypes: () =>
+    adminRequest<ProdutoTipo[]>('/admin/product-types'),
+  createProductType: (data: { nome_tipo: string; is_service?: number | boolean }) =>
+    adminRequest<ProdutoTipo>('/admin/product-types', { method: 'POST', body: JSON.stringify(data) }),
+  updateProductType: (id: number, data: { nome_tipo: string; is_service?: number | boolean }) =>
+    adminRequest<ProdutoTipo>(`/admin/product-types/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteProductType: (id: number) =>
+    adminRequest(`/admin/product-types/${id}`, { method: 'DELETE' }),
 }

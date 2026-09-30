@@ -383,3 +383,11 @@ export interface ImportarOsPdvResponse {
     valor: number
   }[]
 }
+
+export interface ProdutoTipo {
+  id: number
+  nome_tipo: string
+  is_service: number
+  total_produtos?: number
+}
+

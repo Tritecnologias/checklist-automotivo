@@ -48,6 +48,7 @@ router.get('/products', async (req, res) => {
   const limit  = 50;
   const offset = (page - 1) * limit;
   const status = String(req.query.status ?? 'ativos'); // 'ativos' | 'inativos' | 'todos'
+  const tipoFilter = req.query.tipo ? Number(req.query.tipo) : null;
 
   const whereParts: string[] = [];
   const params: any[] = [];
@@ -56,6 +57,11 @@ router.get('/products', async (req, res) => {
     whereParts.push('p.inativo = 0');
   } else if (status === 'inativos') {
     whereParts.push('p.inativo = 1');
+  }
+
+  if (tipoFilter) {
+    whereParts.push('p.id_tipo = ?');
+    params.push(tipoFilter);
   }
 
   if (search.length >= 2) {
@@ -81,11 +87,14 @@ router.get('/products', async (req, res) => {
 
   const [rows] = await pool.query<any>(
     `SELECT p.id, p.nome_produto, p.cod_barra, p.unidade, p.id_tipo,
+            t.nome_tipo AS tipo_nome,
+            COALESCE(t.is_service, 0) AS is_service,
             p.vr_compra, p.vr_venda, p.vr_venda_2,
             ${saldoExpr} AS estoque,
             COALESCE(p.controla_estoque, 1) AS controla_estoque,
             p.inativo
      FROM cad_produtos p
+     LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
      ${where}
      ORDER BY p.nome_produto LIMIT ? OFFSET ?`,
@@ -95,6 +104,8 @@ router.get('/products', async (req, res) => {
   res.json({
     data: rows.map((r: any) => ({
       ...r,
+      tipo_nome: r.tipo_nome ?? null,
+      is_service: Number(r.is_service ?? 0),
       estoque: Number(r.estoque ?? 0),
       controla_estoque: Number(r.controla_estoque ?? 1),
       vr_compra: Number(r.vr_compra ?? 0),
@@ -345,6 +356,97 @@ router.put('/products/:id/instalacoes', async (req, res) => {
     const values = ids.map(iid => [prodId, iid]);
     await pool.query('INSERT INTO produto_instalacao (produto_id, instalacao_id) VALUES ?', [values]);
   }
+  res.status(204).end();
+});
+
+// ── TIPOS DE PRODUTOS ────────────────────────────────────────────────────────
+
+router.get('/product-types', async (_req, res) => {
+  const [rows] = await pool.query<any>(
+    `SELECT t.id, t.nome_tipo, COALESCE(t.is_service, 0) AS is_service,
+            COUNT(p.id) AS total_produtos
+     FROM cad_produtos_tipo t
+     LEFT JOIN cad_produtos p ON p.id_tipo = t.id
+     GROUP BY t.id, t.nome_tipo, t.is_service
+     ORDER BY t.nome_tipo ASC`
+  );
+  res.json(rows.map((r: any) => ({
+    id: Number(r.id),
+    nome_tipo: r.nome_tipo,
+    is_service: Number(r.is_service ?? 0),
+    total_produtos: Number(r.total_produtos ?? 0),
+  })));
+});
+
+router.post('/product-types', async (req, res) => {
+  const { nome_tipo, is_service } = req.body as { nome_tipo?: string; is_service?: number | boolean };
+  const nome = nome_tipo?.trim();
+  if (!nome) {
+    res.status(400).json({ message: 'O nome do tipo é obrigatório' });
+    return;
+  }
+  const [existing] = await pool.query<any>(
+    'SELECT id FROM cad_produtos_tipo WHERE LOWER(TRIM(nome_tipo)) = LOWER(?)',
+    [nome]
+  );
+  if (existing.length > 0) {
+    res.status(400).json({ message: 'Já existe um tipo de produto com este nome' });
+    return;
+  }
+  const isServ = is_service ? 1 : 0;
+  const [result] = await pool.query<any>(
+    'INSERT INTO cad_produtos_tipo (nome_tipo, is_service) VALUES (?, ?)',
+    [nome.toUpperCase(), isServ]
+  );
+  res.status(201).json({
+    id: result.insertId,
+    nome_tipo: nome.toUpperCase(),
+    is_service: isServ,
+    total_produtos: 0,
+  });
+});
+
+router.put('/product-types/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const { nome_tipo, is_service } = req.body as { nome_tipo?: string; is_service?: number | boolean };
+  const nome = nome_tipo?.trim();
+  if (!nome) {
+    res.status(400).json({ message: 'O nome do tipo é obrigatório' });
+    return;
+  }
+  const [existing] = await pool.query<any>(
+    'SELECT id FROM cad_produtos_tipo WHERE LOWER(TRIM(nome_tipo)) = LOWER(?) AND id <> ?',
+    [nome, id]
+  );
+  if (existing.length > 0) {
+    res.status(400).json({ message: 'Já existe outro tipo de produto com este nome' });
+    return;
+  }
+  const isServ = is_service ? 1 : 0;
+  await pool.query(
+    'UPDATE cad_produtos_tipo SET nome_tipo = ?, is_service = ? WHERE id = ?',
+    [nome.toUpperCase(), isServ, id]
+  );
+  res.json({
+    id,
+    nome_tipo: nome.toUpperCase(),
+    is_service: isServ,
+  });
+});
+
+router.delete('/product-types/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const [[{ total }]] = await pool.query<any>(
+    'SELECT COUNT(*) as total FROM cad_produtos WHERE id_tipo = ?',
+    [id]
+  );
+  if (Number(total) > 0) {
+    res.status(400).json({
+      message: `Não é possível excluir este tipo porque existem ${total} produto(s) associado(s) a ele. Reclassifique os produtos antes de excluir.`,
+    });
+    return;
+  }
+  await pool.query('DELETE FROM cad_produtos_tipo WHERE id = ?', [id]);
   res.status(204).end();
 });
 

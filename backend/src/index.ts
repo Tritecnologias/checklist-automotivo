@@ -439,6 +439,51 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  // cad_produtos_tipo
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`cad_produtos_tipo\` (
+      \`id\` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      \`nome_tipo\` VARCHAR(100) NOT NULL,
+      \`is_service\` TINYINT(1) NOT NULL DEFAULT 0,
+      UNIQUE KEY \`nome_tipo\` (\`nome_tipo\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  try {
+    const [[{ cntTipoIsService }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntTipoIsService FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_produtos_tipo' AND COLUMN_NAME = 'is_service'`
+    );
+    if (Number(cntTipoIsService) === 0) {
+      await pool.query('ALTER TABLE cad_produtos_tipo ADD COLUMN is_service TINYINT(1) NOT NULL DEFAULT 0');
+      await pool.query('UPDATE cad_produtos_tipo SET is_service = 1 WHERE id IN (2, 9)');
+      console.log('[migration] cad_produtos_tipo.is_service adicionada');
+    }
+  } catch (err) {
+    console.warn('[migration] Aviso ao verificar coluna is_service em cad_produtos_tipo:', err);
+  }
+
+  try {
+    await pool.query('ALTER TABLE cad_produtos_tipo MODIFY COLUMN nome_tipo VARCHAR(100) NOT NULL');
+  } catch (err) {}
+
+  await pool.query("UPDATE cad_produtos_tipo SET nome_tipo = 'DIVERSOS' WHERE id = 7 AND TRIM(nome_tipo) = ''").catch(() => {});
+
+  const [[{ cntTiposInit }]] = await pool.query<any>('SELECT COUNT(*) as cntTiposInit FROM cad_produtos_tipo');
+  if (Number(cntTiposInit) === 0) {
+    await pool.query(`
+      INSERT INTO cad_produtos_tipo (id, nome_tipo, is_service) VALUES
+      (1, 'PECAS', 0),
+      (2, 'MAO DE OBRA', 1),
+      (3, 'LUBRIFICANTES', 0),
+      (4, 'OUTROS', 0),
+      (5, 'ACESSORIOS', 0),
+      (6, 'ESCAPAMENTOS', 0),
+      (8, 'COMPONENTES P/ ESCAPAMENTOS', 0),
+      (9, 'ALINHAMENTO E BALANCEAMENTO', 1)
+    `).catch(() => {});
+  }
+
   console.log('[migration] tabelas de multi-tenant e financeiro OK');
 }
 
