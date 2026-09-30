@@ -3,9 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import type { CaixaSession, Venda } from '../types'
 import { useAuth } from '../contexts/AuthContext'
+import ContadorCedulasModal from '../components/ContadorCedulasModal'
+import FilipetaFechamentoModal from '../components/FilipetaFechamentoModal'
 import {
   Calendar, Filter, X, CreditCard, Banknote, Zap,
-  FileText, Ticket, Layers, Search, DollarSign, CheckCircle2, TrendingDown
+  FileText, Ticket, Layers, Search, DollarSign, CheckCircle2, TrendingDown,
+  Calculator, Printer, ExternalLink
 } from 'lucide-react'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -77,6 +80,12 @@ export default function Caixa() {
   const [vrAbertura, setVrAbertura] = useState('')
   const [vrFechamento, setVrFechamento] = useState('')
   const [detalhesId, setDetalhesId] = useState<number | null>(null)
+
+  // Modais de contagem de dinheiro e filipeta física
+  const [contadorModalOpen, setContadorModalOpen] = useState(false)
+  const [filipetaModalOpen, setFilipetaModalOpen] = useState(false)
+  const [filipetaSession, setFilipetaSession] = useState<CaixaSession | null>(null)
+  const [showPixModal, setShowPixModal] = useState(false)
 
   // Abas de visualização
   const [activeTab, setActiveTab] = useState<'sessoes' | 'vendas'>('sessoes')
@@ -185,9 +194,13 @@ export default function Caixa() {
     },
   })
 
+  // Determina se o caixa está efetivamente aberto nesta loja
+  const isCaixaAberto = Boolean(status && status.aberto !== false && status.id)
+  const ultimoFechado = status?.ultimo_caixa_fechado || (hist?.data as CaixaSession[] | undefined)?.find(s => s.status_caixa === 'F') || null
+
   // Cálculos em tempo real para o caixa aberto
   const esperadoDinheiro = useMemo(() => {
-    if (!status) return 0
+    if (!status || !isCaixaAberto) return 0
     if (status.saldo_esperado_dinheiro !== undefined) {
       return Number(status.saldo_esperado_dinheiro)
     }
@@ -195,10 +208,10 @@ export default function Caixa() {
     const vendasDinheiro = Number(status.totais_por_forma?.dinheiro || 0)
     const despesasDinheiro = Number(status.despesas_dinheiro ?? status.totais_por_forma?.despesas_dinheiro ?? 0)
     return Math.max(0, fundo + vendasDinheiro - despesasDinheiro)
-  }, [status])
+  }, [status, isCaixaAberto])
 
   const totalVendasSessao = useMemo(() => {
-    if (!status) return 0
+    if (!status || !isCaixaAberto) return 0
     if (status.totais_por_forma) {
       return (
         (Number(status.totais_por_forma.dinheiro) || 0) +
@@ -208,18 +221,18 @@ export default function Caixa() {
       )
     }
     return Number(status.vr_fechado_turno || 0)
-  }, [status])
+  }, [status, isCaixaAberto])
 
   const totalDespesasSessao = useMemo(() => {
-    if (!status) return 0
+    if (!status || !isCaixaAberto) return 0
     return Number(status.total_despesas ?? status.totais_por_forma?.total_despesas ?? 0)
-  }, [status])
+  }, [status, isCaixaAberto])
 
   const saldoLiquidoSessao = useMemo(() => {
-    if (!status) return 0
+    if (!status || !isCaixaAberto) return 0
     if (status.saldo_liquido !== undefined) return Number(status.saldo_liquido)
     return totalVendasSessao - totalDespesasSessao
-  }, [status, totalVendasSessao, totalDespesasSessao])
+  }, [status, isCaixaAberto, totalVendasSessao, totalDespesasSessao])
 
   const fechamentoNum = parseFloat(vrFechamento.replace(',', '.')) || 0
   const temValorDigitado = vrFechamento.trim() !== ''
@@ -259,7 +272,7 @@ export default function Caixa() {
       <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-sm">
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Status da Loja Atual</h2>
 
-        {status ? (
+        {isCaixaAberto && status?.id ? (
           <div className="space-y-6">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-3">
@@ -328,7 +341,20 @@ export default function Caixa() {
             {/* Resumo por Forma de Pagamento */}
             {status.totais_por_forma && (
               <div className="bg-slate-950/50 rounded-xl border border-slate-800/80 p-3.5">
-                <p className="text-xs font-semibold text-slate-400 mb-2">Resumo das Vendas por Meio de Pagamento</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-slate-400">Resumo das Vendas por Meio de Pagamento</p>
+                  {status.lista_pix && status.lista_pix.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPixModal(true)}
+                      className="text-xs text-teal-400 hover:text-teal-300 font-medium flex items-center gap-1 hover:underline"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Ver {status.lista_pix.length} PIX discriminados</span>
+                    </button>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
                   <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5">
                     <span className="text-slate-400 block text-[11px]">💵 Dinheiro</span>
@@ -339,7 +365,12 @@ export default function Caixa() {
                     <strong className="text-slate-100 text-sm">{R(status.totais_por_forma.cartao)}</strong>
                   </div>
                   <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5">
-                    <span className="text-slate-400 block text-[11px]">⚡ PIX</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 block text-[11px]">⚡ PIX</span>
+                      {status.lista_pix && status.lista_pix.length > 0 && (
+                        <span className="text-[10px] text-teal-400 font-mono">({status.lista_pix.length})</span>
+                      )}
+                    </div>
                     <strong className="text-slate-100 text-sm">{R(status.totais_por_forma.pix)}</strong>
                   </div>
                   <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5">
@@ -354,6 +385,74 @@ export default function Caixa() {
                 </div>
               </div>
             )}
+
+            {/* Espelho da Filipeta de Fechamento Físico */}
+            <div className="border-t border-slate-800 pt-4">
+              <div className="bg-slate-950/70 rounded-xl border border-slate-800 p-4 space-y-3 font-mono">
+                <div className="flex items-center justify-between font-sans border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+                    <span>📋 Espelho da Filipeta de Fechamento</span>
+                    <span className="text-slate-500 font-normal">({currentTenant?.nome || 'Loja'})</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (status?.id) {
+                        setFilipetaSession(status as unknown as CaixaSession)
+                        setFilipetaModalOpen(true)
+                      }
+                    }}
+                    className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 font-sans hover:underline"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Visualizar / Imprimir Filipeta</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">CX ANTERIOR</span>
+                    <strong className="text-amber-400 text-sm">{R(Number(status.vr_abertura || 0))}</strong>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">DESPESAS</span>
+                    <strong className="text-red-400 text-sm">{R(Number(status.despesas_dinheiro || 0))}</strong>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">CARTÃO</span>
+                    <strong className="text-slate-200 text-sm">{R(Number(status.totais_por_forma?.cartao || 0))}</strong>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">DINHEIRO (GAVETA)</span>
+                    <strong className="text-emerald-400 text-sm">
+                      {R(temValorDigitado ? fechamentoNum : Number(status.totais_por_forma?.dinheiro || 0))}
+                    </strong>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">PIX</span>
+                    <strong className="text-blue-400 text-sm">{R(Number(status.totais_por_forma?.pix || 0))}</strong>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-800/80 text-xs gap-2">
+                  <div>
+                    <span className="text-slate-500 mr-2">TOTAL MOVIMENTADO:</span>
+                    <strong className="text-white font-bold">
+                      {R(
+                        Number(status.totais_por_forma?.cartao || 0) +
+                        (temValorDigitado ? fechamentoNum : Number(status.totais_por_forma?.dinheiro || 0)) +
+                        Number(status.totais_por_forma?.pix || 0) +
+                        Number(status.despesas_dinheiro || 0)
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 mr-2">TOTAL FATURADO SISTEMA:</span>
+                    <strong className="text-slate-300 font-bold">{R(totalVendasSessao)}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             {/* Fechamento */}
             <div className="border-t border-slate-800 pt-4 space-y-3">
@@ -376,8 +475,31 @@ export default function Caixa() {
                 </div>
 
                 <button
+                  type="button"
+                  onClick={() => setContadorModalOpen(true)}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-colors flex items-center gap-2 shadow-sm"
+                >
+                  <Calculator className="w-4 h-4 text-emerald-400" />
+                  <span>Contar Dinheiro (Gaveta)</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => {
-                    if (confirm(`Confirma o fechamento do caixa com ${R(fechamentoNum)} conferidos?`)) {
+                    if (status?.id) {
+                      setFilipetaSession(status as unknown as CaixaSession)
+                      setFilipetaModalOpen(true)
+                    }
+                  }}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-colors flex items-center gap-2 shadow-sm"
+                >
+                  <Printer className="w-4 h-4 text-blue-400" />
+                  <span>Filipeta</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (status?.id && confirm(`Confirma o fechamento do caixa com ${R(fechamentoNum)} conferidos?`)) {
                       fechar(status.id)
                     }
                   }}
@@ -390,7 +512,7 @@ export default function Caixa() {
 
               {/* Indicador de Diferença em Tempo Real */}
               {temValorDigitado && (
-                <div className={`p-3 rounded-xl text-xs font-semibold border flex items-center justify-between ${
+                <div className={`p-3.5 rounded-xl text-xs font-semibold border flex items-center justify-between ${
                   Math.abs(diferencaFechamento) < 0.01
                     ? 'bg-emerald-950/40 border-emerald-600/50 text-emerald-300'
                     : diferencaFechamento > 0
@@ -427,7 +549,7 @@ export default function Caixa() {
             <div>
               <p className="text-sm text-slate-300 font-medium mb-1">Valor de abertura (fundo de caixa, R$)</p>
               <p className="text-xs text-slate-500 mb-3">Valor inicial em cédulas/moedas deixado na gaveta para troco.</p>
-              <div className="flex gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <div className="relative">
                   <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-semibold">R$</span>
                   <input
@@ -437,6 +559,16 @@ export default function Caixa() {
                     className="w-44 bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-white font-medium text-sm focus:outline-none focus:border-blue-500 transition-colors"
                   />
                 </div>
+                {ultimoFechado && (
+                  <button
+                    type="button"
+                    onClick={() => setVrAbertura(String(ultimoFechado.vr_fechamento || 0).replace('.', ','))}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-semibold rounded-xl border border-slate-700 transition-colors flex items-center gap-1.5"
+                    title="Usar o valor de fechamento da sessão anterior como fundo de abertura"
+                  >
+                    <span>💡 Sugerir Saldo Anterior ({R(Number(ultimoFechado.vr_fechamento || 0))})</span>
+                  </button>
+                )}
                 <button
                   onClick={() => abrir()}
                   disabled={abrindo}
@@ -923,13 +1055,25 @@ export default function Caixa() {
                         </td>
 
                         <td className="px-5 py-3 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => setDetalhesId(c.id)}
-                            className="px-3 py-1 bg-slate-800 hover:bg-slate-700 active:scale-95 text-xs text-blue-400 hover:text-blue-300 font-medium rounded-lg transition-colors border border-slate-700/60"
-                            title="Ver extrato e formas de pagamento desta sessão"
-                          >
-                            Extrato
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => {
+                                setFilipetaSession(c)
+                                setFilipetaModalOpen(true)
+                              }}
+                              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-700/60"
+                              title="Imprimir Filipeta de Fechamento desta sessão"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-blue-400" />
+                            </button>
+                            <button
+                              onClick={() => setDetalhesId(c.id)}
+                              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 active:scale-95 text-xs text-blue-400 hover:text-blue-300 font-medium rounded-lg transition-colors border border-slate-700/60"
+                              title="Ver extrato e formas de pagamento desta sessão"
+                            >
+                              Extrato
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -1281,6 +1425,93 @@ export default function Caixa() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Detalhes do PIX */}
+      {showPixModal && status && status.lista_pix && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/70">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-teal-500/20 text-teal-400 border border-teal-500/30">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Recebimentos via PIX</h3>
+                  <p className="text-xs text-slate-400">{status.lista_pix.length} transações nesta sessão de caixa</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPixModal(false)}
+                className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-3 max-h-[60vh] overflow-y-auto">
+              <div className="flex justify-between items-center p-3 rounded-xl bg-teal-950/40 border border-teal-800/50 mb-3">
+                <span className="text-xs font-semibold text-teal-300">Total Acumulado em PIX:</span>
+                <strong className="text-lg font-bold text-teal-400 font-mono">
+                  {R(Number(status.totais_por_forma?.pix || 0))}
+                </strong>
+              </div>
+
+              <div className="space-y-2">
+                {status.lista_pix.map(p => (
+                  <div
+                    key={p.controle}
+                    className="p-3 rounded-xl bg-slate-800/80 border border-slate-700/80 flex items-center justify-between"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-white">{p.nome_cliente}</p>
+                      <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                        {p.modelo && <span className="text-amber-400 font-medium">{p.modelo}</span>}
+                        <span>Controle: #{p.controle}</span>
+                      </div>
+                    </div>
+                    <strong className="text-base font-bold text-teal-400 font-mono">
+                      {R(p.vr_pix)}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="px-6 py-3.5 border-t border-slate-800 bg-slate-950/70 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowPixModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Contagem de Cédulas e Moedas da Gaveta */}
+      <ContadorCedulasModal
+        isOpen={contadorModalOpen}
+        onClose={() => setContadorModalOpen(false)}
+        onApply={(total) => {
+          setVrFechamento(total.toFixed(2).replace('.', ','))
+        }}
+      />
+
+      {/* Modal Filipeta de Fechamento de Caixa */}
+      {filipetaSession && (
+        <FilipetaFechamentoModal
+          isOpen={filipetaModalOpen}
+          onClose={() => {
+            setFilipetaModalOpen(false)
+            setFilipetaSession(null)
+          }}
+          session={filipetaSession}
+          lojaNome={currentTenant?.nome || 'Loja'}
+          valorContadoDinheiro={temValorDigitado ? fechamentoNum : undefined}
+        />
       )}
     </div>
   )

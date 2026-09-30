@@ -1,5 +1,5 @@
 import type {
-  Order, OrderItem, CatalogItem, Vehicle, OrderClient, ErpDashboard, CaixaSession, CaixaTotaisPeriodo, Venda, ProdutoPdv,
+  Order, OrderItem, CatalogItem, Vehicle, OrderClient, ErpDashboard, CaixaSession, CaixaStatusResponse, CaixaTotaisPeriodo, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
@@ -129,7 +129,7 @@ function adminRequest<T>(path: string, options?: RequestInit): Promise<T> {
 export const erpApi = {
   dashboard: () => adminRequest<ErpDashboard>('/erp/dashboard'),
 
-  caixaStatus: () => adminRequest<CaixaSession | null>('/erp/caixa/status'),
+  caixaStatus: () => adminRequest<CaixaStatusResponse | null>('/erp/caixa/status'),
   caixaList: (params?: {
     page?: number
     data_inicio?: string

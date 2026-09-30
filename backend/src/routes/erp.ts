@@ -521,8 +521,28 @@ router.get('/caixa/status', async (req, res) => {
     `SELECT * FROM mv_caixa WHERE status_caixa = 'A'${tf} ORDER BY id DESC LIMIT 1`,
     tp
   );
+
+  const [[ultimoCaixa]] = await pool.query<any>(
+    `SELECT id, data_fechamento, hora_fechamento, vr_fechamento, vr_fechado_turno
+     FROM mv_caixa
+     WHERE status_caixa = 'F' ${tf}
+     ORDER BY id DESC LIMIT 1`,
+    tp
+  );
+
+  const ultimoFechamento = ultimoCaixa ? {
+    id: Number(ultimoCaixa.id),
+    data_fechamento: ultimoCaixa.data_fechamento,
+    hora_fechamento: ultimoCaixa.hora_fechamento,
+    vr_fechamento: Number(ultimoCaixa.vr_fechamento || 0),
+    vr_fechado_turno: Number(ultimoCaixa.vr_fechado_turno || 0),
+  } : null;
+
   if (!row) {
-    res.json(null);
+    res.json({
+      aberto: false,
+      ultimo_caixa_fechado: ultimoFechamento,
+    });
     return;
   }
 
@@ -552,6 +572,30 @@ router.get('/caixa/status', async (req, res) => {
     [row.tenant_id, row.id, row.data_abertura, row.data_abertura, row.hora_abertura]
   );
 
+  // Lista de transações PIX discriminadas
+  const [pixRows] = await pool.query<any>(
+    `SELECT v.controle, v.data_venda, v.vr_pix, v.vr_total,
+            COALESCE(c.nome_cliente, 'Cliente Balcão') as nome_cliente,
+            c.inf_adicional as modelo
+     FROM mv_vendas v
+     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+     WHERE v.tenant_id = ?
+       AND v.vr_pix > 0
+       AND (
+         v.id_caixa = ?
+         OR (
+           v.id_caixa IS NULL 
+           AND v.data_venda >= ?
+           AND (
+             v.controle NOT REGEXP '^[0-9]{14}$'
+             OR STR_TO_DATE(controle, '%Y%m%d%H%i%s') >= STR_TO_DATE(CONCAT(?, ' ', ?), '%Y-%m-%d %H:%i:%s')
+           )
+         )
+       )
+     ORDER BY v.data_venda DESC, v.controle DESC`,
+    [row.tenant_id, row.id, row.data_abertura, row.data_abertura, row.hora_abertura]
+  );
+
   // Agrega despesas (contas a pagar quitadas) vinculadas à data da sessão de caixa atual
   const [[despesasStatus]] = await pool.query<any>(
     `SELECT 
@@ -577,6 +621,16 @@ router.get('/caixa/status', async (req, res) => {
 
   res.json({
     ...row,
+    aberto: true,
+    ultimo_caixa_fechado: ultimoFechamento,
+    lista_pix: (pixRows as any[]).map((p: any) => ({
+      controle: p.controle,
+      data_venda: p.data_venda,
+      vr_pix: Number(p.vr_pix || 0),
+      vr_total: Number(p.vr_total || 0),
+      nome_cliente: p.nome_cliente,
+      modelo: p.modelo || null,
+    })),
     vr_fechado_turno: vrTotal,
     total_despesas: totalDespesas,
     despesas_dinheiro: despesasDinheiro,

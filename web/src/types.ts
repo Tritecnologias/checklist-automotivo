@@ -23,6 +23,7 @@ export interface CaixaSession {
   turno: string
   terminal: string
   status_caixa: 'A' | 'F'
+  aberto?: boolean
   nome_login?: string
   nome_operador?: string
   saldo_esperado_dinheiro?: number
@@ -30,6 +31,73 @@ export interface CaixaSession {
   total_despesas?: number
   despesas_dinheiro?: number
   saldo_liquido?: number
+  ultimo_caixa_fechado?: {
+    id: number
+    data_fechamento: string
+    hora_fechamento: string
+    vr_fechamento: number
+    vr_fechado_turno: number
+  } | null
+  lista_pix?: {
+    controle: string
+    data_venda: string
+    vr_pix: number
+    vr_total: number
+    nome_cliente: string
+    modelo?: string | null
+  }[]
+  totais_por_forma?: {
+    dinheiro: number
+    cartao: number
+    pix: number
+    prazo: number
+    outros: number
+    total_vendas: number
+    total_despesas?: number
+    despesas_dinheiro?: number
+    saldo_liquido?: number
+    qtd_vendas: number
+    qtd_despesas?: number
+    saldo_esperado_dinheiro?: number
+  }
+}
+
+export interface CaixaStatusResponse {
+  aberto: boolean
+  id?: number
+  hora_abertura?: string
+  hora_fechamento?: string | null
+  data_abertura?: string
+  data_fechamento?: string | null
+  vr_abertura?: number
+  vr_fechamento?: number
+  vr_fechado_turno?: number
+  id_login?: number
+  turno?: string
+  terminal?: string
+  status_caixa?: 'A' | 'F'
+  nome_login?: string
+  nome_operador?: string
+  saldo_esperado_dinheiro?: number
+  diferenca_caixa?: number
+  total_despesas?: number
+  despesas_dinheiro?: number
+  saldo_liquido?: number
+  ultimo_caixa_fechado?: {
+    id: number
+    data_fechamento: string
+    hora_fechamento: string
+    vr_fechamento: number
+    vr_fechado_turno: number
+  } | null
+  lista_pix?: {
+    controle: string
+    data_venda: string
+    vr_pix: number
+    vr_total: number
+    nome_cliente: string
+    modelo?: string | null
+  }[]
   totais_por_forma?: {
     dinheiro: number
     cartao: number
