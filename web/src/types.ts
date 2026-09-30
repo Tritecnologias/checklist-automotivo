@@ -25,6 +25,8 @@ export interface CaixaSession {
   status_caixa: 'A' | 'F'
   nome_login?: string
   nome_operador?: string
+  saldo_esperado_dinheiro?: number
+  diferenca_caixa?: number
   totais_por_forma?: {
     dinheiro: number
     cartao: number
@@ -33,8 +35,22 @@ export interface CaixaSession {
     outros: number
     total_vendas: number
     qtd_vendas: number
-    saldo_esperado_dinheiro: number
+    saldo_esperado_dinheiro?: number
   }
+}
+
+export interface CaixaTotaisPeriodo {
+  total_vendas: number
+  dinheiro: number
+  cartao: number
+  pix: number
+  prazo: number
+  outros: number
+  total_fundo: number
+  total_conferido: number
+  qtd_vendas: number
+  qtd_sessoes: number
+  valor_filtrado?: number
 }
 
 export interface Venda {

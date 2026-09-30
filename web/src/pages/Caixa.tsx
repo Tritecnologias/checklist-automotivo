@@ -1,8 +1,12 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
-import type { CaixaSession } from '../types'
+import type { CaixaSession, Venda } from '../types'
 import { useAuth } from '../contexts/AuthContext'
+import {
+  Calendar, Filter, X, CreditCard, Banknote, Zap,
+  FileText, Ticket, Layers, Search, DollarSign, CheckCircle2
+} from 'lucide-react'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -19,26 +23,142 @@ const fmtDate = (d?: string | null) => {
   return isNaN(parsed.getTime()) ? '—' : parsed.toLocaleDateString('pt-BR')
 }
 
+const FORMAS_OPTS = [
+  { value: '',         label: 'Todas as formas' },
+  { value: 'dinheiro', label: '💵 Dinheiro' },
+  { value: 'cartao',   label: '💳 Cartão' },
+  { value: 'pix',      label: '⚡ PIX' },
+  { value: 'prazo',    label: '📝 A Prazo (Nota)' },
+  { value: 'outros',   label: '🎟️ Outros / Ticket' },
+]
+
+const getDatesPreset = (preset: string) => {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const today = `${y}-${pad(m + 1)}-${pad(now.getDate())}`
+
+  if (preset === 'hoje') {
+    return { inicio: today, fim: today }
+  }
+  if (preset === '7dias') {
+    const d = new Date()
+    d.setDate(d.getDate() - 6)
+    return {
+      inicio: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      fim: today,
+    }
+  }
+  if (preset === 'mes') {
+    const inicio = `${y}-${pad(m + 1)}-01`
+    const lastDay = new Date(y, m + 1, 0).getDate()
+    const fim = `${y}-${pad(m + 1)}-${pad(lastDay)}`
+    return { inicio, fim }
+  }
+  if (preset === 'mes_anterior') {
+    const prevMonth = new Date(y, m - 1, 1)
+    const py = prevMonth.getFullYear()
+    const pm = prevMonth.getMonth()
+    const inicio = `${py}-${pad(pm + 1)}-01`
+    const lastDay = new Date(py, pm + 1, 0).getDate()
+    const fim = `${py}-${pad(pm + 1)}-${pad(lastDay)}`
+    return { inicio, fim }
+  }
+  return { inicio: '', fim: '' }
+}
+
 export default function Caixa() {
   const { currentTenant } = useAuth()
   const tid = currentTenant?.id ?? null
   const qc = useQueryClient()
+
+  // Operações de abertura / fechamento
   const [vrAbertura, setVrAbertura] = useState('')
   const [vrFechamento, setVrFechamento] = useState('')
-  const [page, setPage] = useState(1)
   const [detalhesId, setDetalhesId] = useState<number | null>(null)
 
+  // Abas de visualização
+  const [activeTab, setActiveTab] = useState<'sessoes' | 'vendas'>('sessoes')
+
+  // Filtros de Período e Forma de Pagamento
+  const [dataPreset, setDataPreset] = useState<string>('mes')
+  const initialPreset = getDatesPreset('mes')
+  const [dataInicio, setDataInicio] = useState(initialPreset.inicio)
+  const [dataFim, setDataFim]       = useState(initialPreset.fim)
+  const [formaPagto, setFormaPagto] = useState<string>('')
+  const [page, setPage] = useState(1)
+
+  // Busca e paginação da aba de movimentações
+  const [searchVendas, setSearchVendas] = useState('')
+  const [debouncedSearchVendas, setDebouncedSearchVendas] = useState('')
+  const [pageVendas, setPageVendas] = useState(1)
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchVendas(searchVendas)
+      setPageVendas(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchVendas])
+
+  const aplicarPreset = (preset: string) => {
+    setDataPreset(preset)
+    const { inicio, fim } = getDatesPreset(preset)
+    setDataInicio(inicio)
+    setDataFim(fim)
+    setPage(1)
+    setPageVendas(1)
+  }
+
+  const limparFiltros = () => {
+    setDataPreset('')
+    setDataInicio('')
+    setDataFim('')
+    setFormaPagto('')
+    setSearchVendas('')
+    setPage(1)
+    setPageVendas(1)
+  }
+
+  const toggleFormaPagto = (forma: string) => {
+    setFormaPagto(prev => (prev === forma ? '' : forma))
+    setPage(1)
+    setPageVendas(1)
+  }
+
+  // Status da sessão de caixa atual
   const { data: status } = useQuery({
     queryKey: ['caixa-status', tid],
     queryFn: erpApi.caixaStatus,
     refetchInterval: 10_000,
   })
 
-  const { data: hist, isLoading } = useQuery({
-    queryKey: ['caixa-hist', tid, page],
-    queryFn: () => erpApi.caixaList(page),
+  // Histórico de sessões de caixa (filtrado por tenant, período e forma de pagamento)
+  const { data: hist, isLoading: loadingHist } = useQuery({
+    queryKey: ['caixa-hist', tid, page, dataInicio, dataFim, formaPagto],
+    queryFn: () => erpApi.caixaList({
+      page,
+      data_inicio: dataInicio || undefined,
+      data_fim: dataFim || undefined,
+      forma_pagto: formaPagto || undefined,
+    }),
   })
 
+  // Lista de vendas/movimentações no período e forma de pagamento
+  const { data: vendasRes, isLoading: loadingVendas } = useQuery({
+    queryKey: ['caixa-vendas', tid, pageVendas, dataInicio, dataFim, formaPagto, debouncedSearchVendas],
+    queryFn: () => erpApi.caixaVendas({
+      page: pageVendas,
+      data_inicio: dataInicio || undefined,
+      data_fim: dataFim || undefined,
+      forma_pagto: formaPagto || undefined,
+      search: debouncedSearchVendas || undefined,
+    }),
+    enabled: activeTab === 'vendas',
+  })
+
+  // Detalhes da sessão para o modal de extrato
   const { data: detalhesModal, isLoading: carregandoDetalhes } = useQuery({
     queryKey: ['caixa-detalhes', tid, detalhesId],
     queryFn: () => detalhesId ? erpApi.caixaDetalhes(detalhesId) : null,
@@ -50,6 +170,7 @@ export default function Caixa() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['caixa-status'] })
       qc.invalidateQueries({ queryKey: ['caixa-hist'] })
+      qc.invalidateQueries({ queryKey: ['caixa-vendas'] })
       setVrAbertura('')
     },
   })
@@ -59,6 +180,7 @@ export default function Caixa() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['caixa-status'] })
       qc.invalidateQueries({ queryKey: ['caixa-hist'] })
+      qc.invalidateQueries({ queryKey: ['caixa-vendas'] })
       setVrFechamento('')
     },
   })
@@ -75,18 +197,25 @@ export default function Caixa() {
   const temValorDigitado = vrFechamento.trim() !== ''
   const diferencaFechamento = temValorDigitado ? (fechamentoNum - esperadoDinheiro) : 0
 
+  const totaisPeriodo = hist?.totais
+  const temFiltroAtivo = !!(dataInicio || dataFim || formaPagto || (activeTab === 'vendas' && searchVendas))
+
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6 max-w-6xl">
+      {/* ── CABEÇALHO ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Controle de Caixa</h1>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
+            <DollarSign className="w-7 h-7 text-emerald-400" />
+            <span>Controle de Caixa</span>
+          </h1>
           <p className="text-slate-400 text-sm mt-0.5">
             Loja: <strong className="text-slate-200">{currentTenant?.nome ?? 'Todas as Lojas'}</strong>
           </p>
         </div>
       </div>
 
-      {/* ── STATUS ATUAL ── */}
+      {/* ── STATUS DA LOJA ATUAL (CAIXA ABERTO / FECHADO) ── */}
       <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 shadow-sm">
         <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Status da Loja Atual</h2>
 
@@ -107,7 +236,7 @@ export default function Caixa() {
               </span>
             </div>
 
-            {/* KPI Cards do Caixa */}
+            {/* KPI Cards do Caixa Aberto */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <p className="text-xs text-slate-400 font-medium">Abertura</p>
@@ -260,89 +389,565 @@ export default function Caixa() {
         )}
       </div>
 
-      {/* ── HISTÓRICO DE CAIXAS ── */}
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-sm">
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-bold text-white">Histórico de Caixas</h2>
-            <p className="text-xs text-slate-500">Sessões registradas exclusivamente para esta loja</p>
+      {/* ── FILTROS POR PERÍODO E FORMA DE PAGAMENTO ── */}
+      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 space-y-4 shadow-sm">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-sm font-bold text-white">Filtros de Caixa</h2>
+            <span className="text-xs text-slate-400">· Filtre sessões e movimentações financeiras</span>
           </div>
-          {hist && hist.pages > 1 && (
-            <div className="flex items-center gap-2 text-xs">
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage(p => p - 1)}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 rounded text-slate-300"
-              >
-                Anterior
-              </button>
-              <span className="text-slate-400">Pág {page} de {hist.pages}</span>
-              <button
-                disabled={page >= hist.pages}
-                onClick={() => setPage(p => p + 1)}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 rounded text-slate-300"
-              >
-                Próxima
-              </button>
+
+          {/* Abas de Navegação */}
+          <div className="inline-flex items-center p-1 bg-slate-950/80 rounded-xl border border-slate-800">
+            <button
+              onClick={() => setActiveTab('sessoes')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'sessoes'
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Sessões de Caixa ({hist?.total ?? 0})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('vendas')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'vendas'
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Movimentações / Vendas ({totaisPeriodo?.qtd_vendas ?? 0})</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Linha de Controles de Filtros */}
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          {/* Botões de Atalho de Período (Presets) */}
+          <div className="flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-slate-800 text-xs">
+            <button
+              onClick={() => aplicarPreset('hoje')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                dataPreset === 'hoje' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Hoje
+            </button>
+            <button
+              onClick={() => aplicarPreset('7dias')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                dataPreset === '7dias' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              7 dias
+            </button>
+            <button
+              onClick={() => aplicarPreset('mes')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                dataPreset === 'mes' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Este Mês
+            </button>
+            <button
+              onClick={() => aplicarPreset('mes_anterior')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                dataPreset === 'mes_anterior' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Mês Anterior
+            </button>
+            <button
+              onClick={() => { setDataPreset('todos'); setDataInicio(''); setDataFim(''); setPage(1); setPageVendas(1) }}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                dataPreset === 'todos' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Todos
+            </button>
+          </div>
+
+          {/* Inputs de Data Personalizada */}
+          <div className="flex items-center gap-2 bg-slate-950/60 p-1 px-2 rounded-xl border border-slate-800 text-xs text-slate-300">
+            <Calendar className="w-3.5 h-3.5 text-slate-500" />
+            <input
+              type="date"
+              value={dataInicio}
+              onChange={e => { setDataInicio(e.target.value); setDataPreset(''); setPage(1); setPageVendas(1) }}
+              className="bg-slate-900 border border-slate-700/80 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+              title="Data Início"
+            />
+            <span className="text-slate-500">até</span>
+            <input
+              type="date"
+              value={dataFim}
+              onChange={e => { setDataFim(e.target.value); setDataPreset(''); setPage(1); setPageVendas(1) }}
+              className="bg-slate-900 border border-slate-700/80 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+              title="Data Fim"
+            />
+          </div>
+
+          {/* Select de Forma de Pagamento */}
+          <div className="flex items-center gap-2 bg-slate-950/60 p-1 px-2.5 rounded-xl border border-slate-800 text-xs">
+            <CreditCard className="w-3.5 h-3.5 text-slate-500" />
+            <select
+              value={formaPagto}
+              onChange={e => { setFormaPagto(e.target.value); setPage(1); setPageVendas(1) }}
+              className="bg-slate-900 border border-slate-700/80 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+            >
+              {FORMAS_OPTS.map(f => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Botão Limpar Filtros */}
+          {temFiltroAtivo && (
+            <button
+              onClick={limparFiltros}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-slate-700"
+            >
+              <X className="w-3.5 h-3.5 text-rose-400" />
+              <span>Limpar filtros</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── CARDS DE TOTAIS DO PERÍODO (INTERATIVOS) ── */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-emerald-400" />
+              <span>Vendas por Meio de Pagamento no Período Selecionado</span>
+            </h2>
+            {formaPagto && (
+              <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full font-semibold">
+                Filtro ativo: {FORMAS_OPTS.find(f => f.value === formaPagto)?.label}
+              </span>
+            )}
+          </div>
+          <span className="text-[11px] text-slate-500">
+            Clique em um card para filtrar ou desmarcar
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {/* Total Geral em Vendas */}
+          <div
+            onClick={() => setFormaPagto('')}
+            className={`cursor-pointer rounded-xl p-3 border transition-all ${
+              formaPagto === ''
+                ? 'bg-slate-800/90 border-blue-500/80 shadow-md ring-1 ring-blue-500/30'
+                : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Vendas</span>
+              <DollarSign className="w-3.5 h-3.5 text-slate-400" />
+            </div>
+            <strong className="text-white text-base block font-bold">
+              {R(totaisPeriodo?.total_vendas ?? 0)}
+            </strong>
+            <span className="text-[10px] text-slate-500 block mt-0.5">
+              {totaisPeriodo?.qtd_vendas ?? 0} {totaisPeriodo?.qtd_vendas === 1 ? 'venda' : 'vendas'}
+            </span>
+          </div>
+
+          {/* Dinheiro */}
+          <div
+            onClick={() => toggleFormaPagto('dinheiro')}
+            className={`cursor-pointer rounded-xl p-3 border transition-all ${
+              formaPagto === 'dinheiro'
+                ? 'bg-emerald-950/60 border-emerald-500 shadow-md ring-1 ring-emerald-500/40'
+                : 'bg-slate-950/60 border-slate-800 hover:border-emerald-800/60'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">💵 Dinheiro</span>
+              <Banknote className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+            <strong className="text-emerald-300 text-base block font-bold">
+              {R(totaisPeriodo?.dinheiro ?? 0)}
+            </strong>
+            <span className="text-[10px] text-emerald-500/80 block mt-0.5">
+              Em espécie
+            </span>
+          </div>
+
+          {/* Cartão */}
+          <div
+            onClick={() => toggleFormaPagto('cartao')}
+            className={`cursor-pointer rounded-xl p-3 border transition-all ${
+              formaPagto === 'cartao'
+                ? 'bg-blue-950/60 border-blue-500 shadow-md ring-1 ring-blue-500/40'
+                : 'bg-slate-950/60 border-slate-800 hover:border-blue-800/60'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-blue-400 uppercase tracking-wider">💳 Cartão</span>
+              <CreditCard className="w-3.5 h-3.5 text-blue-400" />
+            </div>
+            <strong className="text-blue-300 text-base block font-bold">
+              {R(totaisPeriodo?.cartao ?? 0)}
+            </strong>
+            <span className="text-[10px] text-blue-500/80 block mt-0.5">
+              Crédito / Débito
+            </span>
+          </div>
+
+          {/* PIX */}
+          <div
+            onClick={() => toggleFormaPagto('pix')}
+            className={`cursor-pointer rounded-xl p-3 border transition-all ${
+              formaPagto === 'pix'
+                ? 'bg-teal-950/60 border-teal-500 shadow-md ring-1 ring-teal-500/40'
+                : 'bg-slate-950/60 border-slate-800 hover:border-teal-800/60'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-teal-400 uppercase tracking-wider">⚡ PIX</span>
+              <Zap className="w-3.5 h-3.5 text-teal-400" />
+            </div>
+            <strong className="text-teal-300 text-base block font-bold">
+              {R(totaisPeriodo?.pix ?? 0)}
+            </strong>
+            <span className="text-[10px] text-teal-500/80 block mt-0.5">
+              Transferência instantânea
+            </span>
+          </div>
+
+          {/* A Prazo */}
+          <div
+            onClick={() => toggleFormaPagto('prazo')}
+            className={`cursor-pointer rounded-xl p-3 border transition-all ${
+              formaPagto === 'prazo'
+                ? 'bg-amber-950/60 border-amber-500 shadow-md ring-1 ring-amber-500/40'
+                : 'bg-slate-950/60 border-slate-800 hover:border-amber-800/60'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider">📝 A Prazo</span>
+              <FileText className="w-3.5 h-3.5 text-amber-400" />
+            </div>
+            <strong className="text-amber-300 text-base block font-bold">
+              {R(totaisPeriodo?.prazo ?? 0)}
+            </strong>
+            <span className="text-[10px] text-amber-500/80 block mt-0.5">
+              Nota / Carnê
+            </span>
+          </div>
+
+          {/* Outros / Ticket */}
+          <div
+            onClick={() => toggleFormaPagto('outros')}
+            className={`cursor-pointer rounded-xl p-3 border transition-all ${
+              formaPagto === 'outros'
+                ? 'bg-purple-950/60 border-purple-500 shadow-md ring-1 ring-purple-500/40'
+                : 'bg-slate-950/60 border-slate-800 hover:border-purple-800/60'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold text-purple-400 uppercase tracking-wider">🎟️ Outros</span>
+              <Ticket className="w-3.5 h-3.5 text-purple-400" />
+            </div>
+            <strong className="text-purple-300 text-base block font-bold">
+              {R(totaisPeriodo?.outros ?? 0)}
+            </strong>
+            <span className="text-[10px] text-purple-500/80 block mt-0.5">
+              Ticket / Outros
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── ABA 1: SESSÕES DE CAIXA ── */}
+      {activeTab === 'sessoes' && (
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-sm">
+          <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Histórico de Sessões de Caixa</span>
+                {formaPagto && (
+                  <span className="text-xs font-normal text-blue-400">
+                    (com vendas em {FORMAS_OPTS.find(f => f.value === formaPagto)?.label})
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs text-slate-500">
+                {hist?.total ?? 0} sessões registradas no período selecionado
+              </p>
+            </div>
+
+            {hist && hist.pages > 1 && (
+              <div className="flex items-center gap-2 text-xs">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => p - 1)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 rounded text-slate-300"
+                >
+                  Anterior
+                </button>
+                <span className="text-slate-400">Pág {page} de {hist.pages}</span>
+                <button
+                  disabled={page >= hist.pages}
+                  onClick={() => setPage(p => p + 1)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 rounded text-slate-300"
+                >
+                  Próxima
+                </button>
+              </div>
+            )}
+          </div>
+
+          {loadingHist ? (
+            <div className="py-12 text-center text-slate-500 text-sm">Carregando sessões…</div>
+          ) : (hist?.data ?? []).length === 0 ? (
+            <div className="py-12 text-center text-slate-500 text-sm space-y-1">
+              <p>Nenhuma sessão de caixa encontrada para os filtros selecionados.</p>
+              <p className="text-xs text-slate-600">Tente ajustar o período ou o filtro de forma de pagamento.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-800 bg-slate-950/40">
+                    <th className="px-5 py-3">Data</th>
+                    <th className="px-5 py-3">Abertura / Fechamento</th>
+                    <th className="px-5 py-3">Operador</th>
+                    <th className="px-5 py-3 text-right">Fundo</th>
+                    <th className="px-5 py-3 text-right">Total Vendas</th>
+                    {formaPagto && (
+                      <th className="px-5 py-3 text-right text-blue-400 bg-blue-950/20">
+                        {FORMAS_OPTS.find(f => f.value === formaPagto)?.label}
+                      </th>
+                    )}
+                    <th className="px-5 py-3 text-right">Conf. Caixa</th>
+                    <th className="px-5 py-3 text-center">Diferença</th>
+                    <th className="px-5 py-3 text-center">Status</th>
+                    <th className="px-5 py-3 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80">
+                  {(hist?.data ?? []).map((c: CaixaSession) => {
+                    const dif = c.diferenca_caixa ?? 0
+                    const valorForma = formaPagto === 'dinheiro'
+                      ? c.totais_por_forma?.dinheiro
+                      : formaPagto === 'cartao'
+                      ? c.totais_por_forma?.cartao
+                      : formaPagto === 'pix'
+                      ? c.totais_por_forma?.pix
+                      : formaPagto === 'prazo'
+                      ? c.totais_por_forma?.prazo
+                      : formaPagto === 'outros'
+                      ? c.totais_por_forma?.outros
+                      : 0
+
+                    return (
+                      <tr key={c.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="px-5 py-3 text-slate-300 whitespace-nowrap font-medium">
+                          {fmtDate(c.data_abertura)}
+                        </td>
+                        <td className="px-5 py-3 text-slate-400 whitespace-nowrap text-xs">
+                          <span>{c.hora_abertura}</span>
+                          <span className="text-slate-600 mx-1">→</span>
+                          <span>{c.hora_fechamento ?? 'em aberto'}</span>
+                        </td>
+                        <td className="px-5 py-3 text-slate-300 whitespace-nowrap text-xs">
+                          {c.nome_operador ?? 'Padrão'}
+                        </td>
+                        <td className="px-5 py-3 text-right text-slate-300 whitespace-nowrap">
+                          {R(Number(c.vr_abertura))}
+                        </td>
+                        <td className="px-5 py-3 text-right text-emerald-400 font-semibold whitespace-nowrap">
+                          {R(Number(c.vr_fechado_turno))}
+                        </td>
+
+                        {formaPagto && (
+                          <td className="px-5 py-3 text-right text-blue-300 font-bold whitespace-nowrap bg-blue-950/20">
+                            {R(Number(valorForma || 0))}
+                          </td>
+                        )}
+
+                        <td className="px-5 py-3 text-right text-slate-200 whitespace-nowrap font-medium">
+                          {c.vr_fechamento ? R(Number(c.vr_fechamento)) : '—'}
+                        </td>
+
+                        <td className="px-5 py-3 text-center whitespace-nowrap">
+                          {c.status_caixa === 'F' && c.vr_fechamento !== null ? (
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${
+                              Math.abs(dif) < 0.01
+                                ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/50'
+                                : dif > 0
+                                ? 'bg-blue-950/60 text-blue-400 border-blue-800/50'
+                                : 'bg-red-950/60 text-red-400 border-red-800/50'
+                            }`}>
+                              {Math.abs(dif) < 0.01 ? '✅ Bateu' : dif > 0 ? `+${R(dif)}` : `-${R(Math.abs(dif))}`}
+                            </span>
+                          ) : (
+                            <span className="text-slate-600 text-xs">—</span>
+                          )}
+                        </td>
+
+                        <td className="px-5 py-3 text-center whitespace-nowrap">
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                            c.status_caixa === 'A'
+                              ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/50'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {c.status_caixa === 'A' ? 'Aberto' : 'Fechado'}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-3 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => setDetalhesId(c.id)}
+                            className="px-3 py-1 bg-slate-800 hover:bg-slate-700 active:scale-95 text-xs text-blue-400 hover:text-blue-300 font-medium rounded-lg transition-colors border border-slate-700/60"
+                            title="Ver extrato e formas de pagamento desta sessão"
+                          >
+                            Extrato
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
+      )}
 
-        {isLoading ? (
-          <div className="py-12 text-center text-slate-500 text-sm">Carregando histórico…</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-800 bg-slate-950/40">
-                  <th className="px-5 py-3">Data</th>
-                  <th className="px-5 py-3">Abertura</th>
-                  <th className="px-5 py-3">Fechamento</th>
-                  <th className="px-5 py-3 text-right">Fundo</th>
-                  <th className="px-5 py-3 text-right">Total Vendas</th>
-                  <th className="px-5 py-3 text-right">Conf. Caixa</th>
-                  <th className="px-5 py-3 text-center">Status</th>
-                  <th className="px-5 py-3 text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/80">
-                {(hist?.data ?? []).map((c: CaixaSession) => (
-                  <tr key={c.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="px-5 py-3 text-slate-300 whitespace-nowrap font-medium">
-                      {fmtDate(c.data_abertura)}
-                    </td>
-                    <td className="px-5 py-3 text-slate-400 whitespace-nowrap">{c.hora_abertura}</td>
-                    <td className="px-5 py-3 text-slate-400 whitespace-nowrap">{c.hora_fechamento ?? '—'}</td>
-                    <td className="px-5 py-3 text-right text-slate-300 whitespace-nowrap">{R(Number(c.vr_abertura))}</td>
-                    <td className="px-5 py-3 text-right text-emerald-400 font-semibold whitespace-nowrap">
-                      {R(Number(c.vr_fechado_turno))}
-                    </td>
-                    <td className="px-5 py-3 text-right text-slate-200 whitespace-nowrap font-medium">
-                      {c.vr_fechamento ? R(Number(c.vr_fechamento)) : '—'}
-                    </td>
-                    <td className="px-5 py-3 text-center whitespace-nowrap">
-                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        c.status_caixa === 'A' ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/50' : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {c.status_caixa === 'A' ? 'Aberto' : 'Fechado'}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => setDetalhesId(c.id)}
-                        className="px-3 py-1 bg-slate-800 hover:bg-slate-700 active:scale-95 text-xs text-blue-400 hover:text-blue-300 font-medium rounded-lg transition-colors border border-slate-700/60"
-                        title="Ver extrato e formas de pagamento desta sessão"
-                      >
-                        Extrato
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* ── ABA 2: MOVIMENTAÇÕES / VENDAS DETALHADAS ── */}
+      {activeTab === 'vendas' && (
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-sm">
+          <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Movimentações de Vendas no Caixa</span>
+                {formaPagto && (
+                  <span className="text-xs font-normal text-blue-400">
+                    · Filtrando por {FORMAS_OPTS.find(f => f.value === formaPagto)?.label}
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs text-slate-500">
+                {vendasRes?.total ?? 0} vendas localizadas
+              </p>
+            </div>
+
+            {/* Campo de Busca Rápida */}
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-500" />
+                <input
+                  value={searchVendas}
+                  onChange={e => setSearchVendas(e.target.value)}
+                  placeholder="Buscar controle ou cliente…"
+                  className="bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 w-56"
+                />
+              </div>
+
+              {vendasRes && vendasRes.pages > 1 && (
+                <div className="flex items-center gap-1.5 text-xs">
+                  <button
+                    disabled={pageVendas <= 1}
+                    onClick={() => setPageVendas(p => p - 1)}
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 rounded text-slate-300"
+                  >
+                    ←
+                  </button>
+                  <span className="text-slate-400 px-1">{pageVendas} / {vendasRes.pages}</span>
+                  <button
+                    disabled={pageVendas >= vendasRes.pages}
+                    onClick={() => setPageVendas(p => p + 1)}
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 rounded text-slate-300"
+                  >
+                    →
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        )}
-      </div>
+
+          {loadingVendas ? (
+            <div className="py-12 text-center text-slate-500 text-sm">Carregando vendas…</div>
+          ) : (vendasRes?.data ?? []).length === 0 ? (
+            <div className="py-12 text-center text-slate-500 text-sm space-y-1">
+              <p>Nenhuma venda encontrada para os filtros selecionados.</p>
+              <p className="text-xs text-slate-600">Verifique o período ou a forma de pagamento selecionada.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-800 bg-slate-950/40">
+                    <th className="px-5 py-3">Controle</th>
+                    <th className="px-5 py-3">Data / Hora</th>
+                    <th className="px-5 py-3">Cliente</th>
+                    <th className="px-5 py-3">Formas de Pagamento</th>
+                    <th className="px-5 py-3 text-right">Total da Venda</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80">
+                  {(vendasRes?.data ?? []).map((v: any) => {
+                    return (
+                      <tr key={v.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="px-5 py-3 font-mono text-xs text-slate-300 font-semibold">
+                          {v.controle}
+                        </td>
+                        <td className="px-5 py-3 text-slate-400 whitespace-nowrap text-xs">
+                          {fmtDate(v.data_venda)} às {v.hora_venda}
+                        </td>
+                        <td className="px-5 py-3 text-slate-200 truncate max-w-[200px]">
+                          {v.nome_cliente || 'Consumidor Final'}
+                        </td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {Number(v.vr_dinheiro) > 0 && (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-medium">
+                                Dinheiro: {R(Number(v.vr_dinheiro))}
+                              </span>
+                            )}
+                            {Number(v.vr_cartao) > 0 && (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60 font-medium">
+                                Cartão: {R(Number(v.vr_cartao))}
+                              </span>
+                            )}
+                            {Number(v.vr_pix) > 0 && (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-teal-950/80 text-teal-300 border border-teal-800/60 font-medium">
+                                PIX: {R(Number(v.vr_pix))}
+                              </span>
+                            )}
+                            {Number(v.vr_prazo) > 0 && (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-medium">
+                                Prazo: {R(Number(v.vr_prazo))}
+                              </span>
+                            )}
+                            {Number(v.vr_outros) > 0 && (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-800/60 font-medium">
+                                Outros: {R(Number(v.vr_outros))}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-5 py-3 text-right font-bold text-emerald-400 whitespace-nowrap">
+                          {R(Number(v.vr_total))}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── MODAL DE DETALHES / EXTRATO DO CAIXA ── */}
       {detalhesId && (

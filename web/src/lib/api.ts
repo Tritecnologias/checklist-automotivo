@@ -1,5 +1,5 @@
 import type {
-  Order, OrderItem, CatalogItem, Vehicle, OrderClient, ErpDashboard, CaixaSession, Venda, ProdutoPdv,
+  Order, OrderItem, CatalogItem, Vehicle, OrderClient, ErpDashboard, CaixaSession, CaixaTotaisPeriodo, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
@@ -129,7 +129,41 @@ export const erpApi = {
   dashboard: () => adminRequest<ErpDashboard>('/erp/dashboard'),
 
   caixaStatus: () => adminRequest<CaixaSession | null>('/erp/caixa/status'),
-  caixaList: (page = 1) => adminRequest<{ data: CaixaSession[]; total: number; pages: number }>(`/erp/caixa?page=${page}`),
+  caixaList: (params?: {
+    page?: number
+    data_inicio?: string
+    data_fim?: string
+    forma_pagto?: string
+  } | number) => {
+    if (typeof params === 'number') {
+      return adminRequest<{ data: CaixaSession[]; total: number; pages: number; totais?: CaixaTotaisPeriodo }>(`/erp/caixa?page=${params}`)
+    }
+    const q = new URLSearchParams()
+    if (params?.page)        q.set('page',        String(params.page))
+    if (params?.data_inicio) q.set('data_inicio', params.data_inicio)
+    if (params?.data_fim)    q.set('data_fim',    params.data_fim)
+    if (params?.forma_pagto) q.set('forma_pagto', params.forma_pagto)
+    return adminRequest<{ data: CaixaSession[]; total: number; pages: number; totais?: CaixaTotaisPeriodo }>(`/erp/caixa?${q}`)
+  },
+  caixaVendas: (params: {
+    page?: number
+    data_inicio?: string
+    data_fim?: string
+    forma_pagto?: string
+    search?: string
+  }) => {
+    const q = new URLSearchParams()
+    if (params.page)        q.set('page',        String(params.page))
+    if (params.data_inicio) q.set('data_inicio', params.data_inicio)
+    if (params.data_fim)    q.set('data_fim',    params.data_fim)
+    if (params.forma_pagto) q.set('forma_pagto', params.forma_pagto)
+    if (params.search)      q.set('search',      params.search)
+    return adminRequest<{
+      data: (Venda & { vr_prazo?: number; vr_outros?: number; id_caixa?: number })[]
+      total: number
+      pages: number
+    }>(`/erp/caixa/vendas?${q}`)
+  },
   caixaDetalhes: (id: number) => adminRequest<{
     caixa: CaixaSession
     totais: {
