@@ -2049,22 +2049,31 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
   const page   = Math.max(1, Number(req.query.page ?? 1));
   const limit  = 30;
   const offset = (page - 1) * limit;
-  const search = String(req.query.search ?? '');
+  const search = String(req.query.search ?? '').trim();
+  const status = String(req.query.status ?? 'ativos');
 
   const filterTenantId = getClienteTenantId(req);
   const tenantJoin = filterTenantId !== null
     ? 'INNER JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id AND _ctf.tenant_id = ?'
     : '';
 
-  const whereParts: string[] = ['c.inativo = 0'];
+  const whereParts: string[] = [];
+  if (status === 'inativos') {
+    whereParts.push('c.inativo = 1');
+  } else if (status === 'todos') {
+    // sem filtro de inativo
+  } else {
+    whereParts.push('c.inativo = 0');
+  }
+
   const baseParams: any[] = filterTenantId !== null ? [filterTenantId] : [];
 
   if (search.length >= 2) {
-    whereParts.push('(c.nome_cliente LIKE ? OR c.telefone LIKE ? OR c.celular LIKE ?)');
-    baseParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    whereParts.push('(c.nome_cliente LIKE ? OR c.telefone LIKE ? OR c.celular LIKE ? OR c.cpf_cnpj LIKE ?)');
+    baseParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
 
-  const where = 'WHERE ' + whereParts.join(' AND ');
+  const where = whereParts.length > 0 ? 'WHERE ' + whereParts.join(' AND ') : '';
 
   const [[{ total }]] = await pool.query<any>(
     `SELECT COUNT(*) as total FROM cad_clientes c ${tenantJoin} ${where}`,
@@ -2073,6 +2082,7 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
 
   const [rows] = await pool.query<any>(
     `SELECT c.id, c.nome_cliente, c.telefone, c.celular, c.inf_adicional,
+            c.cpf_cnpj, c.email, c.cep, c.endereco, c.bairro, c.cidade, c.uf, c.inativo,
             MAX(v.data_venda) as ultima_compra,
             COALESCE(SUM(v.vr_total),0) as total_gasto,
             COUNT(v.id) as qtd_compras,
@@ -2098,6 +2108,15 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
       placa: extractPlate(r.nome_cliente),
       modelo: r.inf_adicional || null,
       telefone: r.telefone || r.celular || null,
+      celular: r.celular || null,
+      cpf_cnpj: r.cpf_cnpj || null,
+      email: r.email || null,
+      cep: r.cep || null,
+      endereco: r.endereco || null,
+      bairro: r.bairro || null,
+      cidade: r.cidade || null,
+      uf: r.uf || null,
+      inativo: Number(r.inativo || 0),
       ultima_compra: r.ultima_compra,
       total_gasto: Number(r.total_gasto),
       qtd_compras: Number(r.qtd_compras),
@@ -2106,6 +2125,240 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
     total: Number(total),
     pages: Math.ceil(Number(total) / limit),
   });
+});
+
+router.get('/clientes/:id', requireManagerUp, async (req, res) => {
+  try {
+    const [[cliente]] = await pool.query<any>(
+      'SELECT * FROM cad_clientes WHERE id = ?',
+      [req.params.id]
+    );
+    if (!cliente) {
+      res.status(404).json({ message: 'Cliente não encontrado' });
+      return;
+    }
+    const [tRows] = await pool.query<any>(
+      'SELECT tenant_id FROM cliente_tenant WHERE cliente_id = ?',
+      [req.params.id]
+    );
+    res.json({
+      id: cliente.id,
+      nome: stripPlate(cliente.nome_cliente),
+      nome_original: cliente.nome_cliente,
+      placa: extractPlate(cliente.nome_cliente),
+      modelo: cliente.inf_adicional || '',
+      telefone: cliente.telefone || '',
+      celular: cliente.celular || '',
+      cpf_cnpj: cliente.cpf_cnpj || '',
+      email: cliente.email || '',
+      cep: cliente.cep || '',
+      endereco: cliente.endereco || '',
+      bairro: cliente.bairro || '',
+      cidade: cliente.cidade || '',
+      uf: cliente.uf || '',
+      inativo: Number(cliente.inativo || 0),
+      data_cadastro: cliente.data_cadastro,
+      data_ultima_alteracao: cliente.data_ultima_alteracao,
+      tenant_ids: tRows.map((r: any) => Number(r.tenant_id)),
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: 'Erro ao buscar dados do cliente', error: err?.message });
+  }
+});
+
+router.post('/clientes', requireManagerUp, async (req, res) => {
+  try {
+    const {
+      nome,
+      placa,
+      modelo,
+      cpf_cnpj,
+      telefone,
+      celular,
+      email,
+      cep,
+      endereco,
+      bairro,
+      cidade,
+      uf,
+      tenant_ids,
+    } = req.body;
+
+    if (!nome || !String(nome).trim()) {
+      res.status(400).json({ message: 'Nome do cliente é obrigatório' });
+      return;
+    }
+
+    const cleanNome = String(nome).trim();
+    const cleanPlaca = (placa || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    let nomeCliente = cleanNome;
+    if (cleanPlaca && !cleanNome.toUpperCase().includes(cleanPlaca)) {
+      nomeCliente = `${cleanNome} ${cleanPlaca}`.slice(0, 60);
+    } else {
+      nomeCliente = cleanNome.slice(0, 60);
+    }
+
+    const [result] = await pool.query<any>(
+      `INSERT INTO cad_clientes (
+        nome_cliente, cpf_cnpj, telefone, celular, email,
+        cep, endereco, bairro, cidade, uf,
+        inf_adicional, inativo, data_cadastro
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURDATE())`,
+      [
+        nomeCliente,
+        cpf_cnpj ? String(cpf_cnpj).slice(0, 18) : null,
+        telefone ? String(telefone).slice(0, 15) : null,
+        celular ? String(celular).slice(0, 15) : null,
+        email ? String(email).slice(0, 100) : null,
+        cep ? String(cep).slice(0, 15) : null,
+        endereco ? String(endereco).slice(0, 100) : null,
+        bairro ? String(bairro).slice(0, 60) : null,
+        cidade ? String(cidade).slice(0, 60) : null,
+        uf ? String(uf).slice(0, 2).toUpperCase() : null,
+        modelo ? String(modelo).slice(0, 255) : null,
+      ]
+    );
+
+    const newId = result.insertId;
+    const currentTenant = getErpWriteTenantId(req);
+    const targetTenants: number[] = Array.isArray(tenant_ids) && tenant_ids.length > 0
+      ? tenant_ids.map(Number).filter((n: number) => n > 0)
+      : [currentTenant];
+
+    if (targetTenants.length > 0) {
+      const tValues = targetTenants.map(tid => [newId, tid]);
+      await pool.query('INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) VALUES ?', [tValues])
+        .catch(err => console.error('Erro ao associar cliente_tenant:', err));
+    }
+
+    res.status(201).json({ ok: true, id: newId, message: 'Cliente cadastrado com sucesso' });
+  } catch (err: any) {
+    console.error('POST /erp/clientes error:', err);
+    res.status(500).json({ message: 'Erro ao cadastrar cliente', error: err?.message });
+  }
+});
+
+router.put('/clientes/:id', requireManagerUp, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const {
+      nome,
+      placa,
+      modelo,
+      cpf_cnpj,
+      telefone,
+      celular,
+      email,
+      cep,
+      endereco,
+      bairro,
+      cidade,
+      uf,
+      inativo,
+      tenant_ids,
+    } = req.body;
+
+    if (!nome || !String(nome).trim()) {
+      res.status(400).json({ message: 'Nome do cliente é obrigatório' });
+      return;
+    }
+
+    const cleanNome = String(nome).trim();
+    const cleanPlaca = (placa || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    let nomeCliente = cleanNome;
+    if (cleanPlaca && !cleanNome.toUpperCase().includes(cleanPlaca)) {
+      nomeCliente = `${cleanNome} ${cleanPlaca}`.slice(0, 60);
+    } else {
+      nomeCliente = cleanNome.slice(0, 60);
+    }
+
+    await pool.query(
+      `UPDATE cad_clientes
+       SET nome_cliente = ?,
+           cpf_cnpj = ?,
+           telefone = ?,
+           celular = ?,
+           email = ?,
+           cep = ?,
+           endereco = ?,
+           bairro = ?,
+           cidade = ?,
+           uf = ?,
+           inf_adicional = ?,
+           inativo = COALESCE(?, inativo),
+           data_ultima_alteracao = CURDATE()
+       WHERE id = ?`,
+      [
+        nomeCliente,
+        cpf_cnpj ? String(cpf_cnpj).slice(0, 18) : null,
+        telefone ? String(telefone).slice(0, 15) : null,
+        celular ? String(celular).slice(0, 15) : null,
+        email ? String(email).slice(0, 100) : null,
+        cep ? String(cep).slice(0, 15) : null,
+        endereco ? String(endereco).slice(0, 100) : null,
+        bairro ? String(bairro).slice(0, 60) : null,
+        cidade ? String(cidade).slice(0, 60) : null,
+        uf ? String(uf).slice(0, 2).toUpperCase() : null,
+        modelo !== undefined ? (modelo ? String(modelo).slice(0, 255) : null) : null,
+        inativo !== undefined ? Number(inativo) : null,
+        id,
+      ]
+    );
+
+    if (Array.isArray(tenant_ids)) {
+      await pool.query('DELETE FROM cliente_tenant WHERE cliente_id = ?', [id]).catch(() => {});
+      const targetTenants = tenant_ids.map(Number).filter((n: number) => n > 0);
+      if (targetTenants.length > 0) {
+        const tValues = targetTenants.map(tid => [id, tid]);
+        await pool.query('INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) VALUES ?', [tValues])
+          .catch(err => console.error('Erro ao atualizar cliente_tenant:', err));
+      }
+    }
+
+    res.json({ ok: true, message: 'Cliente atualizado com sucesso' });
+  } catch (err: any) {
+    console.error('PUT /erp/clientes/:id error:', err);
+    res.status(500).json({ message: 'Erro ao atualizar cliente', error: err?.message });
+  }
+});
+
+router.patch('/clientes/:id/toggle', requireManagerUp, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await pool.query('UPDATE cad_clientes SET inativo = IF(inativo=0,1,0), data_ultima_alteracao = CURDATE() WHERE id = ?', [id]);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ message: 'Erro ao alternar status do cliente' });
+  }
+});
+
+router.delete('/clientes/:id', requireManagerUp, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    const [[vendasRow]] = await pool.query<any>(
+      'SELECT COUNT(*) as cnt FROM mv_vendas WHERE id_cliente = ?',
+      [id]
+    );
+
+    if (Number(vendasRow?.cnt || 0) > 0) {
+      await pool.query('UPDATE cad_clientes SET inativo = 1, data_ultima_alteracao = CURDATE() WHERE id = ?', [id]);
+      res.json({
+        ok: true,
+        softDeleted: true,
+        message: 'Cliente possui histórico de compras e foi inativado para manter a integridade dos relatórios.',
+      });
+      return;
+    }
+
+    await pool.query('DELETE FROM cliente_tenant WHERE cliente_id = ?', [id]).catch(() => {});
+    await pool.query('DELETE FROM cad_clientes WHERE id = ?', [id]);
+
+    res.json({ ok: true, softDeleted: false, message: 'Cliente excluído com sucesso' });
+  } catch (err: any) {
+    console.error('DELETE /erp/clientes/:id error:', err);
+    res.status(500).json({ message: 'Erro ao excluir cliente', error: err?.message });
+  }
 });
 
 router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
@@ -2152,10 +2405,19 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
     cliente: {
       id: cliente.id,
       nome: stripPlate(cliente.nome_cliente),
+      nome_original: cliente.nome_cliente,
       placa,
       modelo: cliente.inf_adicional || null,
       telefone: cliente.telefone || cliente.celular || null,
+      celular: cliente.celular || null,
       cpf_cnpj: cliente.cpf_cnpj || null,
+      email: cliente.email || null,
+      cep: cliente.cep || null,
+      endereco: cliente.endereco || null,
+      bairro: cliente.bairro || null,
+      cidade: cliente.cidade || null,
+      uf: cliente.uf || null,
+      inativo: Number(cliente.inativo || 0),
     },
     vendas: (vendas as any[]).map((v: any) => ({
       controle: v.controle,

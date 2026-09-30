@@ -318,14 +318,67 @@ export const erpApi = {
   buscaProdutos: (q: string) => adminRequest<ProdutoPdv[]>(`/erp/busca/produtos?q=${encodeURIComponent(q)}`),
   buscaClientes: (q: string) => adminRequest<ClientePdv[]>(`/erp/busca/clientes?q=${encodeURIComponent(q)}`),
 
-  clientes: (params: { search?: string; page?: number }) => {
+  clientes: (params: { search?: string; status?: 'ativos' | 'inativos' | 'todos'; page?: number }) => {
     const q = new URLSearchParams()
     if (params.search) q.set('search', params.search)
+    if (params.status) q.set('status', params.status)
     if (params.page)   q.set('page',   String(params.page))
     return adminRequest<{ data: ClienteErp[]; total: number; pages: number }>(`/erp/clientes?${q}`)
   },
+  clienteDetalhes: (id: number) =>
+    adminRequest<ClienteErp>(`/erp/clientes/${id}`),
   clienteHistorico: (id: number) =>
     adminRequest<ClienteHistorico>(`/erp/clientes/${id}/historico`),
+  criarCliente: (data: {
+    nome: string
+    placa?: string
+    modelo?: string
+    cpf_cnpj?: string
+    telefone?: string
+    celular?: string
+    email?: string
+    cep?: string
+    endereco?: string
+    bairro?: string
+    cidade?: string
+    uf?: string
+    tenant_ids?: number[]
+  }) =>
+    adminRequest<{ ok: boolean; id: number; message: string }>('/erp/clientes', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  atualizarCliente: (
+    id: number,
+    data: {
+      nome: string
+      placa?: string
+      modelo?: string
+      cpf_cnpj?: string
+      telefone?: string
+      celular?: string
+      email?: string
+      cep?: string
+      endereco?: string
+      bairro?: string
+      cidade?: string
+      uf?: string
+      inativo?: number
+      tenant_ids?: number[]
+    }
+  ) =>
+    adminRequest<{ ok: boolean; message: string }>(`/erp/clientes/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  toggleClienteStatus: (id: number) =>
+    adminRequest<{ ok: boolean }>(`/erp/clientes/${id}/toggle`, {
+      method: 'PATCH',
+    }),
+  excluirCliente: (id: number) =>
+    adminRequest<{ ok: boolean; softDeleted: boolean; message: string }>(`/erp/clientes/${id}`, {
+      method: 'DELETE',
+    }),
 
   estoque: (params: { search?: string; filtro?: string; page?: number }) => {
     const q = new URLSearchParams()

@@ -211,24 +211,43 @@ export interface ProdutoEstoque {
 export interface ClienteErp {
   id: number
   nome: string
-  nome_original: string
+  nome_original?: string
   placa: string | null
   modelo: string | null
   telefone: string | null
+  celular?: string | null
+  cpf_cnpj?: string | null
+  email?: string | null
+  cep?: string | null
+  endereco?: string | null
+  bairro?: string | null
+  cidade?: string | null
+  uf?: string | null
+  inativo?: number
   ultima_compra: string | null
   total_gasto: number
   qtd_compras: number
   lojas: string | null
+  tenant_ids?: number[]
 }
 
 export interface ClienteHistorico {
   cliente: {
     id: number
     nome: string
+    nome_original?: string
     placa: string | null
     modelo: string | null
     telefone: string | null
+    celular?: string | null
     cpf_cnpj: string | null
+    email?: string | null
+    cep?: string | null
+    endereco?: string | null
+    bairro?: string | null
+    cidade?: string | null
+    uf?: string | null
+    inativo?: number
   }
   vendas: {
     controle: string

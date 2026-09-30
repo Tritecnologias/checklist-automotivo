@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Pencil, MapPin, Mail } from 'lucide-react'
 import { erpApi } from '../lib/api'
 import type { Venda, ClienteHistorico as ClienteHistoricoType } from '../types'
+import ClienteModal from '../components/ClienteModal'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -331,6 +333,7 @@ export default function ClienteHistorico() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [printing, setPrinting] = useState(false)
+  const [editModalOpen, setEditModalOpen] = useState(false)
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['cliente-historico', id],
@@ -404,20 +407,29 @@ export default function ClienteHistorico() {
           <span>/</span>
           <span className="text-slate-300">{cliente.nome}</span>
         </div>
-        <button
-          onClick={handlePrint}
-          disabled={printing}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 text-sm rounded-lg transition-colors"
-        >
-          {printing ? (
-            <>
-              <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-              Preparando…
-            </>
-          ) : (
-            <>🖨️ Imprimir</>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setEditModalOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium rounded-lg transition-colors border border-slate-700"
+          >
+            <Pencil className="w-4 h-4 text-amber-400" />
+            <span>Editar Cliente</span>
+          </button>
+          <button
+            onClick={handlePrint}
+            disabled={printing}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 text-sm rounded-lg transition-colors"
+          >
+            {printing ? (
+              <>
+                <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+                Preparando…
+              </>
+            ) : (
+              <>🖨️ Imprimir</>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Header card */}
@@ -431,6 +443,18 @@ export default function ClienteHistorico() {
             )}
             {cliente.cpf_cnpj && (
               <p className="text-xs text-slate-500 mt-0.5">{cliente.cpf_cnpj}</p>
+            )}
+            {cliente.email && (
+              <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-slate-500" />
+                {cliente.email}
+              </p>
+            )}
+            {cliente.endereco && (
+              <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                {[cliente.endereco, cliente.bairro, cliente.cidade, cliente.uf].filter(Boolean).join(', ')}
+              </p>
             )}
           </div>
           {(cliente.placa || cliente.modelo) && (
@@ -553,6 +577,17 @@ export default function ClienteHistorico() {
           </div>
         )}
       </section>
+
+      {/* Modal Editar Cliente */}
+      <ClienteModal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        clienteId={Number(id)}
+        onSuccess={() => {
+          qc.invalidateQueries({ queryKey: ['cliente-historico', id] })
+          qc.invalidateQueries({ queryKey: ['erp-clientes'] })
+        }}
+      />
     </div>
   )
 }
