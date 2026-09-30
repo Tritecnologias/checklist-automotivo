@@ -256,17 +256,14 @@ async function runMigrations() {
       WHERE v.tenant_id IS NOT NULL AND l.tenant_id = 1
     `);
 
-    // Sincroniza id_caixa para vendas antigas onde houve caixa único no dia para o tenant
+    // Sincroniza id_caixa para vendas antigas com data e turno correspondentes para o tenant
     await pool.query(`
       UPDATE mv_vendas v
       JOIN mv_caixa c ON c.tenant_id = v.tenant_id
         AND v.data_venda = c.data_abertura
+        AND (v.turno = c.turno OR c.turno = '1' OR v.turno IS NULL)
       SET v.id_caixa = c.id
       WHERE v.id_caixa IS NULL
-        AND (
-          SELECT COUNT(*) FROM (SELECT id, tenant_id, data_abertura FROM mv_caixa) c2
-          WHERE c2.tenant_id = v.tenant_id AND c2.data_abertura = v.data_venda
-        ) = 1
     `);
 
     // Recalcula vr_fechado_turno de caixas fechados aplicando isolamento multi-tenant

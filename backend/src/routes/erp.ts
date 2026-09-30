@@ -178,15 +178,15 @@ router.get('/caixa', async (req, res) => {
   }
 
   if (formaPagto === 'dinheiro') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.id_caixa = c.id AND v.vr_dinheiro > 0)');
+    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND v.vr_dinheiro > 0)');
   } else if (formaPagto === 'cartao') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.id_caixa = c.id AND v.vr_cartao > 0)');
+    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND v.vr_cartao > 0)');
   } else if (formaPagto === 'pix') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.id_caixa = c.id AND v.vr_pix > 0)');
+    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND v.vr_pix > 0)');
   } else if (formaPagto === 'prazo') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.id_caixa = c.id AND (v.vr_nota > 0 OR v.vr_carne > 0))');
+    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND (v.vr_nota > 0 OR v.vr_carne > 0))');
   } else if (formaPagto === 'outros') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.id_caixa = c.id AND (v.vr_ticket > 0 OR v.vr_outros > 0))');
+    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND (v.vr_ticket > 0 OR v.vr_outros > 0))');
   }
 
   const whereSql = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
@@ -210,22 +210,22 @@ router.get('/caixa', async (req, res) => {
   const sessionBreakdownMap: Record<number, any> = {};
 
   if (sessionIds.length > 0) {
-    const { condition: vTenantCond, params: vTenantParams } = getErpTenantCondition(req, 'tenant_id');
     const placeholders = sessionIds.map(() => '?').join(',');
     const [breakdowns] = await pool.query<any>(
       `SELECT 
-         id_caixa,
-         COALESCE(SUM(vr_total), 0) as vr_total,
-         COALESCE(SUM(vr_dinheiro), 0) as vr_dinheiro,
-         COALESCE(SUM(vr_cartao), 0) as vr_cartao,
-         COALESCE(SUM(vr_pix), 0) as vr_pix,
-         COALESCE(SUM(vr_nota + vr_carne), 0) as vr_prazo,
-         COALESCE(SUM(vr_ticket + vr_outros), 0) as vr_outros,
-         COUNT(*) as qtd_vendas
-       FROM mv_vendas
-       WHERE ${vTenantCond ? vTenantCond + ' AND ' : ''} id_caixa IN (${placeholders})
-       GROUP BY id_caixa`,
-      [...vTenantParams, ...sessionIds]
+         c.id as id_caixa,
+         COALESCE(SUM(v.vr_total), 0) as vr_total,
+         COALESCE(SUM(v.vr_dinheiro), 0) as vr_dinheiro,
+         COALESCE(SUM(v.vr_cartao), 0) as vr_cartao,
+         COALESCE(SUM(v.vr_pix), 0) as vr_pix,
+         COALESCE(SUM(v.vr_nota + v.vr_carne), 0) as vr_prazo,
+         COALESCE(SUM(v.vr_ticket + v.vr_outros), 0) as vr_outros,
+         COUNT(v.id) as qtd_vendas
+       FROM mv_caixa c
+       LEFT JOIN mv_vendas v ON (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura))
+       WHERE c.id IN (${placeholders})
+       GROUP BY c.id`,
+      sessionIds
     );
 
     for (const b of breakdowns) {
