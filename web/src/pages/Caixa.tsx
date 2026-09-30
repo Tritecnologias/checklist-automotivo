@@ -198,6 +198,18 @@ export default function Caixa() {
   const diferencaFechamento = temValorDigitado ? (fechamentoNum - esperadoDinheiro) : 0
 
   const totaisPeriodo = hist?.totais
+
+  // Outros não deve entrar nos cálculos de vendas
+  const totalVendasPeriodo = useMemo(() => {
+    if (!totaisPeriodo) return 0
+    return (
+      (Number(totaisPeriodo.dinheiro) || 0) +
+      (Number(totaisPeriodo.cartao) || 0) +
+      (Number(totaisPeriodo.pix) || 0) +
+      (Number(totaisPeriodo.prazo) || 0)
+    )
+  }, [totaisPeriodo])
+
   const temFiltroAtivo = !!(dataInicio || dataFim || formaPagto || (activeTab === 'vendas' && searchVendas))
 
   return (
@@ -252,7 +264,16 @@ export default function Caixa() {
 
               <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-xl p-3.5">
                 <p className="text-xs text-emerald-300 font-medium">Total em Vendas</p>
-                <p className="text-lg font-bold text-emerald-400 mt-0.5">{R(Number(status.vr_fechado_turno))}</p>
+                <p className="text-lg font-bold text-emerald-400 mt-0.5">
+                  {R(
+                    status.totais_por_forma
+                      ? ((Number(status.totais_por_forma.dinheiro) || 0) +
+                         (Number(status.totais_por_forma.cartao) || 0) +
+                         (Number(status.totais_por_forma.pix) || 0) +
+                         (Number(status.totais_por_forma.prazo) || 0))
+                      : Number(status.vr_fechado_turno || 0)
+                  )}
+                </p>
                 <p className="text-xs text-emerald-400/70">
                   {status.totais_por_forma?.qtd_vendas ?? 0} {status.totais_por_forma?.qtd_vendas === 1 ? 'venda' : 'vendas'} nesta sessão
                 </p>
@@ -289,6 +310,7 @@ export default function Caixa() {
                   <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5">
                     <span className="text-slate-400 block text-[11px]">🎟️ Outros / Ticket</span>
                     <strong className="text-slate-100 text-sm">{R(status.totais_por_forma.outros)}</strong>
+                    <span className="text-[10px] text-slate-500 block">Não soma no total</span>
                   </div>
                 </div>
               </div>
@@ -552,7 +574,7 @@ export default function Caixa() {
               <DollarSign className="w-3.5 h-3.5 text-slate-400" />
             </div>
             <strong className="text-white text-base block font-bold">
-              {R(totaisPeriodo?.total_vendas ?? 0)}
+              {R(totaisPeriodo ? totalVendasPeriodo : 0)}
             </strong>
             <span className="text-[10px] text-slate-500 block mt-0.5">
               {totaisPeriodo?.qtd_vendas ?? 0} {totaisPeriodo?.qtd_vendas === 1 ? 'venda' : 'vendas'}
@@ -659,8 +681,8 @@ export default function Caixa() {
             <strong className="text-purple-300 text-base block font-bold">
               {R(totaisPeriodo?.outros ?? 0)}
             </strong>
-            <span className="text-[10px] text-purple-500/80 block mt-0.5">
-              Ticket / Outros
+            <span className="text-[10px] text-purple-400/80 block mt-0.5">
+              Não entra no total
             </span>
           </div>
         </div>
@@ -765,7 +787,14 @@ export default function Caixa() {
                           {R(Number(c.vr_abertura))}
                         </td>
                         <td className="px-5 py-3 text-right text-emerald-400 font-semibold whitespace-nowrap">
-                          {R(Number(c.vr_fechado_turno))}
+                          {R(
+                            c.totais_por_forma
+                              ? ((Number(c.totais_por_forma.dinheiro) || 0) +
+                                 (Number(c.totais_por_forma.cartao) || 0) +
+                                 (Number(c.totais_por_forma.pix) || 0) +
+                                 (Number(c.totais_por_forma.prazo) || 0))
+                              : Number(c.vr_fechado_turno || 0)
+                          )}
                         </td>
 
                         {formaPagto && (
@@ -985,7 +1014,16 @@ export default function Caixa() {
                     </div>
                     <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-xl p-3">
                       <span className="text-emerald-300 block text-xs">Total Vendas</span>
-                      <strong className="text-emerald-400 text-base">{R(detalhesModal.totais.total_vendas)}</strong>
+                      <strong className="text-emerald-400 text-base">
+                        {R(
+                          detalhesModal.totais
+                            ? ((Number(detalhesModal.totais.dinheiro) || 0) +
+                               (Number(detalhesModal.totais.cartao) || 0) +
+                               (Number(detalhesModal.totais.pix) || 0) +
+                               (Number(detalhesModal.totais.prazo) || 0))
+                            : Number(detalhesModal.caixa.vr_fechado_turno || 0)
+                        )}
+                      </strong>
                     </div>
                     <div className="bg-blue-950/30 border border-blue-800/40 rounded-xl p-3">
                       <span className="text-blue-300 block text-xs">Esperado em Dinheiro</span>
@@ -1024,6 +1062,7 @@ export default function Caixa() {
                       <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
                         <span className="text-slate-400 block text-[11px]">🎟️ Outros</span>
                         <strong className="text-slate-200 text-sm">{R(detalhesModal.totais.outros)}</strong>
+                        <span className="text-[10px] text-slate-500 block">Não soma no total</span>
                       </div>
                     </div>
                   </div>

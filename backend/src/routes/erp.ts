@@ -81,17 +81,17 @@ router.get('/dashboard', async (req, res) => {
   const { clause: lClause, params: lParams } = getErpTenantFilter(req, true, 'tenant_id');
 
   const [[hoje]] = await pool.query<any>(
-    `SELECT COUNT(*) as count_vendas, COALESCE(SUM(vr_total),0) as total_dia
+    `SELECT COUNT(*) as count_vendas, COALESCE(SUM(COALESCE(vr_dinheiro, 0) + COALESCE(vr_cartao, 0) + COALESCE(vr_pix, 0) + COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)),0) as total_dia
      FROM mv_vendas WHERE data_venda = CURDATE()${vClause}`,
     vParams
   );
   const [[semana]] = await pool.query<any>(
-    `SELECT COALESCE(SUM(vr_total),0) as total_semana
+    `SELECT COALESCE(SUM(COALESCE(vr_dinheiro, 0) + COALESCE(vr_cartao, 0) + COALESCE(vr_pix, 0) + COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)),0) as total_semana
      FROM mv_vendas WHERE data_venda >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)${vClause}`,
     vParams
   );
   const [[mes]] = await pool.query<any>(
-    `SELECT COALESCE(SUM(vr_total),0) as total_mes
+    `SELECT COALESCE(SUM(COALESCE(vr_dinheiro, 0) + COALESCE(vr_cartao, 0) + COALESCE(vr_pix, 0) + COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)),0) as total_mes
      FROM mv_vendas WHERE MONTH(data_venda)=MONTH(CURDATE()) AND YEAR(data_venda)=YEAR(CURDATE())${vClause}`,
     vParams
   );
@@ -215,7 +215,7 @@ router.get('/caixa', async (req, res) => {
       const [breakdowns] = await pool.query<any>(
         `SELECT 
            c.id as id_caixa,
-           COALESCE(SUM(v.vr_total), 0) as vr_total,
+           COALESCE(SUM(COALESCE(v.vr_dinheiro, 0) + COALESCE(v.vr_cartao, 0) + COALESCE(v.vr_pix, 0) + COALESCE(v.vr_nota, 0) + COALESCE(v.vr_carne, 0)), 0) as vr_total,
            COALESCE(SUM(v.vr_dinheiro), 0) as vr_dinheiro,
            COALESCE(SUM(v.vr_cartao), 0) as vr_cartao,
            COALESCE(SUM(v.vr_pix), 0) as vr_pix,
@@ -284,7 +284,7 @@ router.get('/caixa', async (req, res) => {
 
     const [[totaisVendas]] = await pool.query<any>(
       `SELECT 
-         COALESCE(SUM(v.vr_total), 0) as total_vendas,
+         COALESCE(SUM(COALESCE(v.vr_dinheiro, 0) + COALESCE(v.vr_cartao, 0) + COALESCE(v.vr_pix, 0) + COALESCE(v.vr_nota, 0) + COALESCE(v.vr_carne, 0)), 0) as total_vendas,
          COALESCE(SUM(v.vr_dinheiro), 0) as dinheiro,
          COALESCE(SUM(v.vr_cartao), 0) as cartao,
          COALESCE(SUM(v.vr_pix), 0) as pix,
@@ -452,7 +452,7 @@ router.get('/caixa/status', async (req, res) => {
   // Calcula vendas acumuladas em tempo real da sessão do caixa aberto com isolamento estrito por loja
   const [[totais]] = await pool.query<any>(
     `SELECT 
-       COALESCE(SUM(vr_total), 0) as vr_total,
+       COALESCE(SUM(COALESCE(vr_dinheiro, 0) + COALESCE(vr_cartao, 0) + COALESCE(vr_pix, 0) + COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)), 0) as vr_total,
        COALESCE(SUM(vr_dinheiro), 0) as vr_dinheiro,
        COALESCE(SUM(vr_cartao), 0) as vr_cartao,
        COALESCE(SUM(vr_pix), 0) as vr_pix,
@@ -511,7 +511,7 @@ router.get('/caixa/:id/detalhes', async (req, res) => {
 
   const [[totais]] = await pool.query<any>(
     `SELECT 
-       COALESCE(SUM(vr_total), 0) as vr_total,
+       COALESCE(SUM(COALESCE(vr_dinheiro, 0) + COALESCE(vr_cartao, 0) + COALESCE(vr_pix, 0) + COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)), 0) as vr_total,
        COALESCE(SUM(vr_dinheiro), 0) as vr_dinheiro,
        COALESCE(SUM(vr_cartao), 0) as vr_cartao,
        COALESCE(SUM(vr_pix), 0) as vr_pix,
@@ -636,7 +636,7 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
 
   const [[totals]] = await pool.query<any>(
     `SELECT 
-       COALESCE(SUM(vr_total),0) as vr_fechado_turno,
+       COALESCE(SUM(COALESCE(vr_dinheiro, 0) + COALESCE(vr_cartao, 0) + COALESCE(vr_pix, 0) + COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)), 0) as vr_fechado_turno,
        COALESCE(SUM(vr_dinheiro),0) as vr_dinheiro,
        COALESCE(SUM(vr_cartao),0) as vr_cartao,
        COALESCE(SUM(vr_pix),0) as vr_pix,
