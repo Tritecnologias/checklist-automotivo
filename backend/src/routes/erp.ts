@@ -151,281 +151,291 @@ router.get('/dashboard', async (req, res) => {
 // ── CAIXA ────────────────────────────────────────────────────────────────────
 
 router.get('/caixa', async (req, res) => {
-  const page       = Math.max(1, Number(req.query.page ?? 1));
-  const limit      = 20;
-  const offset     = (page - 1) * limit;
-  const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
-  const dataFim    = req.query.data_fim    ? String(req.query.data_fim).trim()    : '';
-  const formaPagto = req.query.forma_pagto ? String(req.query.forma_pagto).trim().toLowerCase() : '';
+  try {
+    const page       = Math.max(1, Number(req.query.page ?? 1));
+    const limit      = 20;
+    const offset     = (page - 1) * limit;
+    const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
+    const dataFim    = req.query.data_fim    ? String(req.query.data_fim).trim()    : '';
+    const formaPagto = req.query.forma_pagto ? String(req.query.forma_pagto).trim().toLowerCase() : '';
 
-  const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'c.tenant_id');
-  const whereParts: string[] = [];
-  const params: any[] = [];
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'c.tenant_id');
+    const whereParts: string[] = [];
+    const params: any[] = [];
 
-  if (tenantCond) {
-    whereParts.push(tenantCond);
-    params.push(...tenantParams);
-  }
+    if (tenantCond) {
+      whereParts.push(tenantCond);
+      params.push(...tenantParams);
+    }
 
-  if (dataInicio) {
-    whereParts.push('c.data_abertura >= ?');
-    params.push(dataInicio);
-  }
+    if (dataInicio) {
+      whereParts.push('(c.data_abertura >= ? OR DATE(c.data_abertura) >= ?)');
+      params.push(dataInicio, dataInicio);
+    }
 
-  if (dataFim) {
-    whereParts.push('c.data_abertura <= ?');
-    params.push(dataFim);
-  }
+    if (dataFim) {
+      whereParts.push("(c.data_abertura <= ? OR c.data_abertura <= CONCAT(?, ' 23:59:59'))");
+      params.push(dataFim, dataFim);
+    }
 
-  if (formaPagto === 'dinheiro') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND v.vr_dinheiro > 0)');
-  } else if (formaPagto === 'cartao') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND v.vr_cartao > 0)');
-  } else if (formaPagto === 'pix') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND v.vr_pix > 0)');
-  } else if (formaPagto === 'prazo') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND (v.vr_nota > 0 OR v.vr_carne > 0))');
-  } else if (formaPagto === 'outros') {
-    whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND (v.vr_ticket > 0 OR v.vr_outros > 0))');
-  }
+    if (formaPagto === 'dinheiro') {
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_dinheiro, 0) > 0)');
+    } else if (formaPagto === 'cartao') {
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_cartao, 0) > 0)');
+    } else if (formaPagto === 'pix') {
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_pix, 0) > 0)');
+    } else if (formaPagto === 'prazo') {
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND (COALESCE(v.vr_nota, 0) > 0 OR COALESCE(v.vr_carne, 0) > 0))');
+    } else if (formaPagto === 'outros') {
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_ticket, 0) > 0)');
+    }
 
-  const whereSql = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
+    const whereSql = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
 
-  const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total FROM mv_caixa c ${whereSql}`,
-    params
-  );
-
-  const [rows] = await pool.query<any>(
-    `SELECT c.*,
-            COALESCE(u.nome, 'Operador') as nome_operador
-     FROM mv_caixa c
-     LEFT JOIN users u ON u.id = c.id_login
-     ${whereSql}
-     ORDER BY c.id DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
-
-  const sessionIds = rows.map((r: any) => r.id);
-  const sessionBreakdownMap: Record<number, any> = {};
-
-  if (sessionIds.length > 0) {
-    const placeholders = sessionIds.map(() => '?').join(',');
-    const [breakdowns] = await pool.query<any>(
-      `SELECT 
-         c.id as id_caixa,
-         COALESCE(SUM(v.vr_total), 0) as vr_total,
-         COALESCE(SUM(v.vr_dinheiro), 0) as vr_dinheiro,
-         COALESCE(SUM(v.vr_cartao), 0) as vr_cartao,
-         COALESCE(SUM(v.vr_pix), 0) as vr_pix,
-         COALESCE(SUM(v.vr_nota + v.vr_carne), 0) as vr_prazo,
-         COALESCE(SUM(v.vr_ticket + v.vr_outros), 0) as vr_outros,
-         COUNT(v.id) as qtd_vendas
-       FROM mv_caixa c
-       LEFT JOIN mv_vendas v ON (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura))
-       WHERE c.id IN (${placeholders})
-       GROUP BY c.id`,
-      sessionIds
+    const [[{ total }]] = await pool.query<any>(
+      `SELECT COUNT(*) as total FROM mv_caixa c ${whereSql}`,
+      params
     );
 
-    for (const b of breakdowns) {
-      sessionBreakdownMap[b.id_caixa] = b;
-    }
-  }
+    const [rows] = await pool.query<any>(
+      `SELECT c.*,
+              COALESCE(u.nome, 'Operador') as nome_operador
+       FROM mv_caixa c
+       LEFT JOIN users u ON u.id = c.id_login
+       ${whereSql}
+       ORDER BY c.id DESC LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
 
-  const enrichedRows = rows.map((c: any) => {
-    const s = sessionBreakdownMap[c.id];
-    const totalVendas = Number(s?.vr_total || c.vr_fechado_turno || 0);
-    const vrDinheiro = Number(s?.vr_dinheiro || 0);
-    const vrCartao = Number(s?.vr_cartao || 0);
-    const vrPix = Number(s?.vr_pix || 0);
-    const vrPrazo = Number(s?.vr_prazo || 0);
-    const vrOutros = Number(s?.vr_outros || 0);
-    const vrAbertura = Number(c.vr_abertura || 0);
-    const vrFechamento = Number(c.vr_fechamento || 0);
-    const saldoEsperado = vrAbertura + vrDinheiro;
-    const diferenca = c.status_caixa === 'F' && c.vr_fechamento !== null ? (vrFechamento - saldoEsperado) : 0;
+    const sessionIds = rows.map((r: any) => r.id);
+    const sessionBreakdownMap: Record<number, any> = {};
 
-    return {
-      ...c,
-      vr_fechado_turno: totalVendas,
-      saldo_esperado_dinheiro: saldoEsperado,
-      diferenca_caixa: diferenca,
-      totais_por_forma: {
-        dinheiro: vrDinheiro,
-        cartao: vrCartao,
-        pix: vrPix,
-        prazo: vrPrazo,
-        outros: vrOutros,
-        total_vendas: totalVendas,
-        qtd_vendas: Number(s?.qtd_vendas || 0),
+    if (sessionIds.length > 0) {
+      const placeholders = sessionIds.map(() => '?').join(',');
+      const [breakdowns] = await pool.query<any>(
+        `SELECT 
+           c.id as id_caixa,
+           COALESCE(SUM(v.vr_total), 0) as vr_total,
+           COALESCE(SUM(v.vr_dinheiro), 0) as vr_dinheiro,
+           COALESCE(SUM(v.vr_cartao), 0) as vr_cartao,
+           COALESCE(SUM(v.vr_pix), 0) as vr_pix,
+           COALESCE(SUM(COALESCE(v.vr_nota, 0) + COALESCE(v.vr_carne, 0)), 0) as vr_prazo,
+           COALESCE(SUM(COALESCE(v.vr_ticket, 0)), 0) as vr_outros,
+           COUNT(v.id) as qtd_vendas
+         FROM mv_caixa c
+         LEFT JOIN mv_vendas v ON (v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)))
+         WHERE c.id IN (${placeholders})
+         GROUP BY c.id`,
+        sessionIds
+      );
+
+      for (const b of breakdowns) {
+        sessionBreakdownMap[b.id_caixa] = b;
       }
-    };
-  });
-
-  // Agrega totais do período
-  const { condition: vTenantCond, params: vTenantParams } = getErpTenantCondition(req, 'v.tenant_id');
-  const vWhereParts: string[] = [];
-  const vParams: any[] = [];
-  if (vTenantCond) {
-    vWhereParts.push(vTenantCond);
-    vParams.push(...vTenantParams);
-  }
-  if (dataInicio) {
-    vWhereParts.push('v.data_venda >= ?');
-    vParams.push(dataInicio);
-  }
-  if (dataFim) {
-    vWhereParts.push('v.data_venda <= ?');
-    vParams.push(dataFim);
-  }
-  const vWhereSql = vWhereParts.length ? 'WHERE ' + vWhereParts.join(' AND ') : '';
-
-  const [[totaisVendas]] = await pool.query<any>(
-    `SELECT 
-       COALESCE(SUM(v.vr_total), 0) as total_vendas,
-       COALESCE(SUM(v.vr_dinheiro), 0) as dinheiro,
-       COALESCE(SUM(v.vr_cartao), 0) as cartao,
-       COALESCE(SUM(v.vr_pix), 0) as pix,
-       COALESCE(SUM(v.vr_nota + v.vr_carne), 0) as prazo,
-       COALESCE(SUM(v.vr_ticket + v.vr_outros), 0) as outros,
-       COUNT(v.id) as qtd_vendas
-     FROM mv_vendas v
-     ${vWhereSql}`,
-    vParams
-  );
-
-  const { condition: cTenantCond, params: cTenantParams } = getErpTenantCondition(req, 'c.tenant_id');
-  const cWhereParts: string[] = [];
-  const cParams: any[] = [];
-  if (cTenantCond) {
-    cWhereParts.push(cTenantCond);
-    cParams.push(...cTenantParams);
-  }
-  if (dataInicio) {
-    cWhereParts.push('c.data_abertura >= ?');
-    cParams.push(dataInicio);
-  }
-  if (dataFim) {
-    cWhereParts.push('c.data_abertura <= ?');
-    cParams.push(dataFim);
-  }
-  const cWhereSql = cWhereParts.length ? 'WHERE ' + cWhereParts.join(' AND ') : '';
-
-  const [[totaisCaixas]] = await pool.query<any>(
-    `SELECT 
-       COALESCE(SUM(c.vr_abertura), 0) as total_fundo,
-       COALESCE(SUM(c.vr_fechamento), 0) as total_conferido,
-       COUNT(c.id) as qtd_sessoes
-     FROM mv_caixa c
-     ${cWhereSql}`,
-    cParams
-  );
-
-  let valorFiltrado = Number(totaisVendas?.total_vendas || 0);
-  if (formaPagto === 'dinheiro') valorFiltrado = Number(totaisVendas?.dinheiro || 0);
-  else if (formaPagto === 'cartao') valorFiltrado = Number(totaisVendas?.cartao || 0);
-  else if (formaPagto === 'pix') valorFiltrado = Number(totaisVendas?.pix || 0);
-  else if (formaPagto === 'prazo') valorFiltrado = Number(totaisVendas?.prazo || 0);
-  else if (formaPagto === 'outros') valorFiltrado = Number(totaisVendas?.outros || 0);
-
-  res.json({
-    data: enrichedRows,
-    total: Number(total),
-    pages: Math.ceil(total / limit),
-    totais: {
-      total_vendas: Number(totaisVendas?.total_vendas || 0),
-      dinheiro: Number(totaisVendas?.dinheiro || 0),
-      cartao: Number(totaisVendas?.cartao || 0),
-      pix: Number(totaisVendas?.pix || 0),
-      prazo: Number(totaisVendas?.prazo || 0),
-      outros: Number(totaisVendas?.outros || 0),
-      total_fundo: Number(totaisCaixas?.total_fundo || 0),
-      total_conferido: Number(totaisCaixas?.total_conferido || 0),
-      qtd_vendas: Number(totaisVendas?.qtd_vendas || 0),
-      qtd_sessoes: Number(totaisCaixas?.qtd_sessoes || 0),
-      valor_filtrado: valorFiltrado,
     }
-  });
+
+    const enrichedRows = rows.map((c: any) => {
+      const s = sessionBreakdownMap[c.id];
+      const totalVendas = Number(s?.vr_total || c.vr_fechado_turno || 0);
+      const vrDinheiro = Number(s?.vr_dinheiro || 0);
+      const vrCartao = Number(s?.vr_cartao || 0);
+      const vrPix = Number(s?.vr_pix || 0);
+      const vrPrazo = Number(s?.vr_prazo || 0);
+      const vrOutros = Number(s?.vr_outros || 0);
+      const vrAbertura = Number(c.vr_abertura || 0);
+      const vrFechamento = Number(c.vr_fechamento || 0);
+      const saldoEsperado = vrAbertura + vrDinheiro;
+      const diferenca = c.status_caixa === 'F' && c.vr_fechamento !== null ? (vrFechamento - saldoEsperado) : 0;
+
+      return {
+        ...c,
+        vr_fechado_turno: totalVendas,
+        saldo_esperado_dinheiro: saldoEsperado,
+        diferenca_caixa: diferenca,
+        totais_por_forma: {
+          dinheiro: vrDinheiro,
+          cartao: vrCartao,
+          pix: vrPix,
+          prazo: vrPrazo,
+          outros: vrOutros,
+          total_vendas: totalVendas,
+          qtd_vendas: Number(s?.qtd_vendas || 0),
+        }
+      };
+    });
+
+    // Agrega totais do período
+    const { condition: vTenantCond, params: vTenantParams } = getErpTenantCondition(req, 'v.tenant_id');
+    const vWhereParts: string[] = [];
+    const vParams: any[] = [];
+    if (vTenantCond) {
+      vWhereParts.push(vTenantCond);
+      vParams.push(...vTenantParams);
+    }
+    if (dataInicio) {
+      vWhereParts.push('(v.data_venda >= ? OR DATE(v.data_venda) >= ?)');
+      vParams.push(dataInicio, dataInicio);
+    }
+    if (dataFim) {
+      vWhereParts.push("(v.data_venda <= ? OR v.data_venda <= CONCAT(?, ' 23:59:59'))");
+      vParams.push(dataFim, dataFim);
+    }
+    const vWhereSql = vWhereParts.length ? 'WHERE ' + vWhereParts.join(' AND ') : '';
+
+    const [[totaisVendas]] = await pool.query<any>(
+      `SELECT 
+         COALESCE(SUM(v.vr_total), 0) as total_vendas,
+         COALESCE(SUM(v.vr_dinheiro), 0) as dinheiro,
+         COALESCE(SUM(v.vr_cartao), 0) as cartao,
+         COALESCE(SUM(v.vr_pix), 0) as pix,
+         COALESCE(SUM(COALESCE(v.vr_nota, 0) + COALESCE(v.vr_carne, 0)), 0) as prazo,
+         COALESCE(SUM(COALESCE(v.vr_ticket, 0)), 0) as outros,
+         COUNT(v.id) as qtd_vendas
+       FROM mv_vendas v
+       ${vWhereSql}`,
+      vParams
+    );
+
+    const { condition: cTenantCond, params: cTenantParams } = getErpTenantCondition(req, 'c.tenant_id');
+    const cWhereParts: string[] = [];
+    const cParams: any[] = [];
+    if (cTenantCond) {
+      cWhereParts.push(cTenantCond);
+      cParams.push(...cTenantParams);
+    }
+    if (dataInicio) {
+      cWhereParts.push('(c.data_abertura >= ? OR DATE(c.data_abertura) >= ?)');
+      cParams.push(dataInicio, dataInicio);
+    }
+    if (dataFim) {
+      cWhereParts.push("(c.data_abertura <= ? OR c.data_abertura <= CONCAT(?, ' 23:59:59'))");
+      cParams.push(dataFim, dataFim);
+    }
+    const cWhereSql = cWhereParts.length ? 'WHERE ' + cWhereParts.join(' AND ') : '';
+
+    const [[totaisCaixas]] = await pool.query<any>(
+      `SELECT 
+         COALESCE(SUM(c.vr_abertura), 0) as total_fundo,
+         COALESCE(SUM(c.vr_fechamento), 0) as total_conferido,
+         COUNT(c.id) as qtd_sessoes
+       FROM mv_caixa c
+       ${cWhereSql}`,
+      cParams
+    );
+
+    let valorFiltrado = Number(totaisVendas?.total_vendas || 0);
+    if (formaPagto === 'dinheiro') valorFiltrado = Number(totaisVendas?.dinheiro || 0);
+    else if (formaPagto === 'cartao') valorFiltrado = Number(totaisVendas?.cartao || 0);
+    else if (formaPagto === 'pix') valorFiltrado = Number(totaisVendas?.pix || 0);
+    else if (formaPagto === 'prazo') valorFiltrado = Number(totaisVendas?.prazo || 0);
+    else if (formaPagto === 'outros') valorFiltrado = Number(totaisVendas?.outros || 0);
+
+    res.json({
+      data: enrichedRows,
+      total: Number(total),
+      pages: Math.ceil(total / limit),
+      totais: {
+        total_vendas: Number(totaisVendas?.total_vendas || 0),
+        dinheiro: Number(totaisVendas?.dinheiro || 0),
+        cartao: Number(totaisVendas?.cartao || 0),
+        pix: Number(totaisVendas?.pix || 0),
+        prazo: Number(totaisVendas?.prazo || 0),
+        outros: Number(totaisVendas?.outros || 0),
+        total_fundo: Number(totaisCaixas?.total_fundo || 0),
+        total_conferido: Number(totaisCaixas?.total_conferido || 0),
+        qtd_vendas: Number(totaisVendas?.qtd_vendas || 0),
+        qtd_sessoes: Number(totaisCaixas?.qtd_sessoes || 0),
+        valor_filtrado: valorFiltrado,
+      }
+    });
+  } catch (err) {
+    console.error('[caixa] Erro ao listar sessões de caixa:', err);
+    res.status(500).json({ error: 'Erro ao listar sessões de caixa', details: String(err) });
+  }
 });
 
 router.get('/caixa/vendas', async (req, res) => {
-  const page       = Math.max(1, Number(req.query.page ?? 1));
-  const limit      = 30;
-  const offset     = (page - 1) * limit;
-  const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
-  const dataFim    = req.query.data_fim    ? String(req.query.data_fim).trim()    : '';
-  const formaPagto = req.query.forma_pagto ? String(req.query.forma_pagto).trim().toLowerCase() : '';
-  const search     = String(req.query.search ?? '').trim();
+  try {
+    const page       = Math.max(1, Number(req.query.page ?? 1));
+    const limit      = 30;
+    const offset     = (page - 1) * limit;
+    const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
+    const dataFim    = req.query.data_fim    ? String(req.query.data_fim).trim()    : '';
+    const formaPagto = req.query.forma_pagto ? String(req.query.forma_pagto).trim().toLowerCase() : '';
+    const search     = String(req.query.search ?? '').trim();
 
-  const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'v.tenant_id');
-  const whereParts: string[] = [];
-  const params: any[] = [];
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'v.tenant_id');
+    const whereParts: string[] = [];
+    const params: any[] = [];
 
-  if (tenantCond) {
-    whereParts.push(tenantCond);
-    params.push(...tenantParams);
+    if (tenantCond) {
+      whereParts.push(tenantCond);
+      params.push(...tenantParams);
+    }
+    if (dataInicio) {
+      whereParts.push('(v.data_venda >= ? OR DATE(v.data_venda) >= ?)');
+      params.push(dataInicio, dataInicio);
+    }
+    if (dataFim) {
+      whereParts.push("(v.data_venda <= ? OR v.data_venda <= CONCAT(?, ' 23:59:59'))");
+      params.push(dataFim, dataFim);
+    }
+    if (search.length >= 2) {
+      whereParts.push('(c.nome_cliente LIKE ? OR v.controle LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    if (formaPagto === 'dinheiro') {
+      whereParts.push('COALESCE(v.vr_dinheiro, 0) > 0');
+    } else if (formaPagto === 'cartao') {
+      whereParts.push('COALESCE(v.vr_cartao, 0) > 0');
+    } else if (formaPagto === 'pix') {
+      whereParts.push('COALESCE(v.vr_pix, 0) > 0');
+    } else if (formaPagto === 'prazo') {
+      whereParts.push('(COALESCE(v.vr_nota, 0) > 0 OR COALESCE(v.vr_carne, 0) > 0)');
+    } else if (formaPagto === 'outros') {
+      whereParts.push('COALESCE(v.vr_ticket, 0) > 0');
+    }
+
+    const whereSql = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
+
+    const [[{ total }]] = await pool.query<any>(
+      `SELECT COUNT(*) as total
+       FROM mv_vendas v
+       LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+       ${whereSql}`,
+      params
+    );
+
+    const [rows] = await pool.query<any>(
+      `SELECT v.id, v.controle, v.data_venda, v.vr_total, v.id_caixa,
+              v.vr_dinheiro, v.vr_cartao, v.vr_pix, v.vr_nota, v.vr_carne, v.vr_ticket,
+              COALESCE(c.nome_cliente, 'Consumidor') as nome_cliente
+       FROM mv_vendas v
+       LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+       ${whereSql}
+       ORDER BY v.id DESC LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+
+    res.json({
+      data: rows.map((r: any) => ({
+        ...r,
+        hora_venda: String(r.controle).slice(8, 10) + ':' + String(r.controle).slice(10, 12),
+        vr_total: Number(r.vr_total || 0),
+        vr_dinheiro: Number(r.vr_dinheiro || 0),
+        vr_cartao: Number(r.vr_cartao || 0),
+        vr_pix: Number(r.vr_pix || 0),
+        vr_prazo: Number(r.vr_nota || 0) + Number(r.vr_carne || 0),
+        vr_outros: Number(r.vr_ticket || 0),
+      })),
+      total: Number(total),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    console.error('[caixa/vendas] Erro ao listar vendas:', err);
+    res.status(500).json({ error: 'Erro ao listar movimentações de vendas', details: String(err) });
   }
-  if (dataInicio) {
-    whereParts.push('v.data_venda >= ?');
-    params.push(dataInicio);
-  }
-  if (dataFim) {
-    whereParts.push('v.data_venda <= ?');
-    params.push(dataFim);
-  }
-  if (search.length >= 2) {
-    whereParts.push('(c.nome_cliente LIKE ? OR v.controle LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`);
-  }
-
-  if (formaPagto === 'dinheiro') {
-    whereParts.push('v.vr_dinheiro > 0');
-  } else if (formaPagto === 'cartao') {
-    whereParts.push('v.vr_cartao > 0');
-  } else if (formaPagto === 'pix') {
-    whereParts.push('v.vr_pix > 0');
-  } else if (formaPagto === 'prazo') {
-    whereParts.push('(v.vr_nota > 0 OR v.vr_carne > 0)');
-  } else if (formaPagto === 'outros') {
-    whereParts.push('(v.vr_ticket > 0 OR v.vr_outros > 0)');
-  }
-
-  const whereSql = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
-
-  const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total
-     FROM mv_vendas v
-     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-     ${whereSql}`,
-    params
-  );
-
-  const [rows] = await pool.query<any>(
-    `SELECT v.id, v.controle, v.data_venda, v.vr_total, v.id_caixa,
-            v.vr_dinheiro, v.vr_cartao, v.vr_pix, v.vr_nota, v.vr_carne, v.vr_ticket, v.vr_outros,
-            COALESCE(c.nome_cliente, 'Consumidor') as nome_cliente
-     FROM mv_vendas v
-     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-     ${whereSql}
-     ORDER BY v.id DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
-  );
-
-  res.json({
-    data: rows.map((r: any) => ({
-      ...r,
-      hora_venda: String(r.controle).slice(8, 10) + ':' + String(r.controle).slice(10, 12),
-      vr_total: Number(r.vr_total),
-      vr_dinheiro: Number(r.vr_dinheiro),
-      vr_cartao: Number(r.vr_cartao),
-      vr_pix: Number(r.vr_pix),
-      vr_prazo: Number(r.vr_nota + r.vr_carne),
-      vr_outros: Number(r.vr_ticket + r.vr_outros),
-    })),
-    total: Number(total),
-    pages: Math.ceil(total / limit),
-  });
 });
 
 router.get('/caixa/status', async (req, res) => {
@@ -446,7 +456,7 @@ router.get('/caixa/status', async (req, res) => {
        COALESCE(SUM(vr_dinheiro), 0) as vr_dinheiro,
        COALESCE(SUM(vr_cartao), 0) as vr_cartao,
        COALESCE(SUM(vr_pix), 0) as vr_pix,
-       COALESCE(SUM(vr_nota + vr_carne), 0) as vr_prazo,
+       COALESCE(SUM(COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)), 0) as vr_prazo,
        COALESCE(SUM(vr_ticket), 0) as vr_outros,
        COUNT(*) as qtd_vendas
      FROM mv_vendas
@@ -505,7 +515,7 @@ router.get('/caixa/:id/detalhes', async (req, res) => {
        COALESCE(SUM(vr_dinheiro), 0) as vr_dinheiro,
        COALESCE(SUM(vr_cartao), 0) as vr_cartao,
        COALESCE(SUM(vr_pix), 0) as vr_pix,
-       COALESCE(SUM(vr_nota + vr_carne), 0) as vr_prazo,
+       COALESCE(SUM(COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)), 0) as vr_prazo,
        COALESCE(SUM(vr_ticket), 0) as vr_outros,
        COUNT(*) as qtd_vendas
      FROM mv_vendas
@@ -630,7 +640,7 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
        COALESCE(SUM(vr_dinheiro),0) as vr_dinheiro,
        COALESCE(SUM(vr_cartao),0) as vr_cartao,
        COALESCE(SUM(vr_pix),0) as vr_pix,
-       COALESCE(SUM(vr_nota + vr_carne),0) as vr_prazo,
+       COALESCE(SUM(COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)),0) as vr_prazo,
        COALESCE(SUM(vr_ticket),0) as vr_outros,
        COUNT(*) as qtd_vendas
      FROM mv_vendas
