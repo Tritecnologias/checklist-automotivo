@@ -202,11 +202,8 @@ router.get('/', async (req: Request, res: Response) => {
       : tenantClause;
 
     const sql = `
-      SELECT o.*,
-             COALESCE(v.vr_total, o.total_amount) AS total_amount,
-             COALESCE(ABS(v.vr_adicional), o.discount_amount, 0) AS discount_amount
+      SELECT o.*
       FROM os_orders o
-      LEFT JOIN mv_vendas v ON v.controle = o.venda_controle
       ${whereStr}
       ORDER BY o.created_at DESC
       LIMIT 200
@@ -525,11 +522,8 @@ router.get('/:id', async (req: Request, res: Response) => {
   const user = req.user!;
   try {
     const [orders] = await pool.execute(
-      `SELECT o.*,
-              COALESCE(v.vr_total, o.total_amount) AS total_amount,
-              COALESCE(ABS(v.vr_adicional), o.discount_amount, 0) AS discount_amount
+      `SELECT o.*
        FROM os_orders o
-       LEFT JOIN mv_vendas v ON v.controle = o.venda_controle
        WHERE o.id = ?`,
       [req.params.id],
     );

@@ -18,6 +18,7 @@ import {
 import { api } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import type { OrderItem, CatalogItem } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -91,9 +92,12 @@ export default function OrderDetail() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
+
   // ── Queries ───────────────────────────────────────────────────────────────
   const { data: order, isLoading, isError } = useQuery({
-    queryKey: ['order', id],
+    queryKey: ['order', id, tid],
     queryFn: () => api.getOrder(id!),
     enabled: !!id,
   })

@@ -99,6 +99,47 @@ async function runMigrations() {
     console.log('[migration] os_orders.tenant_id adicionada (registros existentes → tenant 1)');
   }
 
+  // Índices para listagem e filtros rápidos em os_orders
+  try {
+    const [[{ cntIdx1 }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdx1 FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND INDEX_NAME = 'idx_os_orders_tenant_created'`
+    );
+    if (Number(cntIdx1) === 0) {
+      await pool.query('ALTER TABLE os_orders ADD INDEX idx_os_orders_tenant_created (tenant_id, created_at)');
+      console.log('[migration] Índice idx_os_orders_tenant_created adicionado');
+    }
+
+    const [[{ cntIdx2 }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdx2 FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND INDEX_NAME = 'idx_os_orders_tenant_status'`
+    );
+    if (Number(cntIdx2) === 0) {
+      await pool.query('ALTER TABLE os_orders ADD INDEX idx_os_orders_tenant_status (tenant_id, status, created_at)');
+      console.log('[migration] Índice idx_os_orders_tenant_status adicionado');
+    }
+
+    const [[{ cntIdx3 }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdx3 FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND INDEX_NAME = 'idx_os_orders_venda_controle'`
+    );
+    if (Number(cntIdx3) === 0) {
+      await pool.query('ALTER TABLE os_orders ADD INDEX idx_os_orders_venda_controle (venda_controle)');
+      console.log('[migration] Índice idx_os_orders_venda_controle adicionado');
+    }
+
+    // Sincroniza total_amount e discount_amount de OSs que foram faturadas anteriormente no PDV
+    await pool.query(`
+      UPDATE os_orders o
+      JOIN mv_vendas v ON v.controle = CONVERT(o.venda_controle USING latin1)
+      SET o.total_amount = v.vr_total,
+          o.discount_amount = COALESCE(ABS(v.vr_adicional), o.discount_amount, 0)
+      WHERE o.venda_controle IS NOT NULL AND o.total_amount = 0
+    `);
+  } catch (idxErr) {
+    console.warn('[migration] Aviso ao configurar índices/totais de os_orders:', idxErr);
+  }
+
   // Tabela tenants
   await pool.query(`
     CREATE TABLE IF NOT EXISTS \`tenants\` (

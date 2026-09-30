@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import type { Order } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -33,8 +34,10 @@ function StatCard({
 }
 
 export default function Dashboard() {
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
   const { data: orders = [], isLoading, isError, refetch } = useQuery({
-    queryKey: ['orders'],
+    queryKey: ['orders', tid],
     queryFn: () => api.listOrders(),
   })
 

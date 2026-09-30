@@ -1387,14 +1387,13 @@ router.get('/pdv/os-encerradas', async (req, res) => {
     const whereStr = 'WHERE ' + whereParts.join(' AND ') + tenantClause;
     const sql = `
       SELECT o.id, o.plate, o.model, o.mileage, o.status,
-             COALESCE(v.vr_total, o.total_amount) AS total_amount,
-             COALESCE(ABS(v.vr_adicional), o.discount_amount, 0) AS discount_amount,
+             o.total_amount,
+             o.discount_amount,
              o.labor_amount, o.created_at, o.updated_at, o.closed_at,
              o.venda_controle,
              o.client_id, o.client_name, o.client_phone, o.client_document,
              (SELECT COUNT(*) FROM os_order_items oi WHERE oi.order_id = o.id) AS total_itens
       FROM os_orders o
-      LEFT JOIN mv_vendas v ON v.controle = o.venda_controle
       ${whereStr}
       ORDER BY o.closed_at DESC, o.updated_at DESC
       LIMIT 50

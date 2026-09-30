@@ -7,11 +7,15 @@ import type {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const jwt = localStorage.getItem('erp_jwt_token')
+  const tenantRaw = localStorage.getItem('erp_current_tenant')
+  const tenantId = tenantRaw ? (JSON.parse(tenantRaw) as { id: number }).id : undefined
+
   const res = await fetch(`/api${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+      ...(tenantId ? { 'x-tenant-id': String(tenantId) } : {}),
       ...options?.headers,
     },
   })

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import type { Order, OrderStatus } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -27,6 +28,8 @@ const STATUS_TABS: { key: StatusFilter; label: string }[] = [
 export default function Orders() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatus] = useState<StatusFilter>('all')
 
@@ -45,7 +48,7 @@ export default function Orders() {
   const [lookupFeedback, setLookupFeedback] = useState<string | null>(null)
 
   const { data: orders = [], isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ['orders'],
+    queryKey: ['orders', tid],
     queryFn: () => api.listOrders(),
     staleTime: 30_000,
   })
@@ -229,11 +232,14 @@ export default function Orders() {
 
       {/* Table */}
       {isLoading ? (
-        <div className="py-32 text-center text-slate-500">Carregando…</div>
+        <div className="py-32 text-center text-slate-500">
+          <div className="inline-block animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full mb-3" />
+          <p>Carregando ordens de serviço…</p>
+        </div>
       ) : isError ? (
         <div className="py-32 text-center">
-          <p className="text-red-400 mb-4">Erro ao carregar ordens.</p>
-          <button onClick={() => refetch()} className="px-4 py-2 bg-blue-600 rounded-lg text-sm font-medium text-white">
+          <p className="text-red-400 mb-4">Erro ao carregar ordens de serviço.</p>
+          <button onClick={() => refetch()} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white transition-colors">
             Tentar novamente
           </button>
         </div>

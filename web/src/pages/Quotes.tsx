@@ -22,6 +22,7 @@ import {
 import { api } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import type { Order } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -63,9 +64,12 @@ export default function Quotes() {
   const [lookupLoading, setLookupLoading]   = useState(false)
   const [lookupFeedback, setLookupFeedback] = useState<string | null>(null)
 
+  const { currentTenant } = useAuth()
+  const tid = currentTenant?.id ?? null
+
   // Consulta de ordens
   const { data: orders = [], isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ['orders'],
+    queryKey: ['orders', tid],
     queryFn: () => api.listOrders(),
     staleTime: 30_000,
   })
