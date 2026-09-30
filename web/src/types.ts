@@ -24,6 +24,17 @@ export interface CaixaSession {
   terminal: string
   status_caixa: 'A' | 'F'
   nome_login?: string
+  nome_operador?: string
+  totais_por_forma?: {
+    dinheiro: number
+    cartao: number
+    pix: number
+    prazo: number
+    outros: number
+    total_vendas: number
+    qtd_vendas: number
+    saldo_esperado_dinheiro: number
+  }
 }
 
 export interface Venda {

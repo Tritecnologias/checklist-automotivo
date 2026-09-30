@@ -160,7 +160,12 @@ router.get('/caixa', async (req, res) => {
     `SELECT COUNT(*) as total FROM mv_caixa${tf}`, tp
   );
   const [rows] = await pool.query<any>(
-    `SELECT * FROM mv_caixa${tf} ORDER BY id DESC LIMIT ? OFFSET ?`,
+    `SELECT c.*,
+            COALESCE(u.nome, 'Operador') as nome_operador
+     FROM mv_caixa c
+     LEFT JOIN users u ON u.id = c.id_login
+     ${tf.replace(/tenant_id/g, 'c.tenant_id')}
+     ORDER BY c.id DESC LIMIT ? OFFSET ?`,
     [...tp, limit, offset]
   );
 
@@ -173,7 +178,135 @@ router.get('/caixa/status', async (req, res) => {
     `SELECT * FROM mv_caixa WHERE status_caixa = 'A'${tf} ORDER BY id DESC LIMIT 1`,
     tp
   );
-  res.json(row ?? null);
+  if (!row) {
+    res.json(null);
+    return;
+  }
+
+  // Calcula vendas acumuladas em tempo real da sessão do caixa aberto com isolamento estrito por loja
+  const [[totais]] = await pool.query<any>(
+    `SELECT 
+       COALESCE(SUM(vr_total), 0) as vr_total,
+       COALESCE(SUM(vr_dinheiro), 0) as vr_dinheiro,
+       COALESCE(SUM(vr_cartao), 0) as vr_cartao,
+       COALESCE(SUM(vr_pix), 0) as vr_pix,
+       COALESCE(SUM(vr_nota + vr_carne), 0) as vr_prazo,
+       COALESCE(SUM(vr_ticket), 0) as vr_outros,
+       COUNT(*) as qtd_vendas
+     FROM mv_vendas
+     WHERE tenant_id = ?
+       AND (
+         id_caixa = ?
+         OR (
+           id_caixa IS NULL 
+           AND data_venda >= ?
+           AND (
+             controle NOT REGEXP '^[0-9]{14}$'
+             OR STR_TO_DATE(controle, '%Y%m%d%H%i%s') >= STR_TO_DATE(CONCAT(?, ' ', ?), '%Y-%m-%d %H:%i:%s')
+           )
+         )
+       )`,
+    [row.tenant_id, row.id, row.data_abertura, row.data_abertura, row.hora_abertura]
+  );
+
+  const vrTotal = Number(totais?.vr_total || 0);
+  const vrDinheiro = Number(totais?.vr_dinheiro || 0);
+  const vrAbertura = Number(row.vr_abertura || 0);
+
+  res.json({
+    ...row,
+    vr_fechado_turno: vrTotal,
+    totais_por_forma: {
+      dinheiro: vrDinheiro,
+      cartao: Number(totais?.vr_cartao || 0),
+      pix: Number(totais?.vr_pix || 0),
+      prazo: Number(totais?.vr_prazo || 0),
+      outros: Number(totais?.vr_outros || 0),
+      total_vendas: vrTotal,
+      qtd_vendas: Number(totais?.qtd_vendas || 0),
+      saldo_esperado_dinheiro: vrAbertura + vrDinheiro,
+    }
+  });
+});
+
+router.get('/caixa/:id/detalhes', async (req, res) => {
+  const { clause: tf, params: tp } = getErpTenantFilter(req, true);
+  const [[caixa]] = await pool.query<any>(
+    `SELECT c.*, COALESCE(u.nome, 'Operador') as nome_operador
+     FROM mv_caixa c
+     LEFT JOIN users u ON u.id = c.id_login
+     WHERE c.id = ?${tf.replace(/tenant_id/g, 'c.tenant_id')} LIMIT 1`,
+    [req.params.id, ...tp]
+  );
+  if (!caixa) {
+    res.status(404).json({ message: 'Caixa não encontrado para esta loja' });
+    return;
+  }
+
+  const [[totais]] = await pool.query<any>(
+    `SELECT 
+       COALESCE(SUM(vr_total), 0) as vr_total,
+       COALESCE(SUM(vr_dinheiro), 0) as vr_dinheiro,
+       COALESCE(SUM(vr_cartao), 0) as vr_cartao,
+       COALESCE(SUM(vr_pix), 0) as vr_pix,
+       COALESCE(SUM(vr_nota + vr_carne), 0) as vr_prazo,
+       COALESCE(SUM(vr_ticket), 0) as vr_outros,
+       COUNT(*) as qtd_vendas
+     FROM mv_vendas
+     WHERE tenant_id = ?
+       AND (
+         id_caixa = ?
+         OR (
+           id_caixa IS NULL 
+           AND data_venda = ?
+           AND turno = ?
+           AND terminal = ?
+         )
+       )`,
+    [caixa.tenant_id, caixa.id, caixa.data_abertura, caixa.turno, caixa.terminal]
+  );
+
+  const [vendas] = await pool.query<any>(
+    `SELECT v.id, v.controle, v.data_venda, v.vr_total, v.vr_dinheiro, v.vr_cartao, v.vr_pix, v.vr_nota,
+            COALESCE(c.nome_cliente, 'Consumidor') as nome_cliente
+     FROM mv_vendas v
+     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+     WHERE v.tenant_id = ?
+       AND (
+         v.id_caixa = ?
+         OR (
+           v.id_caixa IS NULL 
+           AND v.data_venda = ?
+           AND v.turno = ?
+           AND v.terminal = ?
+         )
+       )
+     ORDER BY v.id DESC LIMIT 50`,
+    [caixa.tenant_id, caixa.id, caixa.data_abertura, caixa.turno, caixa.terminal]
+  );
+
+  const vrTotal = Number(totais?.vr_total || caixa.vr_fechado_turno || 0);
+  const vrDinheiro = Number(totais?.vr_dinheiro || 0);
+  const vrAbertura = Number(caixa.vr_abertura || 0);
+  const vrFechamento = Number(caixa.vr_fechamento || 0);
+  const saldoEsperado = vrAbertura + vrDinheiro;
+  const diferenca = caixa.status_caixa === 'F' ? (vrFechamento - saldoEsperado) : 0;
+
+  res.json({
+    caixa,
+    totais: {
+      total_vendas: vrTotal,
+      dinheiro: vrDinheiro,
+      cartao: Number(totais?.vr_cartao || 0),
+      pix: Number(totais?.vr_pix || 0),
+      prazo: Number(totais?.vr_prazo || 0),
+      outros: Number(totais?.vr_outros || 0),
+      qtd_vendas: Number(totais?.qtd_vendas || 0),
+      saldo_esperado_dinheiro: saldoEsperado,
+      diferenca_caixa: diferenca
+    },
+    vendas
+  });
 });
 
 router.post('/caixa/abrir', async (req, res) => {
@@ -209,7 +342,7 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
 
   // garante que o caixa pertence ao tenant do usuário logado
   const [[caixaRow]] = await pool.query<any>(
-    `SELECT id FROM mv_caixa WHERE id = ?${tf} LIMIT 1`,
+    `SELECT * FROM mv_caixa WHERE id = ?${tf} LIMIT 1`,
     [req.params.id, ...tp]
   );
   if (!caixaRow) {
@@ -221,19 +354,51 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
   const hora = now.toTimeString().slice(0, 8);
   const data = now.toISOString().slice(0, 10);
 
-  const [[totals]] = await pool.query<any>(
-    `SELECT COALESCE(SUM(vr_total),0) as vr_fechado_turno
-     FROM mv_vendas v
-     JOIN mv_caixa c ON c.id = ? AND v.data_venda = c.data_abertura AND v.turno = c.turno AND v.terminal = c.terminal`,
-    [req.params.id]
+  // Associa vendas pendentes desta sessão que ainda não tinham id_caixa gravado
+  await pool.query(
+    `UPDATE mv_vendas
+     SET id_caixa = ?
+     WHERE tenant_id = ?
+       AND id_caixa IS NULL
+       AND data_venda >= ?
+       AND (
+         controle NOT REGEXP '^[0-9]{14}$'
+         OR STR_TO_DATE(controle, '%Y%m%d%H%i%s') >= STR_TO_DATE(CONCAT(?, ' ', ?), '%Y-%m-%d %H:%i:%s')
+       )`,
+    [caixaRow.id, caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.data_abertura, caixaRow.hora_abertura]
   );
+
+  const [[totals]] = await pool.query<any>(
+    `SELECT 
+       COALESCE(SUM(vr_total),0) as vr_fechado_turno,
+       COALESCE(SUM(vr_dinheiro),0) as vr_dinheiro,
+       COALESCE(SUM(vr_cartao),0) as vr_cartao,
+       COALESCE(SUM(vr_pix),0) as vr_pix,
+       COALESCE(SUM(vr_nota + vr_carne),0) as vr_prazo,
+       COALESCE(SUM(vr_ticket),0) as vr_outros,
+       COUNT(*) as qtd_vendas
+     FROM mv_vendas
+     WHERE tenant_id = ?
+       AND (
+         id_caixa = ?
+         OR (
+           id_caixa IS NULL
+           AND data_venda = ?
+           AND turno = ?
+           AND terminal = ?
+         )
+       )`,
+    [caixaRow.tenant_id, caixaRow.id, caixaRow.data_abertura, caixaRow.turno, caixaRow.terminal]
+  );
+
+  const totalVendas = Number(totals?.vr_fechado_turno || 0);
 
   await pool.query(
     `UPDATE mv_caixa SET status_caixa='F', hora_fechamento=?, data_fechamento=?,
-      vr_fechamento=?, vr_fechado_turno=? WHERE id=?`,
-    [hora, data, vr_fechamento, Number(totals.vr_fechado_turno), req.params.id]
+      vr_fechamento=?, vr_fechado_turno=? WHERE id=? AND tenant_id=?`,
+    [hora, data, vr_fechamento, totalVendas, req.params.id, caixaRow.tenant_id]
   );
-  res.json({ ok: true });
+  res.json({ ok: true, vr_fechado_turno: totalVendas, totais: totals });
 });
 
 // ── VENDAS ───────────────────────────────────────────────────────────────────
@@ -414,16 +579,25 @@ router.post('/vendas', async (req, res) => {
       }
     }
 
+    // Busca o caixa aberto no momento para a loja atual para vincular diretamente
+    const [[caixaAberto]] = await pool.query<any>(
+      `SELECT id, turno, terminal FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
+      [tenantId]
+    );
+    const id_caixa = caixaAberto?.id ?? null;
+    const finalTurno = caixaAberto?.turno ?? turno;
+    const finalTerminal = caixaAberto?.terminal ?? terminal;
+
     const [vendaResult] = await pool.query<any>(
       `INSERT INTO mv_vendas
          (controle, data_venda, parcelas, id_cliente, id_cliente_convenio,
           id_login, terminal, turno, vr_total, vr_adicional,
           vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket, vr_pix, vr_nota,
-          em_aberto, vr_pagto_parcial, cod_lancamento, tenant_id)
-       VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`,
-      [controle, data_venda, parcelas, finalClienteId, id_login, terminal, turno,
+          em_aberto, vr_pagto_parcial, cod_lancamento, tenant_id, id_caixa)
+       VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
+      [controle, data_venda, parcelas, finalClienteId, id_login, finalTerminal, finalTurno,
        vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, finalVrTicket, vr_pix, vr_nota,
-       em_aberto, codLancamento, tenantId]
+       em_aberto, codLancamento, tenantId, id_caixa]
     );
     const id_venda = vendaResult.insertId;
 

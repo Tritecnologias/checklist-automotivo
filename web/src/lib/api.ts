@@ -126,6 +126,21 @@ export const erpApi = {
 
   caixaStatus: () => adminRequest<CaixaSession | null>('/erp/caixa/status'),
   caixaList: (page = 1) => adminRequest<{ data: CaixaSession[]; total: number; pages: number }>(`/erp/caixa?page=${page}`),
+  caixaDetalhes: (id: number) => adminRequest<{
+    caixa: CaixaSession
+    totais: {
+      total_vendas: number
+      dinheiro: number
+      cartao: number
+      pix: number
+      prazo: number
+      outros: number
+      qtd_vendas: number
+      saldo_esperado_dinheiro: number
+      diferenca_caixa: number
+    }
+    vendas: any[]
+  }>(`/erp/caixa/${id}/detalhes`),
   caixaAbrir: (data: { vr_abertura?: number }) =>
     adminRequest<{ id: number }>('/erp/caixa/abrir', { method: 'POST', body: JSON.stringify(data) }),
   caixaFechar: (id: number, data: { vr_fechamento?: number }) =>

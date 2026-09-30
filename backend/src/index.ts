@@ -190,6 +190,16 @@ async function runMigrations() {
     console.log('[migration] mv_vendas.tenant_id adicionada (registros existentes → tenant 1)');
   }
 
+  // id_caixa em mv_vendas (vínculo direto com a sessão do caixa)
+  const [[{ cntCaixaCol }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntCaixaCol FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_vendas' AND COLUMN_NAME = 'id_caixa'`
+  );
+  if (Number(cntCaixaCol) === 0) {
+    await pool.query('ALTER TABLE mv_vendas ADD COLUMN id_caixa INT NULL, ADD INDEX idx_mv_vendas_id_caixa (id_caixa)');
+    console.log('[migration] mv_vendas.id_caixa adicionada');
+  }
+
   // Sincroniza tenant_id em vendas e lançamentos financeiros legados baseados na OS de origem
   try {
     await pool.query(`
@@ -204,8 +214,42 @@ async function runMigrations() {
       SET l.tenant_id = v.tenant_id
       WHERE v.tenant_id IS NOT NULL AND l.tenant_id = 1
     `);
+
+    // Sincroniza id_caixa para vendas antigas onde houve caixa único no dia para o tenant
+    await pool.query(`
+      UPDATE mv_vendas v
+      JOIN mv_caixa c ON c.tenant_id = v.tenant_id
+        AND v.data_venda = c.data_abertura
+      SET v.id_caixa = c.id
+      WHERE v.id_caixa IS NULL
+        AND (
+          SELECT COUNT(*) FROM (SELECT id, tenant_id, data_abertura FROM mv_caixa) c2
+          WHERE c2.tenant_id = v.tenant_id AND c2.data_abertura = v.data_venda
+        ) = 1
+    `);
+
+    // Recalcula vr_fechado_turno de caixas fechados aplicando isolamento multi-tenant
+    await pool.query(`
+      UPDATE mv_caixa c
+      SET vr_fechado_turno = COALESCE((
+        SELECT SUM(v.vr_total)
+        FROM mv_vendas v
+        WHERE v.tenant_id = c.tenant_id
+          AND (
+            v.id_caixa = c.id
+            OR (
+              v.id_caixa IS NULL
+              AND v.data_venda = c.data_abertura
+              AND v.turno = c.turno
+              AND v.terminal = c.terminal
+            )
+          )
+      ), 0)
+      WHERE c.status_caixa = 'F'
+    `);
+    console.log('[migration] Histórico de caixas e id_caixa sincronizados com sucesso');
   } catch (syncErr) {
-    console.warn('[migration] Aviso ao sincronizar tenant_id de vendas/lançamentos:', syncErr);
+    console.warn('[migration] Aviso ao sincronizar tenant_id/caixa de vendas/lançamentos:', syncErr);
   }
 
   // Adiciona role 'caixa' ao ENUM se ainda não existir
