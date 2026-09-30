@@ -209,6 +209,7 @@ router.get('/caixa', async (req, res) => {
 
     const sessionIds = rows.map((r: any) => r.id);
     const sessionBreakdownMap: Record<number, any> = {};
+    const sessionExpensesMap: Record<number, any> = {};
 
     if (sessionIds.length > 0) {
       const placeholders = sessionIds.map(() => '?').join(',');
@@ -232,11 +233,38 @@ router.get('/caixa', async (req, res) => {
       for (const b of breakdowns) {
         sessionBreakdownMap[b.id_caixa] = b;
       }
+
+      // Agrega despesas (contas a pagar quitadas) na data da abertura da sessão de caixa
+      const [despesasRows] = await pool.query<any>(
+        `SELECT 
+           c.id as id_caixa,
+           COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
+           COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+           COUNT(l.id) as qtd_despesas
+         FROM mv_caixa c
+         LEFT JOIN cad_lancamentos l ON (
+           l.tenant_id = c.tenant_id
+           AND l.status_lancamento = 1
+           AND (COALESCE(l.data_confirmacao, l.data_vencimento) = c.data_abertura OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(c.data_abertura))
+         )
+         LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+         WHERE c.id IN (${placeholders})
+           AND (l.id IS NULL OR (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)))
+         GROUP BY c.id`,
+        sessionIds
+      );
+
+      for (const d of despesasRows) {
+        sessionExpensesMap[d.id_caixa] = d;
+      }
     }
 
     const enrichedRows = rows.map((c: any) => {
       const s = sessionBreakdownMap[c.id];
+      const d = sessionExpensesMap[c.id];
       const totalVendas = Number(s?.vr_total || c.vr_fechado_turno || 0);
+      const totalDespesas = Number(d?.total_despesas || 0);
+      const despesasDinheiro = Number(d?.despesas_dinheiro || 0);
       const vrDinheiro = Number(s?.vr_dinheiro || 0);
       const vrCartao = Number(s?.vr_cartao || 0);
       const vrPix = Number(s?.vr_pix || 0);
@@ -244,12 +272,16 @@ router.get('/caixa', async (req, res) => {
       const vrOutros = Number(s?.vr_outros || 0);
       const vrAbertura = Number(c.vr_abertura || 0);
       const vrFechamento = Number(c.vr_fechamento || 0);
-      const saldoEsperado = vrAbertura + vrDinheiro;
+      const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - despesasDinheiro);
+      const saldoLiquido = totalVendas - totalDespesas;
       const diferenca = c.status_caixa === 'F' && c.vr_fechamento !== null ? (vrFechamento - saldoEsperado) : 0;
 
       return {
         ...c,
         vr_fechado_turno: totalVendas,
+        total_despesas: totalDespesas,
+        despesas_dinheiro: despesasDinheiro,
+        saldo_liquido: saldoLiquido,
         saldo_esperado_dinheiro: saldoEsperado,
         diferenca_caixa: diferenca,
         totais_por_forma: {
@@ -259,7 +291,11 @@ router.get('/caixa', async (req, res) => {
           prazo: vrPrazo,
           outros: vrOutros,
           total_vendas: totalVendas,
+          total_despesas: totalDespesas,
+          despesas_dinheiro: despesasDinheiro,
+          saldo_liquido: saldoLiquido,
           qtd_vendas: Number(s?.qtd_vendas || 0),
+          qtd_despesas: Number(d?.qtd_despesas || 0),
         }
       };
     });
@@ -330,12 +366,52 @@ router.get('/caixa', async (req, res) => {
     else if (formaPagto === 'prazo') valorFiltrado = Number(totaisVendas?.prazo || 0);
     else if (formaPagto === 'outros') valorFiltrado = Number(totaisVendas?.outros || 0);
 
+    // Agrega despesas do período (contas a pagar quitadas)
+    const { condition: dTenantCond, params: dTenantParams } = getErpTenantCondition(req, 'l.tenant_id');
+    const dWhereParts: string[] = [
+      'l.status_lancamento = 1',
+      "(pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))"
+    ];
+    const dParams: any[] = [];
+    if (dTenantCond) {
+      dWhereParts.push(dTenantCond);
+      dParams.push(...dTenantParams);
+    }
+    if (dataInicio) {
+      dWhereParts.push('(COALESCE(l.data_confirmacao, l.data_vencimento) >= ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) >= ?)');
+      dParams.push(dataInicio, dataInicio);
+    }
+    if (dataFim) {
+      dWhereParts.push("(COALESCE(l.data_confirmacao, l.data_vencimento) <= ? OR COALESCE(l.data_confirmacao, l.data_vencimento) <= CONCAT(?, ' 23:59:59'))");
+      dParams.push(dataFim, dataFim);
+    }
+    const dWhereSql = 'WHERE ' + dWhereParts.join(' AND ');
+
+    const [[totaisDespesasPeriodo]] = await pool.query<any>(
+      `SELECT 
+         COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+         COUNT(l.id) as qtd_despesas
+       FROM cad_lancamentos l
+       LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+       ${dWhereSql}`,
+      dParams
+    );
+
+    const totalVendasPeriodo = Number(totaisVendas?.total_vendas || 0);
+    const totalDespesasPeriodo = Number(totaisDespesasPeriodo?.total_despesas || 0);
+    const despesasDinheiroPeriodo = Number(totaisDespesasPeriodo?.despesas_dinheiro || 0);
+    const saldoLiquidoPeriodo = totalVendasPeriodo - totalDespesasPeriodo;
+
     res.json({
       data: enrichedRows,
       total: Number(total),
       pages: Math.ceil(total / limit),
       totais: {
-        total_vendas: Number(totaisVendas?.total_vendas || 0),
+        total_vendas: totalVendasPeriodo,
+        total_despesas: totalDespesasPeriodo,
+        despesas_dinheiro: despesasDinheiroPeriodo,
+        saldo_liquido: saldoLiquidoPeriodo,
         dinheiro: Number(totaisVendas?.dinheiro || 0),
         cartao: Number(totaisVendas?.cartao || 0),
         pix: Number(totaisVendas?.pix || 0),
@@ -344,6 +420,7 @@ router.get('/caixa', async (req, res) => {
         total_fundo: Number(totaisCaixas?.total_fundo || 0),
         total_conferido: Number(totaisCaixas?.total_conferido || 0),
         qtd_vendas: Number(totaisVendas?.qtd_vendas || 0),
+        qtd_despesas: Number(totaisDespesasPeriodo?.qtd_despesas || 0),
         qtd_sessoes: Number(totaisCaixas?.qtd_sessoes || 0),
         valor_filtrado: valorFiltrado,
       }
@@ -475,13 +552,36 @@ router.get('/caixa/status', async (req, res) => {
     [row.tenant_id, row.id, row.data_abertura, row.data_abertura, row.hora_abertura]
   );
 
+  // Agrega despesas (contas a pagar quitadas) vinculadas à data da sessão de caixa atual
+  const [[despesasStatus]] = await pool.query<any>(
+    `SELECT 
+       COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
+       COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+       COUNT(l.id) as qtd_despesas
+     FROM cad_lancamentos l
+     LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+     WHERE l.tenant_id = ?
+       AND l.status_lancamento = 1
+       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+       AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))`,
+    [row.tenant_id, row.data_abertura, row.data_abertura]
+  );
+
   const vrTotal = Number(totais?.vr_total || 0);
   const vrDinheiro = Number(totais?.vr_dinheiro || 0);
   const vrAbertura = Number(row.vr_abertura || 0);
+  const totalDespesas = Number(despesasStatus?.total_despesas || 0);
+  const despesasDinheiro = Number(despesasStatus?.despesas_dinheiro || 0);
+  const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - despesasDinheiro);
+  const saldoLiquido = vrTotal - totalDespesas;
 
   res.json({
     ...row,
     vr_fechado_turno: vrTotal,
+    total_despesas: totalDespesas,
+    despesas_dinheiro: despesasDinheiro,
+    saldo_liquido: saldoLiquido,
+    saldo_esperado_dinheiro: saldoEsperado,
     totais_por_forma: {
       dinheiro: vrDinheiro,
       cartao: Number(totais?.vr_cartao || 0),
@@ -489,8 +589,12 @@ router.get('/caixa/status', async (req, res) => {
       prazo: Number(totais?.vr_prazo || 0),
       outros: Number(totais?.vr_outros || 0),
       total_vendas: vrTotal,
+      total_despesas: totalDespesas,
+      despesas_dinheiro: despesasDinheiro,
+      saldo_liquido: saldoLiquido,
       qtd_vendas: Number(totais?.qtd_vendas || 0),
-      saldo_esperado_dinheiro: vrAbertura + vrDinheiro,
+      qtd_despesas: Number(despesasStatus?.qtd_despesas || 0),
+      saldo_esperado_dinheiro: saldoEsperado,
     }
   });
 });
@@ -551,27 +655,65 @@ router.get('/caixa/:id/detalhes', async (req, res) => {
     [caixa.tenant_id, caixa.id, caixa.data_abertura, caixa.turno, caixa.terminal]
   );
 
+  const [[despesasDetalhes]] = await pool.query<any>(
+    `SELECT 
+       COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
+       COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+       COUNT(l.id) as qtd_despesas
+     FROM cad_lancamentos l
+     LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+     WHERE l.tenant_id = ?
+       AND l.status_lancamento = 1
+       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+       AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))`,
+    [caixa.tenant_id, caixa.data_abertura, caixa.data_abertura]
+  );
+
+  const [despesasRows] = await pool.query<any>(
+    `SELECT l.id, l.documento, l.historico, l.favorecido,
+            COALESCE(l.data_confirmacao, l.data_vencimento) as data_pagamento,
+            (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) as valor,
+            l.id_modo_lancamento, m.modo_lancamento
+     FROM cad_lancamentos l
+     LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+     LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
+     WHERE l.tenant_id = ?
+       AND l.status_lancamento = 1
+       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+       AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
+     ORDER BY l.id DESC LIMIT 50`,
+    [caixa.tenant_id, caixa.data_abertura, caixa.data_abertura]
+  );
+
   const vrTotal = Number(totais?.vr_total || caixa.vr_fechado_turno || 0);
   const vrDinheiro = Number(totais?.vr_dinheiro || 0);
   const vrAbertura = Number(caixa.vr_abertura || 0);
   const vrFechamento = Number(caixa.vr_fechamento || 0);
-  const saldoEsperado = vrAbertura + vrDinheiro;
+  const totalDespesas = Number(despesasDetalhes?.total_despesas || 0);
+  const despesasDinheiro = Number(despesasDetalhes?.despesas_dinheiro || 0);
+  const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - despesasDinheiro);
+  const saldoLiquido = vrTotal - totalDespesas;
   const diferenca = caixa.status_caixa === 'F' ? (vrFechamento - saldoEsperado) : 0;
 
   res.json({
     caixa,
     totais: {
       total_vendas: vrTotal,
+      total_despesas: totalDespesas,
+      despesas_dinheiro: despesasDinheiro,
+      saldo_liquido: saldoLiquido,
       dinheiro: vrDinheiro,
       cartao: Number(totais?.vr_cartao || 0),
       pix: Number(totais?.vr_pix || 0),
       prazo: Number(totais?.vr_prazo || 0),
       outros: Number(totais?.vr_outros || 0),
       qtd_vendas: Number(totais?.qtd_vendas || 0),
+      qtd_despesas: Number(despesasDetalhes?.qtd_despesas || 0),
       saldo_esperado_dinheiro: saldoEsperado,
       diferenca_caixa: diferenca
     },
-    vendas
+    vendas,
+    despesas: despesasRows
   });
 });
 
@@ -657,14 +799,48 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
     [caixaRow.tenant_id, caixaRow.id, caixaRow.data_abertura, caixaRow.turno, caixaRow.terminal]
   );
 
+  const [[despesasFechar]] = await pool.query<any>(
+    `SELECT 
+       COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
+       COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+       COUNT(l.id) as qtd_despesas
+     FROM cad_lancamentos l
+     LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+     WHERE l.tenant_id = ?
+       AND l.status_lancamento = 1
+       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+       AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))`,
+    [caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.data_abertura]
+  );
+
   const totalVendas = Number(totals?.vr_fechado_turno || 0);
+  const vrAbertura = Number(caixaRow.vr_abertura || 0);
+  const vrDinheiro = Number(totals?.vr_dinheiro || 0);
+  const totalDespesas = Number(despesasFechar?.total_despesas || 0);
+  const despesasDinheiro = Number(despesasFechar?.despesas_dinheiro || 0);
+  const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - despesasDinheiro);
+  const saldoLiquido = totalVendas - totalDespesas;
 
   await pool.query(
     `UPDATE mv_caixa SET status_caixa='F', hora_fechamento=?, data_fechamento=?,
       vr_fechamento=?, vr_fechado_turno=? WHERE id=? AND tenant_id=?`,
     [hora, data, vr_fechamento, totalVendas, req.params.id, caixaRow.tenant_id]
   );
-  res.json({ ok: true, vr_fechado_turno: totalVendas, totais: totals });
+  res.json({
+    ok: true,
+    vr_fechado_turno: totalVendas,
+    total_despesas: totalDespesas,
+    despesas_dinheiro: despesasDinheiro,
+    saldo_liquido: saldoLiquido,
+    saldo_esperado_dinheiro: saldoEsperado,
+    totais: {
+      ...totals,
+      total_despesas: totalDespesas,
+      despesas_dinheiro: despesasDinheiro,
+      saldo_liquido: saldoLiquido,
+      saldo_esperado_dinheiro: saldoEsperado,
+    }
+  });
 });
 
 // ── VENDAS ───────────────────────────────────────────────────────────────────
@@ -1056,9 +1232,9 @@ router.get('/contas', requireManagerUp, async (req, res) => {
     const [[totaisRow]] = await pool.query<any>(
       `SELECT
          COUNT(*) as total_count,
-         COALESCE(SUM(l.vr_parcela - l.vr_abatimentos), 0) as total_valor,
-         COALESCE(SUM(CASE WHEN l.status_lancamento = 1 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_recebido,
-         COALESCE(SUM(CASE WHEN l.status_lancamento = 0 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_pendente,
+         COALESCE(SUM(CASE WHEN (l.id_modo_lancamento IN (1, 4, 5, 6, 7, 9, 10, 11)) THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_valor,
+         COALESCE(SUM(CASE WHEN l.status_lancamento = 1 AND (l.id_modo_lancamento IN (1, 4, 5, 6, 7, 9, 10, 11)) THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_recebido,
+         COALESCE(SUM(CASE WHEN l.status_lancamento = 0 AND (l.id_modo_lancamento IN (1, 4, 5, 6, 7, 9, 10, 11)) THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_pendente,
          COALESCE(SUM(CASE WHEN l.status_lancamento = 0 AND l.data_vencimento < CURDATE() THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_vencido,
          COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_dinheiro,
          COALESCE(SUM(CASE WHEN l.id_modo_lancamento IN (6, 7) THEN (l.vr_parcela - l.vr_abatimentos) ELSE 0 END), 0) as total_cartao,

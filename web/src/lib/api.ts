@@ -168,16 +168,21 @@ export const erpApi = {
     caixa: CaixaSession
     totais: {
       total_vendas: number
+      total_despesas?: number
+      despesas_dinheiro?: number
+      saldo_liquido?: number
       dinheiro: number
       cartao: number
       pix: number
       prazo: number
       outros: number
       qtd_vendas: number
+      qtd_despesas?: number
       saldo_esperado_dinheiro: number
       diferenca_caixa: number
     }
     vendas: any[]
+    despesas?: any[]
   }>(`/erp/caixa/${id}/detalhes`),
   caixaAbrir: (data: { vr_abertura?: number }) =>
     adminRequest<{ id: number }>('/erp/caixa/abrir', { method: 'POST', body: JSON.stringify(data) }),

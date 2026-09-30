@@ -5,7 +5,7 @@ import type { CaixaSession, Venda } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import {
   Calendar, Filter, X, CreditCard, Banknote, Zap,
-  FileText, Ticket, Layers, Search, DollarSign, CheckCircle2
+  FileText, Ticket, Layers, Search, DollarSign, CheckCircle2, TrendingDown
 } from 'lucide-react'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -188,10 +188,38 @@ export default function Caixa() {
   // Cálculos em tempo real para o caixa aberto
   const esperadoDinheiro = useMemo(() => {
     if (!status) return 0
+    if (status.saldo_esperado_dinheiro !== undefined) {
+      return Number(status.saldo_esperado_dinheiro)
+    }
     const fundo = Number(status.vr_abertura || 0)
     const vendasDinheiro = Number(status.totais_por_forma?.dinheiro || 0)
-    return fundo + vendasDinheiro
+    const despesasDinheiro = Number(status.despesas_dinheiro ?? status.totais_por_forma?.despesas_dinheiro ?? 0)
+    return Math.max(0, fundo + vendasDinheiro - despesasDinheiro)
   }, [status])
+
+  const totalVendasSessao = useMemo(() => {
+    if (!status) return 0
+    if (status.totais_por_forma) {
+      return (
+        (Number(status.totais_por_forma.dinheiro) || 0) +
+        (Number(status.totais_por_forma.cartao) || 0) +
+        (Number(status.totais_por_forma.pix) || 0) +
+        (Number(status.totais_por_forma.prazo) || 0)
+      )
+    }
+    return Number(status.vr_fechado_turno || 0)
+  }, [status])
+
+  const totalDespesasSessao = useMemo(() => {
+    if (!status) return 0
+    return Number(status.total_despesas ?? status.totais_por_forma?.total_despesas ?? 0)
+  }, [status])
+
+  const saldoLiquidoSessao = useMemo(() => {
+    if (!status) return 0
+    if (status.saldo_liquido !== undefined) return Number(status.saldo_liquido)
+    return totalVendasSessao - totalDespesasSessao
+  }, [status, totalVendasSessao, totalDespesasSessao])
 
   const fechamentoNum = parseFloat(vrFechamento.replace(',', '.')) || 0
   const temValorDigitado = vrFechamento.trim() !== ''
@@ -249,40 +277,51 @@ export default function Caixa() {
             </div>
 
             {/* KPI Cards do Caixa Aberto */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
                 <p className="text-xs text-slate-400 font-medium">Abertura</p>
                 <p className="text-lg font-bold text-white mt-0.5">{status.hora_abertura}</p>
-                <p className="text-xs text-slate-500">{fmtDate(status.data_abertura)}</p>
+                <p className="text-[11px] text-slate-500">{fmtDate(status.data_abertura)}</p>
               </div>
 
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
                 <p className="text-xs text-slate-400 font-medium">Fundo de Caixa</p>
                 <p className="text-lg font-bold text-white mt-0.5">{R(Number(status.vr_abertura))}</p>
-                <p className="text-xs text-slate-500">Valor inicial em gaveta</p>
+                <p className="text-[11px] text-slate-500">Inicial na gaveta</p>
               </div>
 
-              <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-xl p-3.5">
+              <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-xl p-3">
                 <p className="text-xs text-emerald-300 font-medium">Total em Vendas</p>
                 <p className="text-lg font-bold text-emerald-400 mt-0.5">
-                  {R(
-                    status.totais_por_forma
-                      ? ((Number(status.totais_por_forma.dinheiro) || 0) +
-                         (Number(status.totais_por_forma.cartao) || 0) +
-                         (Number(status.totais_por_forma.pix) || 0) +
-                         (Number(status.totais_por_forma.prazo) || 0))
-                      : Number(status.vr_fechado_turno || 0)
-                  )}
+                  {R(totalVendasSessao)}
                 </p>
-                <p className="text-xs text-emerald-400/70">
-                  {status.totais_por_forma?.qtd_vendas ?? 0} {status.totais_por_forma?.qtd_vendas === 1 ? 'venda' : 'vendas'} nesta sessão
+                <p className="text-[11px] text-emerald-400/70">
+                  {status.totais_por_forma?.qtd_vendas ?? 0} {status.totais_por_forma?.qtd_vendas === 1 ? 'venda' : 'vendas'} (sem outros)
                 </p>
               </div>
 
-              <div className="bg-blue-950/30 border border-blue-800/40 rounded-xl p-3.5">
+              <div className="bg-rose-950/30 border border-rose-800/40 rounded-xl p-3">
+                <p className="text-xs text-rose-300 font-medium">Despesas (Saídas)</p>
+                <p className="text-lg font-bold text-rose-400 mt-0.5">
+                  {R(totalDespesasSessao)}
+                </p>
+                <p className="text-[11px] text-rose-400/70">
+                  {status.totais_por_forma?.qtd_despesas ?? 0} contas ({R(Number(status.despesas_dinheiro ?? status.totais_por_forma?.despesas_dinheiro ?? 0))} em esp.)
+                </p>
+              </div>
+
+              <div className="bg-teal-950/30 border border-teal-800/40 rounded-xl p-3">
+                <p className="text-xs text-teal-300 font-medium">Saldo Líquido</p>
+                <p className="text-lg font-bold text-teal-400 mt-0.5">
+                  {R(saldoLiquidoSessao)}
+                </p>
+                <p className="text-[11px] text-teal-400/70">Vendas − Despesas</p>
+              </div>
+
+              <div className="bg-blue-950/30 border border-blue-800/40 rounded-xl p-3">
                 <p className="text-xs text-blue-300 font-medium">Esperado em Dinheiro</p>
                 <p className="text-lg font-bold text-blue-400 mt-0.5">{R(esperadoDinheiro)}</p>
-                <p className="text-xs text-blue-400/70">Fundo + Vendas em espécie</p>
+                <p className="text-[11px] text-blue-400/70">Gaveta (Fundo + Dinheiro − Saídas)</p>
               </div>
             </div>
 
@@ -321,7 +360,7 @@ export default function Caixa() {
               <div>
                 <p className="text-sm font-medium text-white mb-1">Fechamento de Caixa</p>
                 <p className="text-xs text-slate-400">
-                  Informe o valor físico em dinheiro contado na gaveta. O valor esperado é de <strong>{R(esperadoDinheiro)}</strong>.
+                  Informe o valor físico em dinheiro contado na gaveta. O valor esperado é de <strong>{R(esperadoDinheiro)}</strong> (Fundo de Caixa + Vendas em espécie − Despesas pagas em dinheiro).
                 </p>
               </div>
 
@@ -542,7 +581,49 @@ export default function Caixa() {
 
       {/* ── CARDS DE TOTAIS DO PERÍODO (INTERATIVOS) ── */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
-        <div className="flex items-center justify-between flex-wrap gap-2">
+        {/* Resumo Consolidado do Período */}
+        {totaisPeriodo && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pb-2 border-b border-slate-800/70">
+            <div className="bg-slate-950/70 border border-slate-800/90 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Total em Vendas</span>
+                <p className="text-lg font-bold text-emerald-400 mt-0.5">{R(totalVendasPeriodo)}</p>
+                <span className="text-[10px] text-slate-500">{totaisPeriodo.qtd_vendas ?? 0} vendas no período (sem outros)</span>
+              </div>
+              <div className="w-9 h-9 rounded-lg bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center text-emerald-400">
+                <DollarSign className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-slate-950/70 border border-slate-800/90 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-rose-400 font-semibold uppercase tracking-wider">Contas a Pagar (Despesas)</span>
+                <p className="text-lg font-bold text-rose-400 mt-0.5">{R(Number(totaisPeriodo.total_despesas ?? 0))}</p>
+                <span className="text-[10px] text-rose-400/80">
+                  {totaisPeriodo.qtd_despesas ?? 0} contas pagas ({R(Number(totaisPeriodo.despesas_dinheiro ?? 0))} em espécie)
+                </span>
+              </div>
+              <div className="w-9 h-9 rounded-lg bg-rose-950/60 border border-rose-800/60 flex items-center justify-center text-rose-400">
+                <TrendingDown className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-slate-950/70 border border-slate-800/90 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-teal-400 font-semibold uppercase tracking-wider">Saldo Líquido do Caixa</span>
+                <p className="text-lg font-bold text-teal-400 mt-0.5">
+                  {R(Number(totaisPeriodo.saldo_liquido ?? (totalVendasPeriodo - Number(totaisPeriodo.total_despesas ?? 0))))}
+                </p>
+                <span className="text-[10px] text-teal-400/80">Vendas − Contas a Pagar</span>
+              </div>
+              <div className="w-9 h-9 rounded-lg bg-teal-950/60 border border-teal-800/60 flex items-center justify-center text-teal-400">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
               <CreditCard className="w-4 h-4 text-emerald-400" />
@@ -744,6 +825,8 @@ export default function Caixa() {
                     <th className="px-5 py-3">Operador</th>
                     <th className="px-5 py-3 text-right">Fundo</th>
                     <th className="px-5 py-3 text-right">Total Vendas</th>
+                    <th className="px-5 py-3 text-right text-rose-400">Despesas</th>
+                    <th className="px-5 py-3 text-right text-teal-400">Saldo Líquido</th>
                     {formaPagto && (
                       <th className="px-5 py-3 text-right text-blue-400 bg-blue-950/20">
                         {FORMAS_OPTS.find(f => f.value === formaPagto)?.label}
@@ -795,6 +878,12 @@ export default function Caixa() {
                                  (Number(c.totais_por_forma.prazo) || 0))
                               : Number(c.vr_fechado_turno || 0)
                           )}
+                        </td>
+                        <td className="px-5 py-3 text-right text-rose-400 font-medium whitespace-nowrap text-xs">
+                          {Number(c.total_despesas || 0) > 0 ? `-${R(Number(c.total_despesas))}` : '—'}
+                        </td>
+                        <td className="px-5 py-3 text-right text-teal-400 font-semibold whitespace-nowrap text-xs">
+                          {R(Number(c.saldo_liquido ?? (Number(c.vr_fechado_turno || 0) - Number(c.total_despesas || 0))))}
                         </td>
 
                         {formaPagto && (
@@ -1007,14 +1096,14 @@ export default function Caixa() {
               ) : (
                 <>
                   {/* Resumo de Valores */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
-                      <span className="text-slate-400 block text-xs">Fundo de Caixa</span>
-                      <strong className="text-white text-base">{R(Number(detalhesModal.caixa.vr_abertura))}</strong>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                    <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-2.5">
+                      <span className="text-slate-400 block text-[11px]">Fundo de Caixa</span>
+                      <strong className="text-white text-sm">{R(Number(detalhesModal.caixa.vr_abertura))}</strong>
                     </div>
-                    <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-xl p-3">
-                      <span className="text-emerald-300 block text-xs">Total Vendas</span>
-                      <strong className="text-emerald-400 text-base">
+                    <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-xl p-2.5">
+                      <span className="text-emerald-300 block text-[11px]">Total Vendas</span>
+                      <strong className="text-emerald-400 text-sm">
                         {R(
                           detalhesModal.totais
                             ? ((Number(detalhesModal.totais.dinheiro) || 0) +
@@ -1025,13 +1114,21 @@ export default function Caixa() {
                         )}
                       </strong>
                     </div>
-                    <div className="bg-blue-950/30 border border-blue-800/40 rounded-xl p-3">
-                      <span className="text-blue-300 block text-xs">Esperado em Dinheiro</span>
-                      <strong className="text-blue-400 text-base">{R(detalhesModal.totais.saldo_esperado_dinheiro)}</strong>
+                    <div className="bg-rose-950/30 border border-rose-800/40 rounded-xl p-2.5">
+                      <span className="text-rose-300 block text-[11px]">Despesas Pagas</span>
+                      <strong className="text-rose-400 text-sm">{R(Number(detalhesModal.totais.total_despesas ?? 0))}</strong>
                     </div>
-                    <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
-                      <span className="text-slate-400 block text-xs">Conferido no Fechamento</span>
-                      <strong className="text-white text-base">
+                    <div className="bg-teal-950/30 border border-teal-800/40 rounded-xl p-2.5">
+                      <span className="text-teal-300 block text-[11px]">Saldo Líquido</span>
+                      <strong className="text-teal-400 text-sm">{R(Number(detalhesModal.totais.saldo_liquido ?? 0))}</strong>
+                    </div>
+                    <div className="bg-blue-950/30 border border-blue-800/40 rounded-xl p-2.5">
+                      <span className="text-blue-300 block text-[11px]">Esperado Dinheiro</span>
+                      <strong className="text-blue-400 text-sm">{R(detalhesModal.totais.saldo_esperado_dinheiro)}</strong>
+                    </div>
+                    <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-2.5">
+                      <span className="text-slate-400 block text-[11px]">Conferido</span>
+                      <strong className="text-white text-sm">
                         {detalhesModal.caixa.vr_fechamento ? R(Number(detalhesModal.caixa.vr_fechamento)) : '—'}
                       </strong>
                     </div>
@@ -1066,6 +1163,47 @@ export default function Caixa() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Despesas / Contas Pagas da Sessão */}
+                  {detalhesModal.despesas && detalhesModal.despesas.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-bold text-rose-400 uppercase tracking-wider mb-2.5 flex items-center justify-between">
+                        <span>Contas a Pagar Pagas nesta Sessão ({detalhesModal.despesas.length})</span>
+                        <span className="text-xs font-semibold text-rose-400">Total: {R(Number(detalhesModal.totais.total_despesas ?? 0))}</span>
+                      </h4>
+                      <div className="bg-slate-950/40 rounded-xl border border-slate-800 overflow-hidden max-h-48 overflow-y-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-slate-500 border-b border-slate-800 bg-slate-900/60">
+                              <th className="px-3 py-2">Documento / Histórico</th>
+                              <th className="px-3 py-2">Favorecido</th>
+                              <th className="px-3 py-2">Forma</th>
+                              <th className="px-3 py-2 text-right">Valor Pago</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/60">
+                            {detalhesModal.despesas.map((d: any) => (
+                              <tr key={d.id} className="hover:bg-slate-800/30">
+                                <td className="px-3 py-2 text-slate-300 font-medium">
+                                  {d.documento ? <span className="font-mono text-slate-400 mr-1.5">[{d.documento}]</span> : null}
+                                  {d.historico || 'Despesa/Conta paga'}
+                                </td>
+                                <td className="px-3 py-2 text-slate-400 truncate max-w-[120px]">{d.favorecido || '—'}</td>
+                                <td className="px-3 py-2 text-slate-400">
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300">
+                                    {d.modo_lancamento || (d.id_modo_lancamento === 1 ? 'Dinheiro' : 'Outros')}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-right text-rose-400 font-semibold whitespace-nowrap">
+                                  -{R(Number(d.valor))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Diferença / Quebra */}
                   {detalhesModal.caixa.status_caixa === 'F' && Number(detalhesModal.caixa.vr_fechamento) > 0 && (

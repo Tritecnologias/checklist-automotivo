@@ -385,6 +385,9 @@ export default function Contas() {
               <p className="text-sm font-bold text-white truncate">
                 {R(totais?.por_forma_pagamento?.outros ?? 0)}
               </p>
+              <span className="text-[10px] text-purple-400/80 block mt-0.5">
+                Não entra no total
+              </span>
             </div>
           </button>
         </div>

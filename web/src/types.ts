@@ -27,6 +27,9 @@ export interface CaixaSession {
   nome_operador?: string
   saldo_esperado_dinheiro?: number
   diferenca_caixa?: number
+  total_despesas?: number
+  despesas_dinheiro?: number
+  saldo_liquido?: number
   totais_por_forma?: {
     dinheiro: number
     cartao: number
@@ -34,13 +37,20 @@ export interface CaixaSession {
     prazo: number
     outros: number
     total_vendas: number
+    total_despesas?: number
+    despesas_dinheiro?: number
+    saldo_liquido?: number
     qtd_vendas: number
+    qtd_despesas?: number
     saldo_esperado_dinheiro?: number
   }
 }
 
 export interface CaixaTotaisPeriodo {
   total_vendas: number
+  total_despesas?: number
+  despesas_dinheiro?: number
+  saldo_liquido?: number
   dinheiro: number
   cartao: number
   pix: number
@@ -49,6 +59,7 @@ export interface CaixaTotaisPeriodo {
   total_fundo: number
   total_conferido: number
   qtd_vendas: number
+  qtd_despesas?: number
   qtd_sessoes: number
   valor_filtrado?: number
 }
