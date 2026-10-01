@@ -27,9 +27,10 @@ export default function FilipetaFechamentoModal({
   const vendasDinheiro = Number(session.totais_por_forma?.dinheiro || 0)
   const despesasDinheiro = Number(session.despesas_dinheiro ?? session.totais_por_forma?.despesas_dinheiro ?? 0)
   const totalDespesas = Number(session.total_despesas ?? session.totais_por_forma?.total_despesas ?? 0)
+  const valorDespesas = despesasDinheiro > 0 ? despesasDinheiro : totalDespesas
 
-  // Saldo esperado em dinheiro = Fundo + Vendas Dinheiro - Despesas Dinheiro
-  const saldoEsperadoDinheiro = Math.max(0, fundoAbertura + vendasDinheiro - despesasDinheiro)
+  // Saldo esperado em dinheiro = Fundo + Vendas Dinheiro - Despesas
+  const saldoEsperadoDinheiro = Math.max(0, fundoAbertura + vendasDinheiro - valorDespesas)
 
   // Dinheiro contado na gaveta (se passou por prop, ou o que foi gravado no fechamento, ou o esperado)
   const dinheiroContado = valorContadoDinheiro !== undefined
@@ -43,7 +44,7 @@ export default function FilipetaFechamentoModal({
 
   // Total geral de movimentação apurada conforme o cliente:
   // "soma: valor em dinheiro, valor em cartão, valor em Pix e valor a prazo, que é a notinha. E somamos junto também o valor de despesa"
-  const totalGeralMovimentado = dinheiroContado + cartao + pix + prazo + despesasDinheiro
+  const totalGeralMovimentado = dinheiroContado + cartao + pix + prazo + valorDespesas
 
   // Conferência do fechamento:
   // "Feita essa soma aí, a gente subtrai o valor total de vendas realizada e subtrai o caixa anterior, que é o de 100 reais"
@@ -104,7 +105,7 @@ export default function FilipetaFechamentoModal({
   <table class="table-linhas">
     <tr>
       <td>DESPESAS PAGAS NO CAIXA:</td>
-      <td class="val">${R(despesasDinheiro)}</td>
+      <td class="val">${R(valorDespesas)}</td>
     </tr>
     <tr>
       <td>CARTÃO (CRÉDITO / DÉBITO):</td>
@@ -211,8 +212,8 @@ export default function FilipetaFechamentoModal({
           {/* Linhas da Filipeta */}
           <div className="bg-slate-950/60 rounded-xl p-4 border border-slate-800 space-y-3">
             <div className="flex justify-between items-center pb-2 border-b border-slate-800/80">
-              <span className="text-slate-400">DESP: (Despesas pagas em dinheiro)</span>
-              <strong className="text-red-400 font-bold">{R(despesasDinheiro)}</strong>
+              <span className="text-slate-400">DESP: (Despesas pagas no caixa)</span>
+              <strong className="text-red-400 font-bold">{R(valorDespesas)}</strong>
             </div>
 
             <div className="flex justify-between items-center pb-2 border-b border-slate-800/80">

@@ -206,7 +206,7 @@ export default function Caixa() {
     }
     const fundo = Number(status.vr_abertura || 0)
     const vendasDinheiro = Number(status.totais_por_forma?.dinheiro || 0)
-    const despesasDinheiro = Number(status.despesas_dinheiro ?? status.totais_por_forma?.despesas_dinheiro ?? 0)
+    const despesasDinheiro = Number(status.despesas_dinheiro ?? status.totais_por_forma?.despesas_dinheiro ?? status.total_despesas ?? 0)
     return Math.max(0, fundo + vendasDinheiro - despesasDinheiro)
   }, [status, isCaixaAberto])
 
@@ -245,7 +245,7 @@ export default function Caixa() {
     const cartao = Number(status.totais_por_forma?.cartao || 0)
     const pix = Number(status.totais_por_forma?.pix || 0)
     const prazo = Number(status.totais_por_forma?.prazo || 0)
-    const despesas = Number(status.despesas_dinheiro || 0)
+    const despesas = Number(status.despesas_dinheiro || status.total_despesas || 0)
     return dinheiroGavetaAtual + cartao + pix + prazo + despesas
   }, [status, dinheiroGavetaAtual])
 
@@ -433,7 +433,7 @@ export default function Caixa() {
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
                     <span className="text-slate-500 block text-[10px] uppercase font-bold">DESPESAS</span>
-                    <strong className="text-red-400 text-sm">{R(Number(status.despesas_dinheiro || 0))}</strong>
+                    <strong className="text-red-400 text-sm">{R(Number(status.despesas_dinheiro || status.total_despesas || 0))}</strong>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
                     <span className="text-slate-500 block text-[10px] uppercase font-bold">CARTÃO</span>

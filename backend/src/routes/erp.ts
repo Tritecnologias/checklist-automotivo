@@ -239,7 +239,7 @@ router.get('/caixa', async (req, res) => {
         `SELECT 
            c.id as id_caixa,
            COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
-           COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+           COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 OR l.id_caixa = c.id THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
            COUNT(l.id) as qtd_despesas
          FROM mv_caixa c
          LEFT JOIN cad_lancamentos l ON (
@@ -250,18 +250,21 @@ router.get('/caixa', async (req, res) => {
              OR (
                l.id_caixa IS NULL
                AND (COALESCE(l.data_confirmacao, l.data_vencimento) = c.data_abertura OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(c.data_abertura))
-               AND NOT EXISTS (
-                 SELECT 1 FROM mv_caixa c_prev
-                 WHERE c_prev.tenant_id = c.tenant_id
-                   AND c_prev.data_abertura = c.data_abertura
-                   AND c_prev.id < c.id
+               AND (
+                 c.status_caixa = 'A'
+                 OR NOT EXISTS (
+                   SELECT 1 FROM mv_caixa c_prev
+                   WHERE c_prev.tenant_id = c.tenant_id
+                     AND c_prev.data_abertura = c.data_abertura
+                     AND c_prev.id < c.id
+                 )
                )
              )
            )
          )
          LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
          WHERE c.id IN (${placeholders})
-           AND (l.id IS NULL OR (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)))
+           AND (l.id IS NULL OR (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14) OR l.id_venda IS NULL OR l.id_venda = 0))
          GROUP BY c.id`,
         sessionIds
       );
@@ -277,6 +280,7 @@ router.get('/caixa', async (req, res) => {
       const totalVendas = Number(s?.vr_total || c.vr_fechado_turno || 0);
       const totalDespesas = Number(d?.total_despesas || 0);
       const despesasDinheiro = Number(d?.despesas_dinheiro || 0);
+      const valorDespesasCaixa = despesasDinheiro > 0 ? despesasDinheiro : totalDespesas;
       const vrDinheiro = Number(s?.vr_dinheiro || 0);
       const vrCartao = Number(s?.vr_cartao || 0);
       const vrPix = Number(s?.vr_pix || 0);
@@ -284,7 +288,7 @@ router.get('/caixa', async (req, res) => {
       const vrOutros = Number(s?.vr_outros || 0);
       const vrAbertura = Number(c.vr_abertura || 0);
       const vrFechamento = Number(c.vr_fechamento || 0);
-      const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - despesasDinheiro);
+      const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - valorDespesasCaixa);
       const saldoLiquido = totalVendas - totalDespesas;
       const diferenca = c.status_caixa === 'F' && c.vr_fechamento !== null ? (vrFechamento - saldoEsperado) : 0;
 
@@ -292,7 +296,7 @@ router.get('/caixa', async (req, res) => {
         ...c,
         vr_fechado_turno: totalVendas,
         total_despesas: totalDespesas,
-        despesas_dinheiro: despesasDinheiro,
+        despesas_dinheiro: valorDespesasCaixa,
         saldo_liquido: saldoLiquido,
         saldo_esperado_dinheiro: saldoEsperado,
         diferenca_caixa: diferenca,
@@ -304,7 +308,7 @@ router.get('/caixa', async (req, res) => {
           outros: vrOutros,
           total_vendas: totalVendas,
           total_despesas: totalDespesas,
-          despesas_dinheiro: despesasDinheiro,
+          despesas_dinheiro: valorDespesasCaixa,
           saldo_liquido: saldoLiquido,
           qtd_vendas: Number(s?.qtd_vendas || 0),
           qtd_despesas: Number(d?.qtd_despesas || 0),
@@ -402,7 +406,7 @@ router.get('/caixa', async (req, res) => {
     const [[totaisDespesasPeriodo]] = await pool.query<any>(
       `SELECT 
          COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
-         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 OR l.id_caixa = ? THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
          COUNT(l.id) as qtd_despesas
        FROM cad_lancamentos l
        LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
@@ -608,31 +612,37 @@ router.get('/caixa/status', async (req, res) => {
     [row.tenant_id, row.id, row.data_abertura, row.data_abertura, row.hora_abertura]
   );
 
+  // Associa proativamente despesas quitadas desta loja que ainda não tinham id_caixa gravado
+  await pool.query(
+    `UPDATE cad_lancamentos
+     SET id_caixa = ?,
+         tenant_id = COALESCE(tenant_id, ?)
+     WHERE (tenant_id = ? OR tenant_id IS NULL)
+       AND status_lancamento = 1
+       AND id_caixa IS NULL
+       AND (COALESCE(data_confirmacao, data_vencimento) = ? OR DATE(COALESCE(data_confirmacao, data_vencimento)) = DATE(?))`,
+    [row.id, row.tenant_id, row.tenant_id, row.data_abertura, row.data_abertura]
+  );
+
   // Agrega despesas (contas a pagar quitadas) vinculadas exclusivamente à sessão de caixa atual
   const [[despesasStatus]] = await pool.query<any>(
     `SELECT 
        COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
-       COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+       COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 OR l.id_caixa = ? THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
        COUNT(l.id) as qtd_despesas
      FROM cad_lancamentos l
      LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
-     WHERE l.tenant_id = ?
-       AND l.status_lancamento = 1
-       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+     WHERE l.status_lancamento = 1
+       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14) OR l.id_venda IS NULL OR l.id_venda = 0)
        AND (
          l.id_caixa = ?
          OR (
-           l.id_caixa IS NULL
+           (l.tenant_id = ? OR l.tenant_id IS NULL)
+           AND l.id_caixa IS NULL
            AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
-           AND NOT EXISTS (
-             SELECT 1 FROM mv_caixa c_prev
-             WHERE c_prev.tenant_id = ?
-               AND c_prev.data_abertura = ?
-               AND c_prev.id < ?
-           )
          )
        )`,
-    [row.tenant_id, row.id, row.data_abertura, row.data_abertura, row.tenant_id, row.data_abertura, row.id]
+    [row.id, row.id, row.tenant_id, row.data_abertura, row.data_abertura]
   );
 
   const vrTotal = Number(totais?.vr_total || 0);
@@ -640,7 +650,8 @@ router.get('/caixa/status', async (req, res) => {
   const vrAbertura = Number(row.vr_abertura || 0);
   const totalDespesas = Number(despesasStatus?.total_despesas || 0);
   const despesasDinheiro = Number(despesasStatus?.despesas_dinheiro || 0);
-  const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - despesasDinheiro);
+  const valorDespesasCaixa = despesasDinheiro > 0 ? despesasDinheiro : totalDespesas;
+  const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - valorDespesasCaixa);
   const saldoLiquido = vrTotal - totalDespesas;
 
   res.json({
@@ -657,7 +668,7 @@ router.get('/caixa/status', async (req, res) => {
     })),
     vr_fechado_turno: vrTotal,
     total_despesas: totalDespesas,
-    despesas_dinheiro: despesasDinheiro,
+    despesas_dinheiro: valorDespesasCaixa,
     saldo_liquido: saldoLiquido,
     saldo_esperado_dinheiro: saldoEsperado,
     totais_por_forma: {
@@ -668,7 +679,7 @@ router.get('/caixa/status', async (req, res) => {
       outros: Number(totais?.vr_outros || 0),
       total_vendas: vrTotal,
       total_despesas: totalDespesas,
-      despesas_dinheiro: despesasDinheiro,
+      despesas_dinheiro: valorDespesasCaixa,
       saldo_liquido: saldoLiquido,
       qtd_vendas: Number(totais?.qtd_vendas || 0),
       qtd_despesas: Number(despesasStatus?.qtd_despesas || 0),
@@ -733,30 +744,46 @@ router.get('/caixa/:id/detalhes', async (req, res) => {
     [caixa.tenant_id, caixa.id, caixa.data_abertura, caixa.turno, caixa.terminal]
   );
 
+  if (caixa.status_caixa === 'A') {
+    await pool.query(
+      `UPDATE cad_lancamentos
+       SET id_caixa = ?,
+           tenant_id = COALESCE(tenant_id, ?)
+       WHERE (tenant_id = ? OR tenant_id IS NULL)
+         AND status_lancamento = 1
+         AND id_caixa IS NULL
+         AND (COALESCE(data_confirmacao, data_vencimento) = ? OR DATE(COALESCE(data_confirmacao, data_vencimento)) = DATE(?))`,
+      [caixa.id, caixa.tenant_id, caixa.tenant_id, caixa.data_abertura, caixa.data_abertura]
+    );
+  }
+
   const [[despesasDetalhes]] = await pool.query<any>(
     `SELECT 
        COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
-       COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+       COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 OR l.id_caixa = ? THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
        COUNT(l.id) as qtd_despesas
      FROM cad_lancamentos l
      LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
-     WHERE l.tenant_id = ?
-       AND l.status_lancamento = 1
-       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+     WHERE l.status_lancamento = 1
+       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14) OR l.id_venda IS NULL OR l.id_venda = 0)
        AND (
          l.id_caixa = ?
          OR (
-           l.id_caixa IS NULL
+           (l.tenant_id = ? OR l.tenant_id IS NULL)
+           AND l.id_caixa IS NULL
            AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
-           AND NOT EXISTS (
-             SELECT 1 FROM mv_caixa c_prev
-             WHERE c_prev.tenant_id = ?
-               AND c_prev.data_abertura = ?
-               AND c_prev.id < ?
+           AND (
+             caixa.status_caixa = 'A'
+             OR NOT EXISTS (
+               SELECT 1 FROM mv_caixa c_prev
+               WHERE c_prev.tenant_id = ?
+                 AND c_prev.data_abertura = ?
+                 AND c_prev.id < ?
+             )
            )
          )
        )`,
-    [caixa.tenant_id, caixa.id, caixa.data_abertura, caixa.data_abertura, caixa.tenant_id, caixa.data_abertura, caixa.id]
+    [caixa.id, caixa.id, caixa.tenant_id, caixa.data_abertura, caixa.data_abertura, caixa.tenant_id, caixa.data_abertura, caixa.id]
   );
 
   const [despesasRows] = await pool.query<any>(
@@ -767,24 +794,27 @@ router.get('/caixa/:id/detalhes', async (req, res) => {
      FROM cad_lancamentos l
      LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
      LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
-     WHERE l.tenant_id = ?
-       AND l.status_lancamento = 1
-       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+     WHERE l.status_lancamento = 1
+       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14) OR l.id_venda IS NULL OR l.id_venda = 0)
        AND (
          l.id_caixa = ?
          OR (
-           l.id_caixa IS NULL
+           (l.tenant_id = ? OR l.tenant_id IS NULL)
+           AND l.id_caixa IS NULL
            AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
-           AND NOT EXISTS (
-             SELECT 1 FROM mv_caixa c_prev
-             WHERE c_prev.tenant_id = ?
-               AND c_prev.data_abertura = ?
-               AND c_prev.id < ?
+           AND (
+             caixa.status_caixa = 'A'
+             OR NOT EXISTS (
+               SELECT 1 FROM mv_caixa c_prev
+               WHERE c_prev.tenant_id = ?
+                 AND c_prev.data_abertura = ?
+                 AND c_prev.id < ?
+             )
            )
          )
        )
      ORDER BY l.id DESC LIMIT 50`,
-    [caixa.tenant_id, caixa.id, caixa.data_abertura, caixa.data_abertura, caixa.tenant_id, caixa.data_abertura, caixa.id]
+    [caixa.id, caixa.tenant_id, caixa.data_abertura, caixa.data_abertura, caixa.tenant_id, caixa.data_abertura, caixa.id]
   );
 
   const vrTotal = Number(totais?.vr_total || caixa.vr_fechado_turno || 0);
@@ -793,7 +823,8 @@ router.get('/caixa/:id/detalhes', async (req, res) => {
   const vrFechamento = Number(caixa.vr_fechamento || 0);
   const totalDespesas = Number(despesasDetalhes?.total_despesas || 0);
   const despesasDinheiro = Number(despesasDetalhes?.despesas_dinheiro || 0);
-  const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - despesasDinheiro);
+  const valorDespesasCaixa = despesasDinheiro > 0 ? despesasDinheiro : totalDespesas;
+  const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - valorDespesasCaixa);
   const saldoLiquido = vrTotal - totalDespesas;
   const diferenca = caixa.status_caixa === 'F' ? (vrFechamento - saldoEsperado) : 0;
 
@@ -904,44 +935,33 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
   // Associa despesas pendentes pagas durante esta sessão que ainda não tinham id_caixa gravado
   await pool.query(
     `UPDATE cad_lancamentos
-     SET id_caixa = ?
-     WHERE tenant_id = ?
+     SET id_caixa = ?,
+         tenant_id = COALESCE(tenant_id, ?)
+     WHERE (tenant_id = ? OR tenant_id IS NULL)
        AND status_lancamento = 1
        AND id_caixa IS NULL
-       AND (data_confirmacao = ? OR DATE(data_confirmacao) = ?)
-       AND NOT EXISTS (
-         SELECT 1 FROM mv_caixa c_prev
-         WHERE c_prev.tenant_id = ?
-           AND c_prev.data_abertura = ?
-           AND c_prev.id < ?
-       )`,
-    [caixaRow.id, caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.data_abertura, caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.id]
+       AND (COALESCE(data_confirmacao, data_vencimento) = ? OR DATE(COALESCE(data_confirmacao, data_vencimento)) = DATE(?))`,
+    [caixaRow.id, caixaRow.tenant_id, caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.data_abertura]
   );
 
   const [[despesasFechar]] = await pool.query<any>(
     `SELECT 
        COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
-       COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+       COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 OR l.id_caixa = ? THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
        COUNT(l.id) as qtd_despesas
      FROM cad_lancamentos l
      LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
-     WHERE l.tenant_id = ?
-       AND l.status_lancamento = 1
-       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
+     WHERE l.status_lancamento = 1
+       AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14) OR l.id_venda IS NULL OR l.id_venda = 0)
        AND (
          l.id_caixa = ?
          OR (
-           l.id_caixa IS NULL
+           (l.tenant_id = ? OR l.tenant_id IS NULL)
+           AND l.id_caixa IS NULL
            AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
-           AND NOT EXISTS (
-             SELECT 1 FROM mv_caixa c_prev
-             WHERE c_prev.tenant_id = ?
-               AND c_prev.data_abertura = ?
-               AND c_prev.id < ?
-           )
          )
        )`,
-    [caixaRow.tenant_id, caixaRow.id, caixaRow.data_abertura, caixaRow.data_abertura, caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.id]
+    [caixaRow.id, caixaRow.id, caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.data_abertura]
   );
 
   const totalVendas = Number(totals?.vr_fechado_turno || 0);
@@ -949,7 +969,8 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
   const vrDinheiro = Number(totals?.vr_dinheiro || 0);
   const totalDespesas = Number(despesasFechar?.total_despesas || 0);
   const despesasDinheiro = Number(despesasFechar?.despesas_dinheiro || 0);
-  const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - despesasDinheiro);
+  const valorDespesasCaixa = despesasDinheiro > 0 ? despesasDinheiro : totalDespesas;
+  const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - valorDespesasCaixa);
   const saldoLiquido = totalVendas - totalDespesas;
 
   await pool.query(
@@ -1783,12 +1804,23 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
 
     // Se houver pagamento imediato, busca a sessão de caixa aberta para vincular
     let caixaAbertoId: number | null = null;
+    let caixaTenantId: number | null = tenantId;
     if (Boolean(pago_agora)) {
       const [[caixaAberto]] = await pool.query<any>(
-        `SELECT id FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
+        `SELECT id, tenant_id FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
         [tenantId]
       );
       caixaAbertoId = caixaAberto?.id ?? null;
+      if (caixaAberto?.tenant_id) caixaTenantId = caixaAberto.tenant_id;
+      if (!caixaAbertoId && req.user?.role === 'owner') {
+        const [[anyCaixa]] = await pool.query<any>(
+          `SELECT id, tenant_id FROM mv_caixa WHERE status_caixa = 'A' ORDER BY id DESC LIMIT 1`
+        );
+        if (anyCaixa?.id) {
+          caixaAbertoId = anyCaixa.id;
+          caixaTenantId = anyCaixa.tenant_id;
+        }
+      }
     }
 
     for (let p = 1; p <= numParcelas; p++) {
@@ -1808,7 +1840,7 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
          VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, 0, ?, ?)`,
         [
           Number(id_planejamento || 4),
-          Number(id_modo_lancamento || 4),
+          Number(id_modo_lancamento || 1),
           isPago ? 1 : 0,
           ctrl,
           documento || ctrl,
@@ -1818,7 +1850,7 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
           dueStr,
           valorParcela,
           dataConf,
-          tenantId,
+          caixaTenantId || tenantId,
           isPago ? caixaAbertoId : null
         ]
       );
@@ -1833,31 +1865,41 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
 
 router.patch('/contas-pagar/:id/pagar', requireManagerUp, async (req, res) => {
   try {
-    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
-    const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
     const writeTenantId = getErpWriteTenantId(req);
     const dataConfirmacao = req.body.data_pagamento || new Date().toISOString().slice(0, 10);
-    const modoId = req.body.id_modo_lancamento ? Number(req.body.id_modo_lancamento) : null;
+    const modoId = req.body.id_modo_lancamento ? Number(req.body.id_modo_lancamento) : 1;
 
     // Busca caixa aberto para vincular a baixa da despesa à sessão atual
+    let caixaAbertoId: number | null = null;
+    let caixaTenantId: number | null = writeTenantId;
     const [[caixaAberto]] = await pool.query<any>(
-      `SELECT id FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
+      `SELECT id, tenant_id FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
       [writeTenantId]
     );
-    const idCaixa = caixaAberto?.id ?? null;
-
-    if (modoId) {
-      await pool.query(
-        `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=?, id_modo_lancamento=?, id_caixa=? WHERE id=?${whereTenant}`,
-        [dataConfirmacao, modoId, idCaixa, req.params.id, ...tenantParams]
+    caixaAbertoId = caixaAberto?.id ?? null;
+    if (caixaAberto?.tenant_id) caixaTenantId = caixaAberto.tenant_id;
+    if (!caixaAbertoId && req.user?.role === 'owner') {
+      const [[anyCaixa]] = await pool.query<any>(
+        `SELECT id, tenant_id FROM mv_caixa WHERE status_caixa = 'A' ORDER BY id DESC LIMIT 1`
       );
-    } else {
-      await pool.query(
-        `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=?, id_caixa=? WHERE id=?${whereTenant}`,
-        [dataConfirmacao, idCaixa, req.params.id, ...tenantParams]
-      );
+      if (anyCaixa?.id) {
+        caixaAbertoId = anyCaixa.id;
+        caixaTenantId = anyCaixa.tenant_id;
+      }
     }
-    res.json({ ok: true });
+
+    const [result] = await pool.query<any>(
+      `UPDATE cad_lancamentos
+       SET status_lancamento = 1,
+           data_confirmacao = ?,
+           id_modo_lancamento = ?,
+           id_caixa = ?,
+           tenant_id = COALESCE(?, tenant_id)
+       WHERE id = ?`,
+      [dataConfirmacao, modoId, caixaAbertoId, caixaTenantId, req.params.id]
+    );
+
+    res.json({ ok: true, affected: result?.affectedRows });
   } catch (err: any) {
     res.status(500).json({ message: err?.message || 'Erro ao baixar conta a pagar' });
   }

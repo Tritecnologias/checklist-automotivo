@@ -41,9 +41,9 @@ const FORMAS_OPTS = [
 ]
 
 const FORMAS_CADASTRO = [
-  { id: 4,  label: 'Boleto Bancário' },
-  { id: 11, label: 'PIX' },
-  { id: 1,  label: 'Dinheiro' },
+  { id: 1,  label: '💵 Dinheiro (Caixa)' },
+  { id: 11, label: '⚡ PIX' },
+  { id: 4,  label: '📄 Boleto Bancário' },
   { id: 6,  label: 'Cartão de Débito' },
   { id: 7,  label: 'Cartão de Crédito' },
   { id: 2,  label: 'Cheque' },
@@ -115,7 +115,7 @@ export default function ContasPagar() {
   const [formValor, setFormValor]             = useState('')
   const [formVencimento, setFormVencimento]   = useState(new Date().toISOString().slice(0, 10))
   const [formCategoria, setFormCategoria]     = useState<number>(4)
-  const [formModo, setFormModo]               = useState<number>(4)
+  const [formModo, setFormModo]               = useState<number>(1)
   const [formDocumento, setFormDocumento]     = useState('')
   const [formParcelas, setFormParcelas]       = useState(1)
   const [formPagoAgora, setFormPagoAgora]     = useState(false)
@@ -123,7 +123,7 @@ export default function ContasPagar() {
 
   // Form Baixa / Pagar
   const [baixaData, setBaixaData] = useState(new Date().toISOString().slice(0, 10))
-  const [baixaModo, setBaixaModo] = useState<number>(4)
+  const [baixaModo, setBaixaModo] = useState<number>(1)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -183,6 +183,9 @@ export default function ContasPagar() {
     mutationFn: (data: any) => erpApi.criarContaPagar(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['contas-pagar'] })
+      qc.invalidateQueries({ queryKey: ['caixa-status'] })
+      qc.invalidateQueries({ queryKey: ['caixa-sessoes'] })
+      qc.invalidateQueries({ queryKey: ['erp-dashboard'] })
       setModalNovo(false)
       limparFormNovo()
     },
@@ -193,19 +196,30 @@ export default function ContasPagar() {
     mutationFn: ({ id, data }: { id: number; data: any }) => erpApi.pagarContaPagar(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['contas-pagar'] })
+      qc.invalidateQueries({ queryKey: ['caixa-status'] })
+      qc.invalidateQueries({ queryKey: ['caixa-sessoes'] })
+      qc.invalidateQueries({ queryKey: ['erp-dashboard'] })
       setModalPagar(null)
     },
   })
 
   const { mutate: estornarConta, isPending: estornando } = useMutation({
     mutationFn: (id: number) => erpApi.estornarContaPagar(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['contas-pagar'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contas-pagar'] })
+      qc.invalidateQueries({ queryKey: ['caixa-status'] })
+      qc.invalidateQueries({ queryKey: ['caixa-sessoes'] })
+      qc.invalidateQueries({ queryKey: ['erp-dashboard'] })
+    },
   })
 
   const { mutate: editarConta, isPending: editando } = useMutation({
     mutationFn: ({ id, data }: { id: number; data: any }) => erpApi.atualizarContaPagar(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['contas-pagar'] })
+      qc.invalidateQueries({ queryKey: ['caixa-status'] })
+      qc.invalidateQueries({ queryKey: ['caixa-sessoes'] })
+      qc.invalidateQueries({ queryKey: ['erp-dashboard'] })
       setModalEditar(null)
     },
   })
@@ -214,6 +228,9 @@ export default function ContasPagar() {
     mutationFn: (id: number) => erpApi.excluirContaPagar(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['contas-pagar'] })
+      qc.invalidateQueries({ queryKey: ['caixa-status'] })
+      qc.invalidateQueries({ queryKey: ['caixa-sessoes'] })
+      qc.invalidateQueries({ queryKey: ['erp-dashboard'] })
       setConfirmDelete(null)
     },
   })
@@ -224,7 +241,7 @@ export default function ContasPagar() {
     setFormValor('')
     setFormVencimento(new Date().toISOString().slice(0, 10))
     setFormCategoria(4)
-    setFormModo(4)
+    setFormModo(1)
     setFormDocumento('')
     setFormParcelas(1)
     setFormPagoAgora(false)
@@ -777,7 +794,7 @@ export default function ContasPagar() {
                           <button
                             onClick={() => {
                               setModalPagar(c)
-                              setBaixaModo(c.id_modo_lancamento || 4)
+                              setBaixaModo(c.id_modo_lancamento || 1)
                               setBaixaData(new Date().toISOString().slice(0, 10))
                             }}
                             className="px-2.5 py-1 rounded-lg bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 text-xs font-semibold border border-emerald-700/60 transition-colors"
