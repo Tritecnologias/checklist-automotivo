@@ -238,6 +238,23 @@ export default function Caixa() {
   const temValorDigitado = vrFechamento.trim() !== ''
   const diferencaFechamento = temValorDigitado ? (fechamentoNum - esperadoDinheiro) : 0
 
+  const dinheiroGavetaAtual = temValorDigitado ? fechamentoNum : esperadoDinheiro
+
+  const somaMovimentada = useMemo(() => {
+    if (!status) return 0
+    const cartao = Number(status.totais_por_forma?.cartao || 0)
+    const pix = Number(status.totais_por_forma?.pix || 0)
+    const prazo = Number(status.totais_por_forma?.prazo || 0)
+    const despesas = Number(status.despesas_dinheiro || 0)
+    return dinheiroGavetaAtual + cartao + pix + prazo + despesas
+  }, [status, dinheiroGavetaAtual])
+
+  const resultadoConferencia = useMemo(() => {
+    if (!status) return 0
+    const cxAnt = Number(status.vr_abertura || 0)
+    return somaMovimentada - totalVendasSessao - cxAnt
+  }, [somaMovimentada, totalVendasSessao, status])
+
   const totaisPeriodo = hist?.totais
 
   // Outros não deve entrar nos cálculos de vendas
@@ -409,7 +426,7 @@ export default function Caixa() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
                   <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
                     <span className="text-slate-500 block text-[10px] uppercase font-bold">CX ANTERIOR</span>
                     <strong className="text-amber-400 text-sm">{R(Number(status.vr_abertura || 0))}</strong>
@@ -423,32 +440,65 @@ export default function Caixa() {
                     <strong className="text-slate-200 text-sm">{R(Number(status.totais_por_forma?.cartao || 0))}</strong>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
-                    <span className="text-slate-500 block text-[10px] uppercase font-bold">DINHEIRO (GAVETA)</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 block text-[10px] uppercase font-bold">DINHEIRO (GAVETA)</span>
+                      <span className="text-[9px] text-slate-500 font-sans">{temValorDigitado ? 'Digitado' : 'Esperado'}</span>
+                    </div>
                     <strong className="text-emerald-400 text-sm">
-                      {R(temValorDigitado ? fechamentoNum : Number(status.totais_por_forma?.dinheiro || 0))}
+                      {R(dinheiroGavetaAtual)}
                     </strong>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
                     <span className="text-slate-500 block text-[10px] uppercase font-bold">PIX</span>
-                    <strong className="text-blue-400 text-sm">{R(Number(status.totais_por_forma?.pix || 0))}</strong>
+                    <strong className="text-teal-400 text-sm">{R(Number(status.totais_por_forma?.pix || 0))}</strong>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">A PRAZO (NOTA)</span>
+                    <strong className="text-purple-400 text-sm">{R(Number(status.totais_por_forma?.prazo || 0))}</strong>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-800/80 text-xs gap-2">
-                  <div>
-                    <span className="text-slate-500 mr-2">TOTAL MOVIMENTADO:</span>
-                    <strong className="text-white font-bold">
-                      {R(
-                        Number(status.totais_por_forma?.cartao || 0) +
-                        (temValorDigitado ? fechamentoNum : Number(status.totais_por_forma?.dinheiro || 0)) +
-                        Number(status.totais_por_forma?.pix || 0) +
-                        Number(status.despesas_dinheiro || 0)
-                      )}
-                    </strong>
+                {/* Linha de Fórmula e Conferência do Espelho */}
+                <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-slate-400">
+                    <div>
+                      <span className="text-slate-500 text-[10px] block uppercase font-semibold">Soma Movimentada:</span>
+                      <strong className="text-white font-mono text-sm">{R(somaMovimentada)}</strong>
+                      <span className="text-[9px] text-slate-500 block">Dinheiro + Cartão + Pix + Prazo + Desp.</span>
+                    </div>
+                    <span className="text-slate-600 font-bold text-base hidden sm:inline">−</span>
+                    <div>
+                      <span className="text-slate-500 text-[10px] block uppercase font-semibold">Total Vendas:</span>
+                      <strong className="text-slate-200 font-mono text-sm">{R(totalVendasSessao)}</strong>
+                    </div>
+                    <span className="text-slate-600 font-bold text-base hidden sm:inline">−</span>
+                    <div>
+                      <span className="text-slate-500 text-[10px] block uppercase font-semibold">Cx Anterior:</span>
+                      <strong className="text-amber-400 font-mono text-sm">{R(Number(status.vr_abertura || 0))}</strong>
+                    </div>
+                    <span className="text-slate-600 font-bold text-base hidden sm:inline">=</span>
                   </div>
-                  <div>
-                    <span className="text-slate-500 mr-2">TOTAL FATURADO SISTEMA:</span>
-                    <strong className="text-slate-300 font-bold">{R(totalVendasSessao)}</strong>
+
+                  <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 ${
+                    Math.abs(resultadoConferencia) < 0.01
+                      ? 'bg-emerald-950/40 border-emerald-600/50 text-emerald-300'
+                      : resultadoConferencia > 0
+                      ? 'bg-blue-950/40 border-blue-600/50 text-blue-300'
+                      : 'bg-red-950/40 border-red-600/50 text-red-300'
+                  }`}>
+                    <span className="text-xs">
+                      {Math.abs(resultadoConferencia) < 0.01 ? '✅' : resultadoConferencia > 0 ? 'ℹ️' : '⚠️'}
+                    </span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider">
+                      {Math.abs(resultadoConferencia) < 0.01
+                        ? 'Caixa Exato:'
+                        : resultadoConferencia > 0
+                        ? 'Sobra:'
+                        : 'Falta:'}
+                    </span>
+                    <strong className="font-mono text-sm font-bold">
+                      {resultadoConferencia >= 0 ? `+${R(resultadoConferencia)}` : `-${R(Math.abs(resultadoConferencia))}`}
+                    </strong>
                   </div>
                 </div>
               </div>
@@ -511,7 +561,7 @@ export default function Caixa() {
               </div>
 
               {/* Indicador de Diferença em Tempo Real */}
-              {temValorDigitado && (
+              {temValorDigitado ? (
                 <div className={`p-3.5 rounded-xl text-xs font-semibold border flex items-center justify-between ${
                   Math.abs(diferencaFechamento) < 0.01
                     ? 'bg-emerald-950/40 border-emerald-600/50 text-emerald-300'
@@ -523,16 +573,30 @@ export default function Caixa() {
                     <span>
                       {Math.abs(diferencaFechamento) < 0.01 ? '✅' : diferencaFechamento > 0 ? 'ℹ️' : '⚠️'}
                     </span>
-                    <span>
-                      {Math.abs(diferencaFechamento) < 0.01
-                        ? 'Caixa bateu perfeitamente com o esperado em dinheiro!'
-                        : diferencaFechamento > 0
-                        ? `Sobra de caixa: ${R(diferencaFechamento)} a mais que o esperado em dinheiro.`
-                        : `Quebra/Falta de caixa: ${R(Math.abs(diferencaFechamento))} a menos que o esperado em dinheiro.`}
-                    </span>
+                    <div>
+                      <span>
+                        {Math.abs(diferencaFechamento) < 0.01
+                          ? 'Caixa bateu perfeitamente com a conferência!'
+                          : diferencaFechamento > 0
+                          ? `Sobra de caixa: ${R(diferencaFechamento)} a mais na contagem da gaveta.`
+                          : `Quebra/Falta de caixa: ${R(Math.abs(diferencaFechamento))} a menos na contagem da gaveta.`}
+                      </span>
+                      <span className="block text-[11px] font-mono text-slate-400 font-normal mt-0.5">
+                        Fórmula: Soma ({R(somaMovimentada)}) − Vendas ({R(totalVendasSessao)}) − Cx Anterior ({R(Number(status.vr_abertura || 0))}) = {diferencaFechamento >= 0 ? `+${R(diferencaFechamento)}` : `-${R(Math.abs(diferencaFechamento))}`}
+                      </span>
+                    </div>
                   </div>
                   <span className="font-mono text-sm font-bold">
                     {diferencaFechamento >= 0 ? `+${R(diferencaFechamento)}` : `-${R(Math.abs(diferencaFechamento))}`}
+                  </span>
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-400 font-mono bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 flex items-center justify-between">
+                  <span>
+                    💡 Conferência da loja: Soma ({R(somaMovimentada)}) − Vendas ({R(totalVendasSessao)}) − Cx Anterior ({R(Number(status.vr_abertura || 0))})
+                  </span>
+                  <span className="font-semibold text-emerald-400">
+                    Esperado na gaveta: {R(esperadoDinheiro)} (Bate R$ 0,00)
                   </span>
                 </div>
               )}

@@ -28,22 +28,26 @@ export default function FilipetaFechamentoModal({
   const despesasDinheiro = Number(session.despesas_dinheiro ?? session.totais_por_forma?.despesas_dinheiro ?? 0)
   const totalDespesas = Number(session.total_despesas ?? session.totais_por_forma?.total_despesas ?? 0)
 
-  // Dinheiro contado na gaveta (se passou por prop ou o que foi gravado no fechamento)
-  const dinheiroContado = valorContadoDinheiro !== undefined
-    ? valorContadoDinheiro
-    : Number(session.vr_fechamento || 0)
-
-  // Total geral de movimentação apurada (física + digital + despesas pagas)
-  const totalGeralMovimentado = cartao + dinheiroContado + pix + despesasDinheiro
-
-  // Total das vendas faturadas no sistema
-  const totalVendasSistema = Number(session.vr_fechado_turno ?? session.totais_por_forma?.total_vendas ?? 0)
-
   // Saldo esperado em dinheiro = Fundo + Vendas Dinheiro - Despesas Dinheiro
   const saldoEsperadoDinheiro = Math.max(0, fundoAbertura + vendasDinheiro - despesasDinheiro)
 
-  // Diferença do caixa (sobra ou quebra)
-  const diferencaCaixa = dinheiroContado - saldoEsperadoDinheiro
+  // Dinheiro contado na gaveta (se passou por prop, ou o que foi gravado no fechamento, ou o esperado)
+  const dinheiroContado = valorContadoDinheiro !== undefined
+    ? valorContadoDinheiro
+    : (session.status_caixa === 'F' && session.vr_fechamento !== null)
+      ? Number(session.vr_fechamento)
+      : saldoEsperadoDinheiro
+
+  // Total das vendas faturadas no sistema
+  const totalVendasSistema = Number(session.vr_fechado_turno ?? session.totais_por_forma?.total_vendas ?? (vendasDinheiro + cartao + pix + prazo))
+
+  // Total geral de movimentação apurada conforme o cliente:
+  // "soma: valor em dinheiro, valor em cartão, valor em Pix e valor a prazo, que é a notinha. E somamos junto também o valor de despesa"
+  const totalGeralMovimentado = dinheiroContado + cartao + pix + prazo + despesasDinheiro
+
+  // Conferência do fechamento:
+  // "Feita essa soma aí, a gente subtrai o valor total de vendas realizada e subtrai o caixa anterior, que é o de 100 reais"
+  const diferencaCaixa = totalGeralMovimentado - totalVendasSistema - fundoAbertura
 
   const listaPix = session.lista_pix || []
 
@@ -107,14 +111,17 @@ export default function FilipetaFechamentoModal({
       <td class="val">${R(cartao)}</td>
     </tr>
     <tr>
-      <td>DINHEIRO FÍSICO CONTADO:</td>
+      <td>DINHEIRO FÍSICO CONTADO (GAVETA):</td>
       <td class="val">${R(dinheiroContado)}</td>
     </tr>
     <tr>
       <td>RECEBIMENTOS PIX:</td>
       <td class="val">${R(pix)}</td>
     </tr>
-    ${prazo > 0 ? `<tr><td>A PRAZO (NOTA/CARNÊ):</td><td class="val">${R(prazo)}</td></tr>` : ''}
+    <tr>
+      <td>A PRAZO (NOTINHA / CARNÊ):</td>
+      <td class="val">${R(prazo)}</td>
+    </tr>
   </table>
 
   ${listaPix.length > 0 ? `
@@ -129,10 +136,21 @@ export default function FilipetaFechamentoModal({
   </div>` : ''}
 
   <div class="total-destaque">
-    <div>TOTAL GERAL MOVIMENTADO:</div>
+    <div>SOMA TOTAL MOVIMENTADA:</div>
     <div class="big">${R(totalGeralMovimentado)}</div>
-    <div style="font-size:11px;margin-top:4px;">TOTAL FATURADO SISTEMA: ${R(totalVendasSistema)}</div>
+    <div style="font-size:11px;margin-top:4px;">(Dinheiro + Cartão + Pix + Prazo + Despesas)</div>
   </div>
+
+  <table class="table-linhas" style="margin: 8px 0; font-size: 12px;">
+    <tr>
+      <td>(-) TOTAL VENDAS REALIZADAS:</td>
+      <td class="val" style="color: #444;">-${R(totalVendasSistema)}</td>
+    </tr>
+    <tr>
+      <td>(-) CAIXA ANTERIOR (FUNDO):</td>
+      <td class="val" style="color: #444;">-${R(fundoAbertura)}</td>
+    </tr>
+  </table>
 
   <div class="resultado-caixa">
     ${Math.abs(diferencaCaixa) < 0.01
@@ -140,6 +158,10 @@ export default function FilipetaFechamentoModal({
       : diferencaCaixa > 0
       ? `SOBRA DE CAIXA: +${R(diferencaCaixa)}`
       : `FALTA DE CAIXA: -${R(Math.abs(diferencaCaixa))}`}
+  </div>
+
+  <div style="text-align: center; font-size: 11px; color: #555; margin-top: 4px;">
+    Conferência: ${R(totalGeralMovimentado)} - ${R(totalVendasSistema)} - ${R(fundoAbertura)} = ${diferencaCaixa >= 0 ? `+${R(diferencaCaixa)}` : `-${R(Math.abs(diferencaCaixa))}`}
   </div>
 
   <div class="signatures">
@@ -199,7 +221,12 @@ export default function FilipetaFechamentoModal({
             </div>
 
             <div className="flex justify-between items-center pb-2 border-b border-slate-800/80">
-              <span className="text-slate-400">DIN: (Dinheiro contado na gaveta)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-400">DIN: (Dinheiro contado na gaveta)</span>
+                <span className="text-[10px] text-slate-500 font-sans">
+                  {valorContadoDinheiro !== undefined ? '(digitado)' : (session.status_caixa === 'F' ? '(apurado)' : '(esperado)')}
+                </span>
+              </div>
               <strong className="text-emerald-400 font-bold">{R(dinheiroContado)}</strong>
             </div>
 
@@ -208,12 +235,10 @@ export default function FilipetaFechamentoModal({
               <strong className="text-blue-400 font-bold">{R(pix)}</strong>
             </div>
 
-            {prazo > 0 && (
-              <div className="flex justify-between items-center pb-2 border-b border-slate-800/80">
-                <span className="text-slate-400">PRAZO: (Notas a receber)</span>
-                <strong className="text-purple-400 font-bold">{R(prazo)}</strong>
-              </div>
-            )}
+            <div className="flex justify-between items-center pb-2 border-b border-slate-800/80">
+              <span className="text-slate-400">PRAZO: (Notinha a prazo / carnê)</span>
+              <strong className="text-purple-400 font-bold">{R(prazo)}</strong>
+            </div>
           </div>
 
           {/* Discriminação de PIX se houver */}
@@ -234,23 +259,29 @@ export default function FilipetaFechamentoModal({
           )}
 
           {/* Total Geral Movimentado vs Sistema */}
-          <div className="p-4 rounded-xl bg-slate-800/90 border border-slate-700 flex items-center justify-between">
-            <div>
-              <span className="text-xs text-slate-400 uppercase tracking-wider block">
-                TOTAL GERAL MOVIMENTADO:
-              </span>
+          <div className="p-4 rounded-xl bg-slate-800/90 border border-slate-700 space-y-2.5">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-700/80">
+              <div>
+                <span className="text-xs text-slate-400 uppercase tracking-wider block">
+                  SOMA TOTAL MOVIMENTADA:
+                </span>
+                <span className="text-[10px] text-slate-400 font-normal">
+                  (Dinheiro + Cartão + Pix + Prazo + Despesas)
+                </span>
+              </div>
               <strong className="text-xl font-bold text-white tracking-tight">
                 {R(totalGeralMovimentado)}
               </strong>
             </div>
 
-            <div className="text-right">
-              <span className="text-xs text-slate-400 uppercase tracking-wider block">
-                TOTAL SISTEMA:
-              </span>
-              <strong className="text-base font-semibold text-slate-300">
-                {R(totalVendasSistema)}
-              </strong>
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span>(−) TOTAL VENDAS REALIZADAS:</span>
+              <strong className="text-slate-200 font-mono text-sm">−{R(totalVendasSistema)}</strong>
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span>(−) CAIXA ANTERIOR (FUNDO):</span>
+              <strong className="text-amber-400 font-mono text-sm">−{R(fundoAbertura)}</strong>
             </div>
           </div>
 
@@ -263,7 +294,7 @@ export default function FilipetaFechamentoModal({
               : 'bg-red-950/40 border-red-600/60 text-red-300'
           }`}>
             <span className="text-xs uppercase font-semibold tracking-wider block mb-1">
-              Resultado Final do Caixa:
+              Resultado Final da Conferência:
             </span>
             <strong className="text-2xl font-bold font-mono block">
               {Math.abs(diferencaCaixa) < 0.01
@@ -272,6 +303,9 @@ export default function FilipetaFechamentoModal({
                 ? `CAIXA: +${R(diferencaCaixa)} (Sobra)`
                 : `CAIXA: -${R(Math.abs(diferencaCaixa))} (Quebra/Falta)`}
             </strong>
+            <span className="text-xs text-slate-400 block mt-1 font-mono">
+              {R(totalGeralMovimentado)} − {R(totalVendasSistema)} − {R(fundoAbertura)} = {diferencaCaixa >= 0 ? `+${R(diferencaCaixa)}` : `-${R(Math.abs(diferencaCaixa))}`}
+            </span>
           </div>
         </div>
 
