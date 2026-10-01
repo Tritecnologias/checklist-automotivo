@@ -97,6 +97,22 @@ export default function Pdv() {
       setImportandoOsId(osId)
       const dados = await erpApi.carregarOsPdv(osId)
 
+      if (dados.order?.vendaControle) {
+        alert(`Esta OS já foi finalizada no caixa na Venda #${dados.order.vendaControle} e não pode ser finalizada novamente nem zerada.`)
+        return
+      }
+
+      if (!dados.itens || dados.itens.length === 0) {
+        alert('Esta Ordem de Serviço não possui itens válidos para faturamento.')
+        return
+      }
+
+      const totalItens = dados.itens.reduce((sum: number, it: any) => sum + (it.valor * it.quant), 0)
+      if (totalItens <= 0) {
+        alert('Esta Ordem de Serviço possui valor total zerado (R$ 0,00) e não pode ser faturada no caixa.')
+        return
+      }
+
       // Vincula cliente se encontrado
       if (dados.cliente) {
         setCliente(dados.cliente)
@@ -122,6 +138,9 @@ export default function Pdv() {
 
   const { mutate: finalizar, isPending: finalizando } = useMutation({
     mutationFn: () => {
+      if (total <= 0) {
+        throw new Error('O valor total da venda não pode ser zerado (R$ 0,00).')
+      }
       const itens = cart.map(c => ({ id_produto: c.produto.id, valor: c.valor, quant: c.quant }))
       const outrosVal = parseNum(pagamento.outros)
       const pag = {
@@ -226,7 +245,11 @@ export default function Pdv() {
     setCart(prev => {
       const next = [...prev]
       const novo = next[idx].quant + delta
-      if (novo <= 0) return prev.filter((_, i) => i !== idx)
+      if (novo <= 0) {
+        const filtered = prev.filter((_, i) => i !== idx)
+        if (filtered.length === 0) setOsImportada(null)
+        return filtered
+      }
       next[idx] = { ...next[idx], quant: novo }
       return next
     })
@@ -235,12 +258,18 @@ export default function Pdv() {
   const alterarValor = (idx: number, val: string) => {
     setCart(prev => {
       const next = [...prev]
-      next[idx] = { ...next[idx], valor: parseFloat(val.replace(',', '.')) || 0 }
+      next[idx] = { ...next[idx], valor: Math.max(0, parseFloat(val.replace(',', '.')) || 0) }
       return next
     })
   }
 
-  const remover = (idx: number) => setCart(prev => prev.filter((_, i) => i !== idx))
+  const remover = (idx: number) => {
+    setCart(prev => {
+      const next = prev.filter((_, i) => i !== idx)
+      if (next.length === 0) setOsImportada(null)
+      return next
+    })
+  }
 
   const cartSubtotal = cart.reduce((s, c) => s + c.valor * c.quant, 0)
   const outrosVal = parseNum(pagamento.outros)
@@ -258,7 +287,7 @@ export default function Pdv() {
   const totalPagto = Object.values(pagamento).reduce((s, v) => s + parseNum(v), 0)
   const troco = Math.max(0, totalPagto - total)
   const pagtoCobreTotal = (cart.length > 0 && totalPagto >= total) || (isVendaAvulsa && totalPagto >= total)
-  const podeFinalizar = pagtoCobreTotal && isDescontoAutorizado
+  const podeFinalizar = pagtoCobreTotal && isDescontoAutorizado && total > 0
   const itensComAlertaEstoque = cart.filter(
     c => !c.produto.is_service && c.produto.controla_estoque !== 0 && (c.produto.estoque <= 0 || c.quant > c.produto.estoque)
   )
@@ -719,6 +748,10 @@ export default function Pdv() {
         {/* Botão finalizar */}
         <button
           onClick={() => {
+            if (total <= 0) {
+              alert('O valor total da venda não pode ser zerado (R$ 0,00).')
+              return
+            }
             if (excedeLimiteDesconto && !isDescontoAutorizado) {
               setPin('')
               setPinError('')
@@ -727,15 +760,19 @@ export default function Pdv() {
             }
             finalizar()
           }}
-          disabled={!pagtoCobreTotal || finalizando}
+          disabled={!pagtoCobreTotal || total <= 0 || finalizando}
           className={`w-full py-4 rounded-2xl text-base font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg active:scale-[0.99] ${
-            excedeLimiteDesconto && !isDescontoAutorizado
+            total <= 0
+              ? 'bg-slate-800 text-slate-500 border border-slate-700/60'
+              : excedeLimiteDesconto && !isDescontoAutorizado
               ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-950/40'
               : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/40'
           }`}
         >
           {finalizando
             ? 'Processando…'
+            : total <= 0
+            ? '⚠️ Venda Zerada (R$ 0,00) não permitida'
             : excedeLimiteDesconto && !isDescontoAutorizado
             ? `🔒 Autorizar Desconto (> 4%) e Finalizar · ${R(total)}`
             : `✅ Finalizar Venda · ${R(total)}`}
@@ -818,7 +855,11 @@ export default function Pdv() {
                           </span>
                           {jaFaturada ? (
                             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/60">
-                              ✓ Faturada (#{os.vendaControle})
+                              🔒 Finalizada no Caixa (#{os.vendaControle})
+                            </span>
+                          ) : os.totalAmount <= 0 ? (
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-950 text-red-300 border border-red-800/60">
+                              ⚠️ OS Zerada (R$ 0,00)
                             </span>
                           ) : (
                             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800/60">
@@ -846,7 +887,7 @@ export default function Pdv() {
                       <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
                         <div className="text-right">
                           <p className="text-xs text-slate-400">{jaFaturada ? 'Total Faturado' : 'Total da OS'}</p>
-                          <p className="text-lg font-bold text-emerald-400">{R(os.totalAmount)}</p>
+                          <p className={`text-lg font-bold ${jaFaturada ? 'text-slate-400' : 'text-emerald-400'}`}>{R(os.totalAmount)}</p>
                           {os.laborAmount > 0 && (
                             <p className="text-[10px] text-blue-400">M.O.: {R(os.laborAmount)}</p>
                           )}
@@ -855,17 +896,33 @@ export default function Pdv() {
                           )}
                         </div>
 
-                        <button
-                          onClick={() => handleImportarOs(os.id)}
-                          disabled={importandoEste}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 shrink-0 ${
-                            jaFaturada
-                              ? 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                              : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/50'
-                          }`}
-                        >
-                          <span>{importandoEste ? 'Carregando…' : 'Importar para PDV →'}</span>
-                        </button>
+                        {jaFaturada ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-500 border border-slate-700/60 cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                            title={`Esta OS já foi finalizada na Venda #${os.vendaControle} e não pode ser finalizada novamente.`}
+                          >
+                            <span>🔒 Já Finalizada</span>
+                          </button>
+                        ) : os.totalAmount <= 0 ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-500 border border-slate-700/60 cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                            title="Esta OS está zerada (R$ 0,00) e não pode ser faturada."
+                          >
+                            <span>⚠️ OS Zerada</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleImportarOs(os.id)}
+                            disabled={importandoEste}
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/50 transition-all shadow-md flex items-center gap-1.5 shrink-0"
+                          >
+                            <span>{importandoEste ? 'Carregando…' : 'Importar para PDV →'}</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   )

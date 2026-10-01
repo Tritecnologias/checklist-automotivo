@@ -67,10 +67,10 @@ async function assertOrderOpen(
   res: Response,
 ): Promise<boolean> {
   const [rows] = await pool.execute(
-    'SELECT status, tenant_id FROM os_orders WHERE id = ?',
+    'SELECT status, tenant_id, venda_controle FROM os_orders WHERE id = ?',
     [orderId],
   );
-  const order = (rows as { status: string; tenant_id: number }[])[0];
+  const order = (rows as { status: string; tenant_id: number; venda_controle?: string | null }[])[0];
   if (!order) {
     res.status(404).json({ message: 'OS não encontrada' });
     return false;
@@ -80,6 +80,13 @@ async function assertOrderOpen(
   const allowed = allowedTenants(user);
   if (allowed !== null && !allowed.includes(order.tenant_id)) {
     res.status(403).json({ message: 'Sem acesso a esta OS' });
+    return false;
+  }
+
+  if (order.venda_controle) {
+    res.status(422).json({
+      message: `Esta OS já foi finalizada no PDV (Venda #${order.venda_controle}) e está totalmente bloqueada contra alterações ou exclusão.`
+    });
     return false;
   }
 
@@ -101,7 +108,7 @@ async function recalcTotal(orderId: string): Promise<number> {
   const totalLabor = row ? Number(row.labor_t) : 0;
   const total = totalParts + totalLabor;
   await pool.execute(
-    'UPDATE os_orders SET labor_amount = ?, total_amount = ?, updated_at = NOW() WHERE id = ?',
+    'UPDATE os_orders SET labor_amount = ?, total_amount = ?, updated_at = NOW() WHERE id = ? AND venda_controle IS NULL',
     [totalLabor, total, orderId],
   );
   return total;
@@ -692,12 +699,19 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
 
   try {
     // Verificar acesso ao tenant
-    const [rows] = await pool.execute('SELECT tenant_id FROM os_orders WHERE id = ?', [req.params.id]);
-    const order = (rows as { tenant_id: number }[])[0];
+    const [rows] = await pool.execute('SELECT tenant_id, venda_controle FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (rows as { tenant_id: number; venda_controle?: string | null }[])[0];
     if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
     const allowedT = allowedTenants(req.user!);
     if (allowedT !== null && !allowedT.includes(order.tenant_id)) {
       res.status(403).json({ message: 'Sem acesso a esta OS' });
+      return;
+    }
+
+    if (order.venda_controle) {
+      res.status(422).json({
+        message: `Esta OS já foi finalizada no PDV (Venda #${order.venda_controle}) e não pode ter seu status alterado, ser reaberta ou zerada.`
+      });
       return;
     }
 
@@ -737,6 +751,13 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     const allowedT = allowedTenants(req.user!);
     if (allowedT !== null && !allowedT.includes(Number(order.tenant_id))) {
       res.status(403).json({ message: 'Sem acesso a esta OS' });
+      return;
+    }
+
+    if (order.venda_controle) {
+      res.status(422).json({
+        message: `Esta OS já foi finalizada no PDV (Venda #${order.venda_controle}) e não pode ser alterada.`
+      });
       return;
     }
 

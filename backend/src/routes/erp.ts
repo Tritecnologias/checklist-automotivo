@@ -1112,6 +1112,24 @@ router.post('/vendas', async (req, res) => {
     const hasItens = itensArray.length > 0;
     const finalVrTicket = Number(vr_ticket || 0) + Number(vr_outros || 0);
 
+    // Valida se a OS já foi faturada anteriormente
+    if (id_os) {
+      const [[osCheck]] = await pool.query<any>(
+        'SELECT id, plate, model, status, total_amount, venda_controle FROM os_orders WHERE id = ?',
+        [id_os]
+      );
+      if (!osCheck) {
+        res.status(404).json({ message: 'Ordem de serviço vinculada não encontrada.' });
+        return;
+      }
+      if (osCheck.venda_controle) {
+        res.status(422).json({
+          message: `A Ordem de Serviço ${osCheck.plate} já foi finalizada na Venda #${osCheck.venda_controle} e não pode ser finalizada novamente.`
+        });
+        return;
+      }
+    }
+
     const vr_pagto_total =
       Number(vr_dinheiro || 0) +
       Number(vr_cartao || 0) +
@@ -1163,6 +1181,10 @@ router.post('/vendas', async (req, res) => {
     const data_venda = now.toISOString().slice(0, 10);
 
     const vr_total = hasItens ? (vr_itens + Number(vr_adicional)) : vr_pagto_total;
+    if (vr_total <= 0) {
+      res.status(400).json({ message: 'O valor total da venda não pode ser zero ou negativo.' });
+      return;
+    }
     const em_aberto = (vr_nota > 0 || vr_carne > 0) ? 1 : 0;
 
     // Detect primary payment mode for cod_lancamento mapping
@@ -1306,17 +1328,10 @@ router.post('/vendas', async (req, res) => {
             }
           }
 
-          // Se peças originais da OS foram removidas no PDV antes da venda, remove de os_order_items
-          if (soldPartProductIds.length > 0) {
-            const placeholders = soldPartProductIds.map(() => '?').join(',');
-            await pool.query(
-              `DELETE FROM os_order_items WHERE order_id = ? AND type = 'part' AND product_id NOT IN (${placeholders})`,
-              [id_os, ...soldPartProductIds]
-            );
-          }
-
+          // Mantém todos os itens originais da OS para preservar o histórico e não zerar valores
           const discountAmount = Number(vr_adicional) < 0 ? Math.abs(Number(vr_adicional)) : 0;
           const finalLabor = osLabor > 0 ? osLabor : Number(osRow.labor_amount ?? 0);
+          const finalTotal = Math.max(Number(vr_total), Number(osRow.total_amount ?? 0));
 
           await pool.query(
             `UPDATE os_orders
@@ -1327,8 +1342,8 @@ router.post('/vendas', async (req, res) => {
                  labor_amount = ?,
                  discount_amount = ?,
                  updated_at = NOW()
-             WHERE id = ?`,
-            [controle, vr_total, finalLabor, discountAmount, id_os]
+             WHERE id = ? AND venda_controle IS NULL`,
+            [controle, finalTotal, finalLabor, discountAmount, id_os]
           );
         }
       } catch (osSyncErr) {
@@ -2061,6 +2076,13 @@ router.get('/pdv/os/:id', async (req, res) => {
 
     if (!order) {
       res.status(404).json({ message: 'Ordem de serviço não encontrada' });
+      return;
+    }
+
+    if (order.venda_controle) {
+      res.status(422).json({
+        message: `Esta Ordem de Serviço (${order.plate}) já foi finalizada no caixa na Venda #${order.venda_controle} e não pode ser finalizada novamente nem zerada.`
+      });
       return;
     }
 

@@ -102,7 +102,7 @@ export default function OrderDetail() {
     enabled: !!id,
   })
 
-  const isClosed = order?.status === 'closed'
+  const isClosed = order?.status === 'closed' || !!order?.vendaControle
 
   const { data: searchResults, isFetching: searchingCatalog } = useQuery({
     queryKey: ['catalog-search', debouncedQuery],
@@ -263,6 +263,10 @@ export default function OrderDetail() {
   }
 
   const handleReopenClick = () => {
+    if (order?.vendaControle) {
+      alert(`Esta OS já foi finalizada no PDV (Venda #${order.vendaControle}) e está permanentemente bloqueada contra reabertura.`)
+      return
+    }
     setPin('')
     setPinError('')
     setShowReopenPin(true)
@@ -683,6 +687,14 @@ export default function OrderDetail() {
                 >
                   🔒 Encerrar OS
                 </button>
+              ) : order.vendaControle ? (
+                <div
+                  className="px-4 py-2 bg-slate-800 text-slate-400 rounded-xl text-sm font-semibold border border-slate-700/60 flex items-center gap-1.5 cursor-not-allowed select-none"
+                  title={`OS finalizada no PDV (Venda #${order.vendaControle}). Bloqueada contra reabertura e alterações.`}
+                >
+                  <span>🔒</span>
+                  <span>Finalizada no PDV (#{order.vendaControle})</span>
+                </div>
               ) : (
                 <button
                   onClick={handleReopenClick}
