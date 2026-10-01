@@ -245,7 +245,19 @@ router.get('/caixa', async (req, res) => {
          LEFT JOIN cad_lancamentos l ON (
            l.tenant_id = c.tenant_id
            AND l.status_lancamento = 1
-           AND (COALESCE(l.data_confirmacao, l.data_vencimento) = c.data_abertura OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(c.data_abertura))
+           AND (
+             l.id_caixa = c.id
+             OR (
+               l.id_caixa IS NULL
+               AND (COALESCE(l.data_confirmacao, l.data_vencimento) = c.data_abertura OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(c.data_abertura))
+               AND NOT EXISTS (
+                 SELECT 1 FROM mv_caixa c_prev
+                 WHERE c_prev.tenant_id = c.tenant_id
+                   AND c_prev.data_abertura = c.data_abertura
+                   AND c_prev.id < c.id
+               )
+             )
+           )
          )
          LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
          WHERE c.id IN (${placeholders})
@@ -596,7 +608,7 @@ router.get('/caixa/status', async (req, res) => {
     [row.tenant_id, row.id, row.data_abertura, row.data_abertura, row.hora_abertura]
   );
 
-  // Agrega despesas (contas a pagar quitadas) vinculadas à data da sessão de caixa atual
+  // Agrega despesas (contas a pagar quitadas) vinculadas exclusivamente à sessão de caixa atual
   const [[despesasStatus]] = await pool.query<any>(
     `SELECT 
        COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
@@ -607,8 +619,20 @@ router.get('/caixa/status', async (req, res) => {
      WHERE l.tenant_id = ?
        AND l.status_lancamento = 1
        AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
-       AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))`,
-    [row.tenant_id, row.data_abertura, row.data_abertura]
+       AND (
+         l.id_caixa = ?
+         OR (
+           l.id_caixa IS NULL
+           AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
+           AND NOT EXISTS (
+             SELECT 1 FROM mv_caixa c_prev
+             WHERE c_prev.tenant_id = ?
+               AND c_prev.data_abertura = ?
+               AND c_prev.id < ?
+           )
+         )
+       )`,
+    [row.tenant_id, row.id, row.data_abertura, row.data_abertura, row.tenant_id, row.data_abertura, row.id]
   );
 
   const vrTotal = Number(totais?.vr_total || 0);
@@ -719,8 +743,20 @@ router.get('/caixa/:id/detalhes', async (req, res) => {
      WHERE l.tenant_id = ?
        AND l.status_lancamento = 1
        AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
-       AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))`,
-    [caixa.tenant_id, caixa.data_abertura, caixa.data_abertura]
+       AND (
+         l.id_caixa = ?
+         OR (
+           l.id_caixa IS NULL
+           AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
+           AND NOT EXISTS (
+             SELECT 1 FROM mv_caixa c_prev
+             WHERE c_prev.tenant_id = ?
+               AND c_prev.data_abertura = ?
+               AND c_prev.id < ?
+           )
+         )
+       )`,
+    [caixa.tenant_id, caixa.id, caixa.data_abertura, caixa.data_abertura, caixa.tenant_id, caixa.data_abertura, caixa.id]
   );
 
   const [despesasRows] = await pool.query<any>(
@@ -734,9 +770,21 @@ router.get('/caixa/:id/detalhes', async (req, res) => {
      WHERE l.tenant_id = ?
        AND l.status_lancamento = 1
        AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
-       AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
+       AND (
+         l.id_caixa = ?
+         OR (
+           l.id_caixa IS NULL
+           AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
+           AND NOT EXISTS (
+             SELECT 1 FROM mv_caixa c_prev
+             WHERE c_prev.tenant_id = ?
+               AND c_prev.data_abertura = ?
+               AND c_prev.id < ?
+           )
+         )
+       )
      ORDER BY l.id DESC LIMIT 50`,
-    [caixa.tenant_id, caixa.data_abertura, caixa.data_abertura]
+    [caixa.tenant_id, caixa.id, caixa.data_abertura, caixa.data_abertura, caixa.tenant_id, caixa.data_abertura, caixa.id]
   );
 
   const vrTotal = Number(totais?.vr_total || caixa.vr_fechado_turno || 0);
@@ -853,6 +901,23 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
     [caixaRow.tenant_id, caixaRow.id, caixaRow.data_abertura, caixaRow.turno, caixaRow.terminal]
   );
 
+  // Associa despesas pendentes pagas durante esta sessão que ainda não tinham id_caixa gravado
+  await pool.query(
+    `UPDATE cad_lancamentos
+     SET id_caixa = ?
+     WHERE tenant_id = ?
+       AND status_lancamento = 1
+       AND id_caixa IS NULL
+       AND (data_confirmacao = ? OR DATE(data_confirmacao) = ?)
+       AND NOT EXISTS (
+         SELECT 1 FROM mv_caixa c_prev
+         WHERE c_prev.tenant_id = ?
+           AND c_prev.data_abertura = ?
+           AND c_prev.id < ?
+       )`,
+    [caixaRow.id, caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.data_abertura, caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.id]
+  );
+
   const [[despesasFechar]] = await pool.query<any>(
     `SELECT 
        COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
@@ -863,8 +928,20 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
      WHERE l.tenant_id = ?
        AND l.status_lancamento = 1
        AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14))
-       AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))`,
-    [caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.data_abertura]
+       AND (
+         l.id_caixa = ?
+         OR (
+           l.id_caixa IS NULL
+           AND (COALESCE(l.data_confirmacao, l.data_vencimento) = ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) = DATE(?))
+           AND NOT EXISTS (
+             SELECT 1 FROM mv_caixa c_prev
+             WHERE c_prev.tenant_id = ?
+               AND c_prev.data_abertura = ?
+               AND c_prev.id < ?
+           )
+         )
+       )`,
+    [caixaRow.tenant_id, caixaRow.id, caixaRow.data_abertura, caixaRow.data_abertura, caixaRow.tenant_id, caixaRow.data_abertura, caixaRow.id]
   );
 
   const totalVendas = Number(totals?.vr_fechado_turno || 0);
@@ -1010,6 +1087,7 @@ router.post('/vendas', async (req, res) => {
       terminal = '01',
       turno = '1',
       id_os,
+      supervisor_pin,
     } = req.body as {
       id_cliente?: number;
       itens: { id_produto: number; valor: number; quant: number }[];
@@ -1027,6 +1105,7 @@ router.post('/vendas', async (req, res) => {
       terminal?: string;
       turno?: string;
       id_os?: string;
+      supervisor_pin?: string;
     };
 
     const itensArray = Array.isArray(itens) ? itens : [];
@@ -1047,13 +1126,42 @@ router.post('/vendas', async (req, res) => {
       return;
     }
 
+    const vr_itens = hasItens ? itensArray.reduce((s, i) => s + i.valor * i.quant, 0) : 0;
+    const subtotalCalculado = vr_itens > 0 ? vr_itens : (vr_pagto_total + (Number(vr_adicional) < 0 ? Math.abs(Number(vr_adicional)) : 0));
+    const descontoAplicado = Number(vr_adicional) < 0 ? Math.abs(Number(vr_adicional)) : 0;
+
+    // Regra de segurança: Máximo de 4% de desconto sem autorização do Administrador
+    if (descontoAplicado > 0 && subtotalCalculado > 0) {
+      const limiteDescontoPermitido = Math.round((subtotalCalculado * 0.04) * 100) / 100;
+      if (descontoAplicado > limiteDescontoPermitido + 0.005) {
+        const isOwner = req.user?.role === 'owner';
+        let pinValido = false;
+
+        if (supervisor_pin && /^\d{4}$/.test(String(supervisor_pin))) {
+          const [pinRows] = await pool.query<any>(
+            'SELECT supervisor_name FROM os_supervisor_pins WHERE pin = ? AND active = 1',
+            [supervisor_pin]
+          );
+          if ((pinRows as any[]).length > 0 || (process.env.SUPERVISOR_PIN && supervisor_pin === process.env.SUPERVISOR_PIN)) {
+            pinValido = true;
+          }
+        }
+
+        if (!isOwner && !pinValido) {
+          res.status(403).json({
+            message: `Desconto de R$ ${descontoAplicado.toFixed(2)} excede o limite máximo permitido de 4% (R$ ${limiteDescontoPermitido.toFixed(2)}). Requer autorização do Administrador via PIN.`
+          });
+          return;
+        }
+      }
+    }
+
     const tenantId = getErpWriteTenantId(req);
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const controle = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
     const data_venda = now.toISOString().slice(0, 10);
 
-    const vr_itens = hasItens ? itensArray.reduce((s, i) => s + i.valor * i.quant, 0) : 0;
     const vr_total = hasItens ? (vr_itens + Number(vr_adicional)) : vr_pagto_total;
     const em_aberto = (vr_nota > 0 || vr_carne > 0) ? 1 : 0;
 
@@ -1658,6 +1766,16 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
     // Base date
     const [y, m, d] = String(data_vencimento).slice(0, 10).split('-').map(Number);
 
+    // Se houver pagamento imediato, busca a sessão de caixa aberta para vincular
+    let caixaAbertoId: number | null = null;
+    if (Boolean(pago_agora)) {
+      const [[caixaAberto]] = await pool.query<any>(
+        `SELECT id FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
+        [tenantId]
+      );
+      caixaAbertoId = caixaAberto?.id ?? null;
+    }
+
     for (let p = 1; p <= numParcelas; p++) {
       const due = new Date(y, (m - 1) + (p - 1), d);
       const dueStr = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`;
@@ -1671,8 +1789,8 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
            (id_planejamento, id_conta, id_modo_lancamento, status_lancamento,
             controle, documento, historico, favorecido, parcela, data_vencimento,
             vr_parcela, vr_abatimentos, vr_acrescimo, transferido,
-            id_cliente, data_confirmacao, dias_atraso, tenant_id)
-         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, 0, ?)`,
+            id_cliente, data_confirmacao, dias_atraso, tenant_id, id_caixa)
+         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, 0, ?, ?)`,
         [
           Number(id_planejamento || 4),
           Number(id_modo_lancamento || 4),
@@ -1685,7 +1803,8 @@ router.post('/contas-pagar', requireManagerUp, async (req, res) => {
           dueStr,
           valorParcela,
           dataConf,
-          tenantId
+          tenantId,
+          isPago ? caixaAbertoId : null
         ]
       );
     }
@@ -1701,18 +1820,26 @@ router.patch('/contas-pagar/:id/pagar', requireManagerUp, async (req, res) => {
   try {
     const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
     const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
+    const writeTenantId = getErpWriteTenantId(req);
     const dataConfirmacao = req.body.data_pagamento || new Date().toISOString().slice(0, 10);
     const modoId = req.body.id_modo_lancamento ? Number(req.body.id_modo_lancamento) : null;
 
+    // Busca caixa aberto para vincular a baixa da despesa à sessão atual
+    const [[caixaAberto]] = await pool.query<any>(
+      `SELECT id FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
+      [writeTenantId]
+    );
+    const idCaixa = caixaAberto?.id ?? null;
+
     if (modoId) {
       await pool.query(
-        `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=?, id_modo_lancamento=? WHERE id=?${whereTenant}`,
-        [dataConfirmacao, modoId, req.params.id, ...tenantParams]
+        `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=?, id_modo_lancamento=?, id_caixa=? WHERE id=?${whereTenant}`,
+        [dataConfirmacao, modoId, idCaixa, req.params.id, ...tenantParams]
       );
     } else {
       await pool.query(
-        `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=? WHERE id=?${whereTenant}`,
-        [dataConfirmacao, req.params.id, ...tenantParams]
+        `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=?, id_caixa=? WHERE id=?${whereTenant}`,
+        [dataConfirmacao, idCaixa, req.params.id, ...tenantParams]
       );
     }
     res.json({ ok: true });
@@ -1726,7 +1853,7 @@ router.patch('/contas-pagar/:id/estornar', requireManagerUp, async (req, res) =>
     const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
     const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
     await pool.query(
-      `UPDATE cad_lancamentos SET status_lancamento=0, data_confirmacao=NULL WHERE id=?${whereTenant}`,
+      `UPDATE cad_lancamentos SET status_lancamento=0, data_confirmacao=NULL, id_caixa=NULL WHERE id=?${whereTenant}`,
       [req.params.id, ...tenantParams]
     );
     res.json({ ok: true });

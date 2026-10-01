@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { erpApi } from '../lib/api'
+import { api, erpApi } from '../lib/api'
 import type { ProdutoPdv, ClientePdv, OsEncerradaPdv } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import { printThermalReceipt, type ThermalReceiptData } from '../lib/thermalPrint'
@@ -32,7 +32,7 @@ interface Pagamento {
 const PAG_VAZIO: Pagamento = { dinheiro: '', cartao: '', pix: '', nota: '', outros: '' }
 
 export default function Pdv() {
-  const { currentTenant } = useAuth()
+  const { currentTenant, user } = useAuth()
   const tid = currentTenant?.id ?? null
   const qc = useQueryClient()
   const searchRef = useRef<HTMLInputElement>(null)
@@ -46,6 +46,17 @@ export default function Pdv() {
   const [sucesso, setSucesso] = useState<string | null>(null)
   const [vendaRecente, setVendaRecente] = useState<ThermalReceiptData | null>(null)
   const [avisosEstoqueVenda, setAvisosEstoqueVenda] = useState<string[] | null>(null)
+
+  // ── Autorização de Desconto (> 4%) ─────────────────────────────────────────
+  const [autorizacaoAdmin, setAutorizacaoAdmin] = useState<{
+    supervisorName: string
+    pin: string
+    valorAutorizado: number
+  } | null>(null)
+  const [showPinModal, setShowPinModal] = useState(false)
+  const [pin, setPin] = useState('')
+  const [pinError, setPinError] = useState('')
+  const [verificandoPin, setVerificandoPin] = useState(false)
 
   // ── Estado de Integração com OS Encerradas ──────────────────────────────────
   const [showOsModal, setShowOsModal]               = useState(false)
@@ -123,6 +134,7 @@ export default function Pdv() {
         id_cliente: cliente?.id ?? 0,
         itens,
         id_os: osImportada?.id,
+        supervisor_pin: autorizacaoAdmin?.pin,
       }
 
       // Prepara snapshot da venda para impressão térmica
@@ -181,6 +193,7 @@ export default function Pdv() {
       setCart([])
       setPagamento(PAG_VAZIO)
       setDesconto('')
+      setAutorizacaoAdmin(null)
       setCliente(null)
       setOsImportada(null)
       setBusca('')
@@ -234,13 +247,49 @@ export default function Pdv() {
   const isVendaAvulsa = cart.length === 0 && outrosVal > 0
   const subtotal = cart.length > 0 ? cartSubtotal : outrosVal
   const descontoVal = parseDesconto(subtotal, desconto)
+  const limiteDescontoPermitido = Math.round((subtotal * 0.04) * 100) / 100
+  const excedeLimiteDesconto = subtotal > 0 && descontoVal > (limiteDescontoPermitido + 0.005)
+  const pctDesconto = subtotal > 0 ? (descontoVal / subtotal) * 100 : 0
+  const isDescontoAutorizado = !excedeLimiteDesconto || (
+    user?.role === 'owner' ||
+    (autorizacaoAdmin !== null && autorizacaoAdmin.valorAutorizado >= descontoVal)
+  )
   const total = Math.max(0, subtotal - descontoVal)
   const totalPagto = Object.values(pagamento).reduce((s, v) => s + parseNum(v), 0)
   const troco = Math.max(0, totalPagto - total)
-  const podeFinalizar = (cart.length > 0 && totalPagto >= total) || (isVendaAvulsa && totalPagto >= total)
+  const pagtoCobreTotal = (cart.length > 0 && totalPagto >= total) || (isVendaAvulsa && totalPagto >= total)
+  const podeFinalizar = pagtoCobreTotal && isDescontoAutorizado
   const itensComAlertaEstoque = cart.filter(
     c => !c.produto.is_service && c.produto.controla_estoque !== 0 && (c.produto.estoque <= 0 || c.quant > c.produto.estoque)
   )
+
+  const handlePinSubmit = async () => {
+    if (!/^\d{4}$/.test(pin)) {
+      setPinError('O PIN deve conter exatamente 4 dígitos.')
+      return
+    }
+    setVerificandoPin(true)
+    setPinError('')
+    try {
+      const res = await api.verifySupervisorPin(pin)
+      if (res.authorized) {
+        setAutorizacaoAdmin({
+          supervisorName: res.supervisorName || 'Supervisor',
+          pin,
+          valorAutorizado: descontoVal,
+        })
+        setShowPinModal(false)
+        setPin('')
+        setPinError('')
+      } else {
+        setPinError('PIN inválido. Somente administradores podem autorizar descontos.')
+      }
+    } catch (err: any) {
+      setPinError(err?.message || 'Erro ao validar PIN. Tente novamente.')
+    } finally {
+      setVerificandoPin(false)
+    }
+  }
 
   if (!statusCaixa) {
     return (
@@ -543,19 +592,68 @@ export default function Pdv() {
               <span className="text-[10px] text-slate-500">(R$ ou %)</span>
             </span>
             <div className="flex items-center gap-1.5">
-              {desconto.trim().endsWith('%') && descontoVal > 0 && (
-                <span className="text-xs text-amber-400 font-mono">
-                  (-{R(descontoVal)})
+              {descontoVal > 0 && (
+                <span className={`text-xs font-mono font-medium ${
+                  excedeLimiteDesconto
+                    ? (isDescontoAutorizado ? 'text-emerald-400' : 'text-amber-400')
+                    : 'text-slate-400'
+                }`}>
+                  (-{R(descontoVal)}{desconto.trim().endsWith('%') ? '' : ` · ${pctDesconto.toFixed(1)}%`})
                 </span>
               )}
               <input
                 value={desconto}
-                onChange={e => setDesconto(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value
+                  setDesconto(val)
+                  if (autorizacaoAdmin) {
+                    const novoVal = parseDesconto(subtotal, val)
+                    if (novoVal > autorizacaoAdmin.valorAutorizado) {
+                      setAutorizacaoAdmin(null)
+                    }
+                  }
+                }}
                 placeholder="0,00 ou 4%"
-                className="w-28 text-right bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono"
+                className={`w-28 text-right bg-slate-800 border rounded px-2 py-0.5 text-white text-sm focus:outline-none font-mono transition-colors ${
+                  excedeLimiteDesconto && !isDescontoAutorizado
+                    ? 'border-amber-500/80 focus:border-amber-400 text-amber-200'
+                    : 'border-slate-700 focus:border-blue-500'
+                }`}
               />
             </div>
           </div>
+
+          {/* Aviso / Status de Autorização de Desconto */}
+          {excedeLimiteDesconto && (
+            <div className={`p-2.5 rounded-xl text-xs border flex items-center justify-between gap-2 transition-all ${
+              isDescontoAutorizado
+                ? 'bg-emerald-950/40 border-emerald-600/40 text-emerald-300'
+                : 'bg-amber-950/40 border-amber-600/50 text-amber-300'
+            }`}>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-sm">{isDescontoAutorizado ? '✅' : '🔒'}</span>
+                <span className="truncate">
+                  {isDescontoAutorizado
+                    ? `Desconto de ${pctDesconto.toFixed(1)}% autorizado por ${user?.role === 'owner' ? 'Owner' : autorizacaoAdmin?.supervisorName || 'Administrador'}`
+                    : `Desconto de ${pctDesconto.toFixed(1)}% acima de 4% (máx: ${R(limiteDescontoPermitido)})`}
+                </span>
+              </div>
+              {!isDescontoAutorizado && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPin('')
+                    setPinError('')
+                    setShowPinModal(true)
+                  }}
+                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 active:scale-95 text-white rounded-lg text-[11px] font-bold shrink-0 transition-all shadow-sm shadow-amber-950/40 flex items-center gap-1"
+                >
+                  <span>🔑</span>
+                  <span>Autorizar</span>
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="border-t border-slate-800 pt-2 flex justify-between text-base font-bold text-white">
             <span>Total</span>
@@ -620,14 +718,30 @@ export default function Pdv() {
 
         {/* Botão finalizar */}
         <button
-          onClick={() => finalizar()}
-          disabled={!podeFinalizar || finalizando}
-          className="w-full py-4 rounded-2xl text-base font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/40"
+          onClick={() => {
+            if (excedeLimiteDesconto && !isDescontoAutorizado) {
+              setPin('')
+              setPinError('')
+              setShowPinModal(true)
+              return
+            }
+            finalizar()
+          }}
+          disabled={!pagtoCobreTotal || finalizando}
+          className={`w-full py-4 rounded-2xl text-base font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg active:scale-[0.99] ${
+            excedeLimiteDesconto && !isDescontoAutorizado
+              ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-950/40'
+              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/40'
+          }`}
         >
-          {finalizando ? 'Processando…' : `✅ Finalizar Venda · ${R(total)}`}
+          {finalizando
+            ? 'Processando…'
+            : excedeLimiteDesconto && !isDescontoAutorizado
+            ? `🔒 Autorizar Desconto (> 4%) e Finalizar · ${R(total)}`
+            : `✅ Finalizar Venda · ${R(total)}`}
         </button>
 
-        {!podeFinalizar && cart.length > 0 && totalPagto < total && (
+        {!pagtoCobreTotal && cart.length > 0 && totalPagto < total && (
           <p className="text-xs text-red-400 text-center -mt-2">
             Faltam {R(total - totalPagto)} para cobrir o total
           </p>
@@ -799,6 +913,92 @@ export default function Pdv() {
                 className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-amber-950/40"
               >
                 Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: AUTORIZAÇÃO DE DESCONTO (> 4%) ── */}
+      {showPinModal && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 px-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">🔒</span>
+              <div>
+                <h2 className="text-lg font-bold text-white">Autorização de Desconto</h2>
+                <p className="text-xs text-slate-400">Requer permissão de Administrador</p>
+              </div>
+            </div>
+
+            <p className="text-slate-300 text-xs mb-3 leading-relaxed">
+              O desconto aplicado de <strong className="text-amber-400 font-mono">{R(descontoVal)} ({pctDesconto.toFixed(1)}%)</strong> excede o limite máximo padrão de <strong>4,0% ({R(limiteDescontoPermitido)})</strong>.
+            </p>
+
+            <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800 text-xs space-y-1.5 mb-4">
+              <div className="flex justify-between text-slate-400">
+                <span>Subtotal da Venda:</span>
+                <span className="text-slate-200 font-mono font-semibold">{R(subtotal)}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>Desconto Solicitado:</span>
+                <span className="text-amber-400 font-mono font-bold">{R(descontoVal)} ({pctDesconto.toFixed(1)}%)</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>Limite sem PIN (4%):</span>
+                <span className="text-slate-400 font-mono">{R(limiteDescontoPermitido)}</span>
+              </div>
+              <div className="flex justify-between border-t border-slate-800/80 pt-1 text-slate-300">
+                <span>Novo Total da Venda:</span>
+                <span className="text-emerald-400 font-mono font-bold text-sm">{R(total)}</span>
+              </div>
+            </div>
+
+            <p className="text-slate-300 text-xs font-semibold mb-2">
+              Digite o PIN do Administrador (4 dígitos):
+            </p>
+
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={pin}
+              onChange={(e) => {
+                setPin(e.target.value.replace(/\D/g, '').slice(0, 4))
+                setPinError('')
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && pin.length === 4 && handlePinSubmit()}
+              placeholder="••••"
+              className="w-full bg-slate-800 border border-slate-700 text-white text-center text-2xl tracking-[0.5em] placeholder-slate-600 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-amber-500 mb-2 font-mono"
+              autoFocus
+            />
+
+            {pinError && (
+              <p className="text-red-400 text-xs mb-3 font-medium flex items-center gap-1">
+                <span>⚠️</span>
+                <span>{pinError}</span>
+              </p>
+            )}
+
+            <div className="flex gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPinModal(false)
+                  setPin('')
+                  setPinError('')
+                }}
+                className="flex-1 py-2.5 rounded-xl border border-slate-700 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handlePinSubmit}
+                disabled={verificandoPin || pin.length < 4}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-amber-950/40"
+              >
+                {verificandoPin ? 'Validando…' : 'Autorizar'}
               </button>
             </div>
           </div>

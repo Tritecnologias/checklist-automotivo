@@ -403,6 +403,36 @@ async function runMigrations() {
     console.log('[migration] cad_lancamentos.tenant_id adicionada');
   }
 
+  // id_caixa em cad_lancamentos para vincular despesas à sessão de caixa correta
+  const [[{ cntLancCaixa }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntLancCaixa FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_lancamentos' AND COLUMN_NAME = 'id_caixa'`
+  );
+  if (Number(cntLancCaixa) === 0) {
+    await pool.query('ALTER TABLE cad_lancamentos ADD COLUMN id_caixa INT NULL DEFAULT NULL, ADD INDEX idx_cad_lancamentos_caixa (id_caixa)');
+    console.log('[migration] cad_lancamentos.id_caixa adicionada');
+  }
+
+  // Backfill: vincula despesas já quitadas à primeira sessão da data para não vazarem para novas sessões do mesmo dia
+  try {
+    await pool.query(`
+      UPDATE cad_lancamentos l
+      JOIN (
+        SELECT tenant_id, data_abertura, MIN(id) as first_caixa_id
+        FROM mv_caixa
+        GROUP BY tenant_id, data_abertura
+      ) c ON c.tenant_id = l.tenant_id AND c.data_abertura = DATE(COALESCE(l.data_confirmacao, l.data_vencimento))
+      SET l.id_caixa = c.first_caixa_id
+      WHERE l.status_lancamento = 1
+        AND l.id_caixa IS NULL
+        AND (l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14) OR EXISTS (
+          SELECT 1 FROM cad_planejamento pl WHERE pl.id = l.id_planejamento AND pl.plane_tipo = 'S'
+        ))
+    `);
+  } catch (backfillErr) {
+    console.warn('[migration] Aviso no backfill de id_caixa em cad_lancamentos:', backfillErr);
+  }
+
   // Seed / garantir categorias de despesas no cad_planejamento
   await pool.query(`
     CREATE TABLE IF NOT EXISTS \`cad_planejamento\` (
