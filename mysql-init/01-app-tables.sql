@@ -81,3 +81,36 @@ CREATE TABLE IF NOT EXISTS `os_supervisor_pins` (
 
 INSERT IGNORE INTO `os_supervisor_pins` (pin, supervisor_name)
 VALUES ('1234', 'Supervisor Padrão');
+
+CREATE TABLE IF NOT EXISTS `cad_mecanicos` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 1,
+  `nome` VARCHAR(100) NOT NULL,
+  `apelido` VARCHAR(50) DEFAULT NULL,
+  `cpf` VARCHAR(20) DEFAULT NULL,
+  `telefone` VARCHAR(30) DEFAULT NULL,
+  `chave_pix` VARCHAR(100) DEFAULT NULL,
+  `comissao_servico_pct` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  `comissao_peca_pct` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  `ativo` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY `idx_cad_mecanicos_tenant` (`tenant_id`, `ativo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mecanico_pagamentos` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `tenant_id` INT NOT NULL DEFAULT 1,
+  `mecanico_id` INT NOT NULL,
+  `valor` DECIMAL(10,2) NOT NULL,
+  `data_pagamento` DATE NOT NULL,
+  `periodo_inicio` DATE NULL DEFAULT NULL,
+  `periodo_fim` DATE NULL DEFAULT NULL,
+  `forma_pagamento` VARCHAR(50) NOT NULL DEFAULT 'PIX',
+  `observacoes` VARCHAR(255) NULL DEFAULT NULL,
+  `id_lancamento` INT NULL DEFAULT NULL,
+  `created_by` VARCHAR(100) NULL DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_mecanico_pagamentos` (`mecanico_id`, `tenant_id`, `data_pagamento`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

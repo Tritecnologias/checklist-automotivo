@@ -118,11 +118,13 @@ async function fetchItems(orderId: string, tenantId = 1): Promise<Record<string,
   const [rows] = await pool.query(
     `SELECT oi.*, inst.sigla AS instalacao_sigla,
             COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque,
-            COALESCE(p.controla_estoque, 1) AS controla_estoque
+            COALESCE(p.controla_estoque, 1) AS controla_estoque,
+            m.nome AS cad_mecanico_nome
      FROM os_order_items oi
      LEFT JOIN instalacoes inst ON inst.id = oi.instalacao_id
      LEFT JOIN cad_produtos p ON p.id = oi.product_id
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+     LEFT JOIN cad_mecanicos m ON m.id = oi.mecanico_id
      WHERE oi.order_id = ?
      ORDER BY oi.created_at`,
     [tenantId, tenantId, orderId],
@@ -149,6 +151,8 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
     },
     status: order.status,
     vendaControle: (order.venda_controle as string | null) ?? null,
+    mecanicoId: order.mecanico_id ? Number(order.mecanico_id) : null,
+    mecanicoNome: (order.mecanico_nome as string | null) ?? null,
     items: items.map(i => ({
       id: i.id,
       productId: i.product_id ? Number(i.product_id) : null,
@@ -163,6 +167,10 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
       instalacaoSigla: (i.instalacao_sigla as string | null) ?? null,
       stock: i.estoque !== null && i.estoque !== undefined ? Number(i.estoque) : null,
       controlaEstoque: i.controla_estoque !== null && i.controla_estoque !== undefined ? Number(i.controla_estoque) === 1 : true,
+      mecanicoId: i.mecanico_id ? Number(i.mecanico_id) : null,
+      mecanicoNome: (i.mecanico_nome as string) || (i.cad_mecanico_nome as string) || null,
+      comissaoPct: i.comissao_pct !== null && i.comissao_pct !== undefined ? Number(i.comissao_pct) : null,
+      comissaoValor: i.comissao_valor !== null && i.comissao_valor !== undefined ? Number(i.comissao_valor) : null,
     })),
     laborAmount: Number(order.labor_amount ?? 0),
     totalAmount: Number(order.total_amount),
@@ -176,7 +184,7 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
 // ── GET /orders ─────────────────────────────────────────────────────────────
 
 router.get('/', async (req: Request, res: Response) => {
-  const { search, status } = req.query as { search?: string; status?: string };
+  const { search, status, mecanico_id } = req.query as { search?: string; status?: string; mecanico_id?: string };
   const user = req.user!;
 
   try {
@@ -191,13 +199,19 @@ router.get('/', async (req: Request, res: Response) => {
         OR UPPER(o.model) LIKE ?
         OR UPPER(COALESCE(o.client_name, '')) LIKE ?
         OR COALESCE(o.client_phone, '') LIKE ?
+        OR UPPER(COALESCE(o.mecanico_nome, '')) LIKE ?
       )`);
-      params.push(`%${clean}%`, term, term, term);
+      params.push(`%${clean}%`, term, term, term, term);
     }
 
     if (status?.trim()) {
       whereParts.push('o.status = ?');
       params.push(status.trim());
+    }
+
+    if (mecanico_id && Number(mecanico_id) > 0) {
+      whereParts.push('(o.mecanico_id = ? OR EXISTS (SELECT 1 FROM os_order_items oi WHERE oi.order_id = o.id AND oi.mecanico_id = ?))');
+      params.push(Number(mecanico_id), Number(mecanico_id));
     }
 
     const { clause: tenantClause, params: tenantParams } = tenantWhereClause(
@@ -230,6 +244,8 @@ router.get('/', async (req: Request, res: Response) => {
         },
         status: o.status,
         vendaControle: (o.venda_controle as string | null) ?? null,
+        mecanicoId: o.mecanico_id ? Number(o.mecanico_id) : null,
+        mecanicoNome: (o.mecanico_nome as string | null) ?? null,
         laborAmount: Number(o.labor_amount ?? 0),
         totalAmount: Number(o.total_amount),
         discountAmount: Number(o.discount_amount ?? 0),
@@ -330,10 +346,12 @@ router.post('/', async (req: Request, res: Response) => {
     vehicle,
     client,
     status = 'open',
+    mecanicoId,
   } = req.body as {
     vehicle?: { plate?: string; model?: string; mileage?: number };
     client?: { id?: number | null; name?: string; phone?: string; document?: string };
     status?: string;
+    mecanicoId?: number | null;
   };
 
   if (!vehicle?.plate || !vehicle?.model || vehicle?.mileage === undefined) {
@@ -480,10 +498,17 @@ router.post('/', async (req: Request, res: Response) => {
       console.error('Erro ao sincronizar cliente em cad_clientes:', cErr);
     }
 
+    let finalMecId: number | null = (mecanicoId && Number(mecanicoId) > 0) ? Number(mecanicoId) : null;
+    let finalMecNome: string | null = null;
+    if (finalMecId) {
+      const [[mecRow]] = await pool.execute<any>('SELECT nome FROM cad_mecanicos WHERE id = ?', [finalMecId]);
+      if (mecRow) finalMecNome = mecRow.nome;
+    }
+
     await pool.execute(
       `INSERT INTO os_orders
-         (id, plate, model, mileage, status, total_amount, tenant_id, client_id, client_name, client_phone, client_document)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+         (id, plate, model, mileage, status, total_amount, tenant_id, client_id, client_name, client_phone, client_document, mecanico_id, mecanico_nome)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         vehicle.plate.toUpperCase(),
@@ -495,6 +520,8 @@ router.post('/', async (req: Request, res: Response) => {
         clientName,
         clientPhone,
         clientDoc,
+        finalMecId,
+        finalMecNome,
       ],
     );
 
@@ -510,6 +537,8 @@ router.post('/', async (req: Request, res: Response) => {
       },
       status: finalStatus,
       vendaControle: null,
+      mecanicoId: finalMecId,
+      mecanicoNome: finalMecNome,
       items: [],
       totalAmount: 0,
       laborAmount: 0,
@@ -556,12 +585,13 @@ router.get('/:id', async (req: Request, res: Response) => {
 // ── POST /orders/:id/items ──────────────────────────────────────────────────
 
 router.post('/:id/items', async (req: Request, res: Response) => {
-  const { catalogItemId, quantity = 1, unitPrice: overridePrice, laborPrice = 0, instalacaoId } = req.body as {
+  const { catalogItemId, quantity = 1, unitPrice: overridePrice, laborPrice = 0, instalacaoId, mecanicoId } = req.body as {
     catalogItemId?: number | string;
     quantity?: number;
     unitPrice?: number;
     laborPrice?: number;
     instalacaoId?: number;
+    mecanicoId?: number | null;
   };
 
   if (!catalogItemId) {
@@ -621,11 +651,45 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       instalacaoSigla = instRow?.sigla ?? null;
     }
 
+    // Identificação do mecânico responsável (enviado ou herdado da OS)
+    let finalMecId: number | null = (mecanicoId !== undefined && mecanicoId !== null && Number(mecanicoId) > 0)
+      ? Number(mecanicoId)
+      : null;
+    let finalMecNome: string | null = null;
+    let comissaoPct: number | null = null;
+    let comissaoValor: number | null = null;
+
+    if (!finalMecId) {
+      const [[ordRow]] = await pool.execute<any>(
+        'SELECT mecanico_id, mecanico_nome FROM os_orders WHERE id = ?',
+        [req.params.id]
+      );
+      if (ordRow?.mecanico_id) {
+        finalMecId = Number(ordRow.mecanico_id);
+        finalMecNome = ordRow.mecanico_nome ?? null;
+      }
+    }
+
+    if (finalMecId) {
+      const [[mecRow]] = await pool.execute<any>(
+        'SELECT nome, comissao_servico_pct, comissao_peca_pct FROM cad_mecanicos WHERE id = ?',
+        [finalMecId]
+      );
+      if (mecRow) {
+        finalMecNome = mecRow.nome;
+        const isServ = product.type === 'service';
+        const pct = isServ ? Number(mecRow.comissao_servico_pct || 0) : Number(mecRow.comissao_peca_pct || 0);
+        comissaoPct = pct;
+        const base = isServ ? (total + lp) : total;
+        comissaoValor = pct > 0 ? (base * pct) / 100 : 0;
+      }
+    }
+
     await pool.execute(
       `INSERT INTO os_order_items
-         (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total, instalacao_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [itemId, req.params.id, product.id as any, product.code as any, product.description as any, product.type as any, qty, unitPrice, lp, total, instId],
+         (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total, instalacao_id, mecanico_id, mecanico_nome, comissao_pct, comissao_valor)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [itemId, req.params.id, product.id as any, product.code as any, product.description as any, product.type as any, qty, unitPrice, lp, total, instId, finalMecId, finalMecNome, comissaoPct, comissaoValor],
     );
 
     await recalcTotal(req.params.id);
@@ -641,6 +705,10 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       total,
       instalacaoId: instId,
       instalacaoSigla,
+      mecanicoId: finalMecId,
+      mecanicoNome: finalMecNome,
+      comissaoPct,
+      comissaoValor,
     });
   } catch (err) {
     console.error('POST /orders/:id/items error:', err);
@@ -672,17 +740,162 @@ router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
     const unitPrice = Number(item.unit_price);
     const total     = qty * unitPrice;
 
+    let comissaoVal = item.comissao_valor !== null ? Number(item.comissao_valor) : null;
+    if (item.comissao_pct !== null && item.comissao_pct !== undefined) {
+      const isServ = item.type === 'service';
+      const base = isServ ? (total + Number(item.labor_price || 0)) : total;
+      comissaoVal = (base * Number(item.comissao_pct)) / 100;
+    }
+
     await pool.execute(
-      'UPDATE os_order_items SET quantity = ?, total = ? WHERE id = ?',
-      [qty, total, req.params.itemId],
+      'UPDATE os_order_items SET quantity = ?, total = ?, comissao_valor = ? WHERE id = ?',
+      [qty, total, comissaoVal, req.params.itemId],
     );
 
     await recalcTotal(req.params.id);
 
-    res.json({ id: item.id, code: item.code, description: item.description, type: item.type, quantity: qty, unitPrice, total });
+    res.json({
+      id: item.id,
+      code: item.code,
+      description: item.description,
+      type: item.type,
+      quantity: qty,
+      unitPrice,
+      total,
+      mecanicoId: item.mecanico_id ? Number(item.mecanico_id) : null,
+      mecanicoNome: item.mecanico_nome ?? null,
+      comissaoPct: item.comissao_pct !== null ? Number(item.comissao_pct) : null,
+      comissaoValor: comissaoVal,
+    });
   } catch (err) {
     console.error('PATCH /orders/:id/items/:itemId error:', err);
     res.status(500).json({ message: 'Erro ao atualizar quantidade' });
+  }
+});
+
+// ── PATCH /orders/:id/mecanico ──────────────────────────────────────────────
+
+router.patch('/:id/mecanico', async (req: Request, res: Response) => {
+  const { mecanicoId, aplicarAosItens } = req.body as {
+    mecanicoId: number | null;
+    aplicarAosItens?: boolean;
+  };
+
+  try {
+    if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
+
+    let mecNome: string | null = null;
+    let mecServPct = 0;
+    let mecPecaPct = 0;
+
+    if (mecanicoId && Number(mecanicoId) > 0) {
+      const [[mec]] = await pool.execute<any>(
+        'SELECT nome, comissao_servico_pct, comissao_peca_pct FROM cad_mecanicos WHERE id = ?',
+        [Number(mecanicoId)]
+      );
+      if (!mec) {
+        res.status(404).json({ message: 'Mecânico não encontrado' });
+        return;
+      }
+      mecNome = mec.nome;
+      mecServPct = Number(mec.comissao_servico_pct || 0);
+      mecPecaPct = Number(mec.comissao_peca_pct || 0);
+    }
+
+    await pool.execute(
+      'UPDATE os_orders SET mecanico_id = ?, mecanico_nome = ?, updated_at = NOW() WHERE id = ?',
+      [mecanicoId && Number(mecanicoId) > 0 ? Number(mecanicoId) : null, mecNome, req.params.id]
+    );
+
+    if (aplicarAosItens) {
+      const [items] = await pool.execute<any>(
+        'SELECT id, type, total, labor_price FROM os_order_items WHERE order_id = ?',
+        [req.params.id]
+      );
+      for (const it of (items as any[])) {
+        if (mecanicoId && Number(mecanicoId) > 0) {
+          const isServ = it.type === 'service';
+          const pct = isServ ? mecServPct : mecPecaPct;
+          const base = isServ ? (Number(it.total) + Number(it.labor_price || 0)) : Number(it.total);
+          const val = pct > 0 ? (base * pct) / 100 : 0;
+          await pool.execute(
+            'UPDATE os_order_items SET mecanico_id = ?, mecanico_nome = ?, comissao_pct = ?, comissao_valor = ? WHERE id = ?',
+            [Number(mecanicoId), mecNome, pct, val, it.id]
+          );
+        } else {
+          await pool.execute(
+            'UPDATE os_order_items SET mecanico_id = NULL, mecanico_nome = NULL, comissao_pct = 0, comissao_valor = 0 WHERE id = ?',
+            [it.id]
+          );
+        }
+      }
+    }
+
+    const [orders] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (orders as Record<string, unknown>[])[0];
+    const items = await fetchItems(req.params.id, Number(order.tenant_id));
+
+    res.json(formatOrder(order, items));
+  } catch (err) {
+    console.error('PATCH /orders/:id/mecanico error:', err);
+    res.status(500).json({ message: 'Erro ao atualizar mecânico da OS' });
+  }
+});
+
+// ── PATCH /orders/:id/items/:itemId/mecanico ────────────────────────────────
+
+router.patch('/:id/items/:itemId/mecanico', async (req: Request, res: Response) => {
+  const { mecanicoId, comissaoPct: customPct } = req.body as {
+    mecanicoId: number | null;
+    comissaoPct?: number;
+  };
+
+  try {
+    if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
+
+    const [rows] = await pool.execute<any>(
+      'SELECT id, type, total, labor_price FROM os_order_items WHERE id = ? AND order_id = ?',
+      [req.params.itemId, req.params.id]
+    );
+    const item = rows[0];
+    if (!item) {
+      res.status(404).json({ message: 'Item não encontrado' });
+      return;
+    }
+
+    let mecNome: string | null = null;
+    let comissaoPct: number | null = null;
+    let comissaoValor: number | null = null;
+
+    if (mecanicoId && Number(mecanicoId) > 0) {
+      const [[mec]] = await pool.execute<any>(
+        'SELECT nome, comissao_servico_pct, comissao_peca_pct FROM cad_mecanicos WHERE id = ?',
+        [Number(mecanicoId)]
+      );
+      if (!mec) {
+        res.status(404).json({ message: 'Mecânico não encontrado' });
+        return;
+      }
+      mecNome = mec.nome;
+      const isServ = item.type === 'service';
+      comissaoPct = customPct !== undefined ? Number(customPct) : (isServ ? Number(mec.comissao_servico_pct || 0) : Number(mec.comissao_peca_pct || 0));
+      const base = isServ ? (Number(item.total) + Number(item.labor_price || 0)) : Number(item.total);
+      comissaoValor = comissaoPct > 0 ? (base * comissaoPct) / 100 : 0;
+    }
+
+    await pool.execute(
+      'UPDATE os_order_items SET mecanico_id = ?, mecanico_nome = ?, comissao_pct = ?, comissao_valor = ? WHERE id = ?',
+      [mecanicoId && Number(mecanicoId) > 0 ? Number(mecanicoId) : null, mecNome, comissaoPct, comissaoValor, req.params.itemId]
+    );
+
+    const [orders] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (orders as Record<string, unknown>[])[0];
+    const items = await fetchItems(req.params.id, Number(order.tenant_id));
+
+    res.json(formatOrder(order, items));
+  } catch (err) {
+    console.error('PATCH /orders/:id/items/:itemId/mecanico error:', err);
+    res.status(500).json({ message: 'Erro ao atribuir mecânico ao item' });
   }
 });
 
@@ -823,9 +1036,22 @@ router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => 
   try {
     if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
 
+    const [rows] = await pool.execute<any>(
+      'SELECT id, type, total, comissao_pct FROM os_order_items WHERE id = ? AND order_id = ?',
+      [req.params.itemId, req.params.id]
+    );
+    const item = rows[0];
+    const lp = Number(laborPrice);
+    let comissaoVal = 0;
+    if (item && item.comissao_pct !== null && item.comissao_pct !== undefined) {
+      const isServ = item.type === 'service';
+      const base = isServ ? (Number(item.total) + lp) : Number(item.total);
+      comissaoVal = (base * Number(item.comissao_pct)) / 100;
+    }
+
     await pool.execute(
-      'UPDATE os_order_items SET labor_price = ? WHERE id = ? AND order_id = ?',
-      [Number(laborPrice), req.params.itemId, req.params.id],
+      'UPDATE os_order_items SET labor_price = ?, comissao_valor = ? WHERE id = ? AND order_id = ?',
+      [lp, comissaoVal, req.params.itemId, req.params.id],
     );
 
     await recalcTotal(req.params.id);

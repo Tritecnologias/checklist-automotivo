@@ -15,9 +15,9 @@ import {
   AlertCircle,
   ShoppingCart,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, oficinaApi } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
-import type { OrderItem, CatalogItem } from '../types'
+import type { OrderItem, CatalogItem, Mecanico } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 
 const currency = (v: number) =>
@@ -63,6 +63,7 @@ export default function OrderDetail() {
   const [addItemUnitPrice, setAddItemUnitPrice]       = useState<number>(0)
   const [addItemLabor, setAddItemLabor]               = useState<number>(0)
   const [addItemInstId, setAddItemInstId]             = useState<number | null>(null)
+  const [addItemMecanicoId, setAddItemMecanicoId]     = useState<number | null>(null)
   const [addItemError, setAddItemError]               = useState('')
 
   // ── estado do modal de exclusão de item ───────────────────────────────────
@@ -110,7 +111,40 @@ export default function OrderDetail() {
     enabled: debouncedQuery.length >= 2 && !isClosed,
   })
 
+  // Lista de Mecânicos / Técnicos
+  const { data: mecanicos = [] } = useQuery<Mecanico[]>({
+    queryKey: ['mecanicos', tid],
+    queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true }),
+  })
+
   // ── Mutações ──────────────────────────────────────────────────────────────
+
+  // Atualizar Mecânico da OS
+  const { mutate: handleUpdateOrderMechanic, isPending: updatingOrderMechanic } = useMutation({
+    mutationFn: (mecanicoId: number | null) => api.updateOrderMechanic(id!, mecanicoId),
+    onSuccess: (updated) => {
+      qc.setQueryData(['order', id], updated)
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['oficina-produtividade'] })
+    },
+    onError: (err: any) => {
+      alert(err.message || 'Erro ao definir mecânico da OS')
+    },
+  })
+
+  // Atualizar Mecânico de um Item
+  const { mutate: handleUpdateItemMechanic } = useMutation({
+    mutationFn: ({ itemId, mecanicoId }: { itemId: string; mecanicoId: number | null }) =>
+      api.updateItemMechanic(id!, itemId, mecanicoId),
+    onSuccess: (updated) => {
+      qc.setQueryData(['order', id], updated)
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['oficina-produtividade'] })
+    },
+    onError: (err: any) => {
+      alert(err.message || 'Erro ao alterar mecânico do item')
+    },
+  })
 
   // Editar Cliente
   const { mutate: handleUpdateClient, isPending: savingClient } = useMutation({
@@ -178,6 +212,7 @@ export default function OrderDetail() {
         unitPrice: addItemUnitPrice,
         laborPrice: addItemLabor,
         instalacaoId: addItemInstId,
+        mecanicoId: addItemMecanicoId ?? undefined,
       })
     },
     onSuccess: () => {
@@ -241,6 +276,7 @@ export default function OrderDetail() {
     setAddItemInstId(
       item.instalacoes && item.instalacoes.length > 0 ? item.instalacoes[0].id : null
     )
+    setAddItemMecanicoId(order?.mecanicoId || null)
     setAddItemError('')
     setSearchFocused(false)
   }
@@ -502,6 +538,10 @@ export default function OrderDetail() {
               <span class="info-label">Quilometragem:</span>
               <span class="info-value">${order.vehicle.mileage.toLocaleString('pt-BR')} km</span>
             </div>
+            <div class="info-row">
+              <span class="info-label">Mecânico Responsável:</span>
+              <span class="info-value">${order.mecanicoNome || 'Geral / Oficina'}</span>
+            </div>
           </div>
         </div>
 
@@ -527,6 +567,7 @@ export default function OrderDetail() {
                 <td>
                   <strong>${i.description}</strong>
                   ${i.instalacaoSigla ? `<span style="font-size:10px; background:#e0f2fe; color:#0369a1; padding:2px 5px; border-radius:4px; margin-left:6px; font-weight:bold;">${i.instalacaoSigla}</span>` : ''}
+                  ${i.mecanicoNome ? `<span style="font-size:10px; background:#f1f5f9; color:#475569; padding:2px 5px; border-radius:4px; margin-left:6px;">🔧 ${i.mecanicoNome}</span>` : ''}
                   ${i.code ? `<br/><small style="color:#64748b;">Cód: ${i.code}</small>` : ''}
                 </td>
                 <td class="text-right">${i.quantity}</td>
@@ -659,6 +700,41 @@ export default function OrderDetail() {
                 <span className="text-xs text-slate-500">
                   Criada em {fmtDate(order.createdAt)}
                 </span>
+              </div>
+
+              {/* Mecânico Responsável da OS */}
+              <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center flex-wrap gap-2.5">
+                <span className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                  <Wrench className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Mecânico / Técnico da OS:</span>
+                </span>
+                {!isClosed ? (
+                  <select
+                    value={order.mecanicoId ?? ''}
+                    disabled={updatingOrderMechanic}
+                    onChange={(e) => {
+                      const val = e.target.value ? Number(e.target.value) : null
+                      handleUpdateOrderMechanic(val)
+                    }}
+                    className="bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-white rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors cursor-pointer"
+                  >
+                    <option value="">Não atribuído (Geral)</option>
+                    {mecanicos.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.nome} {m.apelido ? `(${m.apelido})` : ''} — M.O: {m.comissao_servico_pct}%
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-xs font-bold text-white bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg">
+                    {order.mecanicoNome || 'Não atribuído'}
+                  </span>
+                )}
+                {order.mecanicoNome && (
+                  <span className="text-[11px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-full font-medium">
+                    ✓ Atribuído
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1103,6 +1179,32 @@ export default function OrderDetail() {
                 </div>
               </div>
 
+              {/* Mecânico Executor deste Item */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span>Mecânico / Técnico deste Item</span>
+                  {addItemMecanicoId && (
+                    <span className="text-[10px] text-blue-400 font-normal">
+                      Comissão personalizada para este técnico
+                    </span>
+                  )}
+                </label>
+                <select
+                  value={addItemMecanicoId ?? ''}
+                  onChange={(e) => setAddItemMecanicoId(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">
+                    {order.mecanicoNome ? `Padrão da OS (${order.mecanicoNome})` : 'Nenhum / Geral da Oficina'}
+                  </option>
+                  {mecanicos.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.nome} {m.apelido ? `(${m.apelido})` : ''} — Serv: {m.comissao_servico_pct}% | Peça: {m.comissao_peca_pct}%
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Pré-visualização do Cálculo do Item */}
               <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3.5 flex items-center justify-between text-xs">
                 <div>
@@ -1452,9 +1554,11 @@ export default function OrderDetail() {
               items={parts}
               accentColor="text-amber-400"
               isClosed={isClosed}
+              mecanicos={mecanicos}
               onUpdateQuantity={handleQuantityDelta}
               onEditLabor={handleOpenEditLabor}
               onDeleteItem={setItemToDelete}
+              onUpdateItemMechanic={(itemId, mecanicoId) => handleUpdateItemMechanic({ itemId, mecanicoId })}
             />
           )}
           {services.length > 0 && (
@@ -1463,9 +1567,11 @@ export default function OrderDetail() {
               items={services}
               accentColor="text-blue-400"
               isClosed={isClosed}
+              mecanicos={mecanicos}
               onUpdateQuantity={handleQuantityDelta}
               onEditLabor={handleOpenEditLabor}
               onDeleteItem={setItemToDelete}
+              onUpdateItemMechanic={(itemId, mecanicoId) => handleUpdateItemMechanic({ itemId, mecanicoId })}
             />
           )}
         </div>
@@ -1542,17 +1648,21 @@ function ItemsTable({
   items,
   accentColor,
   isClosed,
+  mecanicos,
   onUpdateQuantity,
   onEditLabor,
   onDeleteItem,
+  onUpdateItemMechanic,
 }: {
   title: string
   items: OrderItem[]
   accentColor: string
   isClosed: boolean
+  mecanicos?: Mecanico[]
   onUpdateQuantity: (item: OrderItem, delta: number) => void
   onEditLabor: (item: OrderItem) => void
   onDeleteItem: (item: OrderItem) => void
+  onUpdateItemMechanic?: (itemId: string, mecanicoId: number | null) => void
 }) {
   return (
     <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-lg">
@@ -1568,6 +1678,7 @@ function ItemsTable({
             <tr className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-800">
               <th className="px-5 py-3">Código</th>
               <th className="px-5 py-3">Descrição</th>
+              <th className="px-5 py-3">Mecânico / Técnico</th>
               <th className="px-5 py-3 text-right">Qtd</th>
               <th className="px-5 py-3 text-right">Unitário</th>
               <th className="px-5 py-3 text-right">Total Peça</th>
@@ -1612,6 +1723,43 @@ function ItemsTable({
                       </span>
                     ) : null}
                   </div>
+                </td>
+                <td className="px-5 py-3 whitespace-nowrap">
+                  {!isClosed && onUpdateItemMechanic ? (
+                    <div>
+                      <select
+                        value={item.mecanicoId ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value ? Number(e.target.value) : null
+                          onUpdateItemMechanic(item.id, val)
+                        }}
+                        className="bg-slate-800/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 rounded-lg text-xs px-2 py-1 text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[150px] truncate cursor-pointer"
+                      >
+                        <option value="">Oficina / Padrão</option>
+                        {mecanicos?.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.nome}
+                          </option>
+                        ))}
+                      </select>
+                      {item.comissaoValor != null && item.comissaoValor > 0 && (
+                        <span className="block text-[10px] text-purple-400 font-mono mt-0.5">
+                          Comissão: {currency(item.comissaoValor)}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="text-xs text-slate-300 font-medium">
+                        {item.mecanicoNome || '—'}
+                      </span>
+                      {item.comissaoValor != null && item.comissaoValor > 0 && (
+                        <span className="block text-[10px] text-purple-400 font-mono mt-0.5">
+                          Comissão: {currency(item.comissaoValor)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td className="px-5 py-3 text-right">
                   {!isClosed ? (

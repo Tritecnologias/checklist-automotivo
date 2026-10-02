@@ -396,6 +396,10 @@ export interface OrderItem {
   instalacaoSigla?: string | null
   stock?: number | null
   controlaEstoque?: boolean
+  mecanicoId?: number | null
+  mecanicoNome?: string | null
+  comissaoPct?: number | null
+  comissaoValor?: number | null
 }
 
 export interface InstItem {
@@ -422,6 +426,8 @@ export interface Order {
   client?: OrderClient | null
   status: OrderStatus
   vendaControle?: string | null
+  mecanicoId?: number | null
+  mecanicoNome?: string | null
   items: OrderItem[]
   laborAmount: number
   totalAmount: number
@@ -671,4 +677,123 @@ export interface CurvaAbcResponse {
   resumo: ResumoCurvaAbc
   produtos: ProdutoCurvaAbc[]
 }
+
+// ── Oficina & Produtividade (Mecânicos e Comissões) ─────────────────────────
+
+export interface Mecanico {
+  id: number
+  tenant_id: number
+  tenant_nome?: string | null
+  nome: string
+  apelido?: string | null
+  cpf?: string | null
+  telefone?: string | null
+  chave_pix?: string | null
+  comissao_servico_pct: number
+  comissao_peca_pct: number
+  ativo: boolean
+  total_os?: number
+  total_servicos?: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface MecanicoProdutividade {
+  id: number
+  nome: string
+  apelido?: string | null
+  cpf?: string | null
+  telefone?: string | null
+  chave_pix?: string | null
+  comissao_servico_pct: number
+  comissao_peca_pct: number
+  ativo: boolean
+  qtd_os: number
+  qtd_servicos: number
+  qtd_pecas: number
+  total_servicos: number
+  total_pecas: number
+  total_produzido: number
+  comissao_servicos: number
+  comissao_pecas: number
+  total_comissao: number
+  total_pago: number
+  saldo_a_pagar: number
+  ticket_medio: number
+  share_pct: number
+}
+
+export interface ExtratoItemComissao {
+  item_id: string
+  order_id: string
+  os_numero: string
+  plate: string
+  model: string
+  mileage: number
+  client_name: string
+  client_phone: string
+  order_status: string
+  venda_controle: string | null
+  data_referencia: string
+  data_os: string
+  data_fechamento: string | null
+  descricao: string
+  codigo: string
+  tipo: 'service' | 'part'
+  quantidade: number
+  unit_price: number
+  labor_price: number
+  total_item: number
+  valor_base: number
+  valor_total_linha: number
+  mecanico_id: number | null
+  mecanico_nome: string
+  comissao_pct: number
+  comissao_valor: number
+}
+
+export interface ProdutividadeOficinaResponse {
+  periodo: {
+    data_inicio: string
+    data_fim: string
+    status_filtro: string
+  }
+  resumo: {
+    faturamento_total: number
+    faturamento_servicos: number
+    faturamento_pecas: number
+    total_comissoes: number
+    total_comissoes_pagas: number
+    saldo_comissoes_pendente: number
+    qtd_os: number
+    qtd_servicos: number
+    ticket_medio_os: number
+    mecanico_destaque: {
+      id: number
+      nome: string
+      apelido: string | null
+      total_servicos: number
+      total_comissao: number
+      share_pct: number
+    } | null
+  }
+  mecanicos: MecanicoProdutividade[]
+  extrato: ExtratoItemComissao[]
+}
+
+export interface MecanicoPagamento {
+  id: number
+  mecanico_id: number
+  valor: number
+  data_pagamento: string
+  periodo_inicio: string | null
+  periodo_fim: string | null
+  forma_pagamento: string
+  observacoes: string | null
+  id_lancamento: number | null
+  lancamento_documento?: string | null
+  created_by: string | null
+  created_at: string
+}
+
 

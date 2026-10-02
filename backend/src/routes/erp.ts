@@ -3872,4 +3872,727 @@ router.get('/estoque/curva-abc', requireManagerUp, async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── OFICINA & PRODUTIVIDADE: MECÂNICOS E COMISSÕES ───────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── GET /erp/mecanicos ────────────────────────────────────────────────────────
+router.get('/mecanicos', async (req: Request, res: Response) => {
+  try {
+    const { clause, params } = getErpTenantFilter(req, false, 'm.tenant_id');
+    const { ativo } = req.query as { ativo?: string };
+
+    let whereClause = clause ? clause : '';
+    const queryParams: any[] = [...params];
+
+    if (ativo !== undefined && ativo !== '') {
+      const atv = Number(ativo) === 1 ? 1 : 0;
+      whereClause += (whereClause ? ' AND ' : ' WHERE ') + 'm.ativo = ?';
+      queryParams.push(atv);
+    }
+
+    const sql = `
+      SELECT
+        m.*,
+        t.nome AS tenant_nome,
+        (SELECT COUNT(DISTINCT o.id) FROM os_orders o WHERE o.mecanico_id = m.id OR EXISTS (SELECT 1 FROM os_order_items oi WHERE oi.order_id = o.id AND oi.mecanico_id = m.id)) AS total_os,
+        (SELECT COUNT(oi.id) FROM os_order_items oi WHERE oi.mecanico_id = m.id AND oi.type = 'service') AS total_servicos
+      FROM cad_mecanicos m
+      LEFT JOIN tenants t ON t.id = m.tenant_id
+      ${whereClause}
+      ORDER BY m.ativo DESC, m.nome ASC
+    `;
+
+    const [rows] = await pool.query<any>(sql, queryParams);
+    res.json(rows.map((r: any) => ({
+      id: Number(r.id),
+      tenant_id: Number(r.tenant_id),
+      tenant_nome: r.tenant_nome || null,
+      nome: r.nome,
+      apelido: r.apelido || null,
+      cpf: r.cpf || null,
+      telefone: r.telefone || null,
+      chave_pix: r.chave_pix || null,
+      comissao_servico_pct: Number(r.comissao_servico_pct || 0),
+      comissao_peca_pct: Number(r.comissao_peca_pct || 0),
+      ativo: Boolean(r.ativo),
+      total_os: Number(r.total_os || 0),
+      total_servicos: Number(r.total_servicos || 0),
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+    })));
+  } catch (err: any) {
+    console.error('[mecanicos] GET erro:', err);
+    res.status(500).json({ message: 'Erro ao listar mecânicos / técnicos' });
+  }
+});
+
+// ── POST /erp/mecanicos ───────────────────────────────────────────────────────
+router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) => {
+  try {
+    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, tenant_id } = req.body;
+    if (!nome || !String(nome).trim()) {
+      res.status(400).json({ message: 'Nome do mecânico / técnico é obrigatório' });
+      return;
+    }
+
+    const tId = tenant_id && Number(tenant_id) > 0 ? Number(tenant_id) : getErpWriteTenantId(req);
+    const servPct = Math.max(0, parseFloat(String(comissao_servico_pct ?? 0)) || 0);
+    const pecaPct = Math.max(0, parseFloat(String(comissao_peca_pct ?? 0)) || 0);
+
+    const [result] = await pool.query<any>(
+      `INSERT INTO cad_mecanicos
+         (tenant_id, nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      [
+        tId,
+        String(nome).trim(),
+        apelido ? String(apelido).trim() : null,
+        cpf ? String(cpf).trim() : null,
+        telefone ? String(telefone).trim() : null,
+        chave_pix ? String(chave_pix).trim() : null,
+        servPct,
+        pecaPct,
+      ]
+    );
+
+    const [[created]] = await pool.query<any>('SELECT * FROM cad_mecanicos WHERE id = ?', [result.insertId]);
+    res.status(201).json({
+      id: Number(created.id),
+      tenant_id: Number(created.tenant_id),
+      nome: created.nome,
+      apelido: created.apelido || null,
+      cpf: created.cpf || null,
+      telefone: created.telefone || null,
+      chave_pix: created.chave_pix || null,
+      comissao_servico_pct: Number(created.comissao_servico_pct),
+      comissao_peca_pct: Number(created.comissao_peca_pct),
+      ativo: Boolean(created.ativo),
+    });
+  } catch (err: any) {
+    console.error('[mecanicos] POST erro:', err);
+    res.status(500).json({ message: 'Erro ao cadastrar mecânico / técnico' });
+  }
+});
+
+// ── PUT /erp/mecanicos/:id ────────────────────────────────────────────────────
+router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo, tenant_id } = req.body;
+
+    const [[existing]] = await pool.query<any>('SELECT * FROM cad_mecanicos WHERE id = ?', [id]);
+    if (!existing) {
+      res.status(404).json({ message: 'Mecânico não encontrado' });
+      return;
+    }
+
+    const servPct = comissao_servico_pct !== undefined ? Math.max(0, parseFloat(String(comissao_servico_pct)) || 0) : Number(existing.comissao_servico_pct);
+    const pecaPct = comissao_peca_pct !== undefined ? Math.max(0, parseFloat(String(comissao_peca_pct)) || 0) : Number(existing.comissao_peca_pct);
+    const isAtivo = ativo !== undefined ? (Boolean(ativo) ? 1 : 0) : existing.ativo;
+    const finalTenant = tenant_id ? Number(tenant_id) : existing.tenant_id;
+
+    await pool.query(
+      `UPDATE cad_mecanicos
+       SET nome = ?, apelido = ?, cpf = ?, telefone = ?, chave_pix = ?,
+           comissao_servico_pct = ?, comissao_peca_pct = ?, ativo = ?, tenant_id = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [
+        nome ? String(nome).trim() : existing.nome,
+        apelido !== undefined ? (apelido ? String(apelido).trim() : null) : existing.apelido,
+        cpf !== undefined ? (cpf ? String(cpf).trim() : null) : existing.cpf,
+        telefone !== undefined ? (telefone ? String(telefone).trim() : null) : existing.telefone,
+        chave_pix !== undefined ? (chave_pix ? String(chave_pix).trim() : null) : existing.chave_pix,
+        servPct,
+        pecaPct,
+        isAtivo,
+        finalTenant,
+        id,
+      ]
+    );
+
+    // Se o nome foi alterado, atualiza também a desnormalização de nome nas OSs e Itens
+    if (nome && String(nome).trim() !== existing.nome) {
+      await pool.query('UPDATE os_orders SET mecanico_nome = ? WHERE mecanico_id = ?', [String(nome).trim(), id]);
+      await pool.query('UPDATE os_order_items SET mecanico_nome = ? WHERE mecanico_id = ?', [String(nome).trim(), id]);
+    }
+
+    const [[updated]] = await pool.query<any>('SELECT * FROM cad_mecanicos WHERE id = ?', [id]);
+    res.json({
+      id: Number(updated.id),
+      tenant_id: Number(updated.tenant_id),
+      nome: updated.nome,
+      apelido: updated.apelido || null,
+      cpf: updated.cpf || null,
+      telefone: updated.telefone || null,
+      chave_pix: updated.chave_pix || null,
+      comissao_servico_pct: Number(updated.comissao_servico_pct),
+      comissao_peca_pct: Number(updated.comissao_peca_pct),
+      ativo: Boolean(updated.ativo),
+    });
+  } catch (err: any) {
+    console.error('[mecanicos] PUT erro:', err);
+    res.status(500).json({ message: 'Erro ao atualizar mecânico / técnico' });
+  }
+});
+
+// ── DELETE /erp/mecanicos/:id ─────────────────────────────────────────────────
+router.delete('/mecanicos/:id', requireManagerUp, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const [[countUsage]] = await pool.query<any>(
+      `SELECT
+         (SELECT COUNT(*) FROM os_orders WHERE mecanico_id = ?) +
+         (SELECT COUNT(*) FROM os_order_items WHERE mecanico_id = ?) AS total_refs`,
+      [id, id]
+    );
+
+    if (Number(countUsage?.total_refs || 0) > 0) {
+      // Inativa para manter integridade dos dados históricos
+      await pool.query('UPDATE cad_mecanicos SET ativo = 0, updated_at = NOW() WHERE id = ?', [id]);
+      res.json({ message: 'Mecânico inativado com sucesso (histórico de ordens preservado)' });
+      return;
+    }
+
+    await pool.query('DELETE FROM cad_mecanicos WHERE id = ?', [id]);
+    res.json({ message: 'Mecânico excluído com sucesso' });
+  } catch (err: any) {
+    console.error('[mecanicos] DELETE erro:', err);
+    res.status(500).json({ message: 'Erro ao excluir mecânico' });
+  }
+});
+
+// ── GET /erp/oficina/produtividade ────────────────────────────────────────────
+// Relatório completo de produtividade e comissões por mecânico / técnico
+router.get('/oficina/produtividade', async (req: Request, res: Response) => {
+  try {
+    const { data_inicio, data_fim, mecanico_id, status } = req.query as {
+      data_inicio?: string;
+      data_fim?: string;
+      mecanico_id?: string;
+      status?: string;
+    };
+
+    // Datas padrão: mês atual
+    const now = new Date();
+    const dtInicio = data_inicio && /^\d{4}-\d{2}-\d{2}$/.test(data_inicio)
+      ? data_inicio
+      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const dtFim = data_fim && /^\d{4}-\d{2}-\d{2}$/.test(data_fim)
+      ? data_fim
+      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true, 'o.tenant_id');
+
+    // Filtros de status de OS: 'all' (todas exceto orçamentos), 'closed' (apenas finalizadas), 'open' (em andamento)
+    let statusFilter = " AND o.status != 'quote'";
+    if (status === 'closed') {
+      statusFilter = " AND o.status = 'closed'";
+    } else if (status === 'open') {
+      statusFilter = " AND o.status IN ('open', 'in_progress')";
+    }
+
+    // Filtro de mecânico se especificado
+    let mecItemFilter = '';
+    const mecParams: any[] = [];
+    if (mecanico_id && Number(mecanico_id) > 0) {
+      mecItemFilter = ' AND oi.mecanico_id = ?';
+      mecParams.push(Number(mecanico_id));
+    }
+
+    // 1. Busca todos os itens de OS executados no período com seus respectivos mecânicos
+    const itemsSql = `
+      SELECT
+        oi.id AS item_id,
+        oi.order_id,
+        oi.product_id,
+        oi.code,
+        oi.description,
+        oi.type,
+        oi.quantity,
+        oi.unit_price,
+        oi.labor_price,
+        oi.total,
+        oi.comissao_pct,
+        oi.comissao_valor,
+        oi.mecanico_id,
+        oi.mecanico_nome,
+        o.plate,
+        o.model,
+        o.mileage,
+        o.status AS order_status,
+        o.venda_controle,
+        o.total_amount AS order_total,
+        o.labor_amount AS order_labor,
+        o.discount_amount AS order_discount,
+        o.client_name,
+        o.client_phone,
+        o.created_at AS order_created_at,
+        o.closed_at AS order_closed_at,
+        DATE(COALESCE(o.closed_at, o.created_at)) AS data_referencia,
+        m.nome AS cad_mecanico_nome,
+        m.apelido AS cad_mecanico_apelido,
+        m.comissao_servico_pct AS cad_serv_pct,
+        m.comissao_peca_pct AS cad_peca_pct,
+        m.chave_pix AS cad_chave_pix
+      FROM os_order_items oi
+      JOIN os_orders o ON o.id = oi.order_id
+      LEFT JOIN cad_mecanicos m ON m.id = oi.mecanico_id
+      WHERE DATE(COALESCE(o.closed_at, o.created_at)) BETWEEN ? AND ?
+        ${statusFilter}
+        ${tenantClause}
+        ${mecItemFilter}
+      ORDER BY data_referencia DESC, o.plate ASC, oi.created_at ASC
+    `;
+
+    const [itemRows] = await pool.query<any>(itemsSql, [dtInicio, dtFim, ...tenantParams, ...mecParams]);
+
+    // 2. Busca lista de mecânicos cadastrados no tenant (para garantir que mesmo os sem OS apareçam no ranking)
+    const { clause: mecTenantClause, params: mecTenantParams } = getErpTenantFilter(req, false, 'tenant_id');
+    const [allMecanicos] = await pool.query<any>(
+      `SELECT * FROM cad_mecanicos ${mecTenantClause} ORDER BY ativo DESC, nome ASC`,
+      mecTenantParams
+    );
+
+    // 3. Busca pagamentos / adiantamentos efetuados aos mecânicos no período
+    const { clause: pagTenantClause, params: pagTenantParams } = getErpTenantFilter(req, true, 'tenant_id');
+    const [pagamentosRows] = await pool.query<any>(
+      `SELECT
+         mecanico_id,
+         COALESCE(SUM(valor), 0) AS total_pago,
+         COUNT(id) AS qtd_pagamentos
+       FROM mecanico_pagamentos
+       WHERE data_pagamento BETWEEN ? AND ?
+       ${pagTenantClause}
+       GROUP BY mecanico_id`,
+      [dtInicio, dtFim, ...pagTenantParams]
+    );
+
+    const pagamentosMap = new Map<number, number>();
+    for (const p of pagamentosRows as any[]) {
+      pagamentosMap.set(Number(p.mecanico_id), Number(p.total_pago));
+    }
+
+    // 4. Agrega métricas por mecânico
+    const mecanicosStats = new Map<number | string, {
+      id: number;
+      nome: string;
+      apelido: string | null;
+      cpf: string | null;
+      telefone: string | null;
+      chave_pix: string | null;
+      comissao_servico_pct: number;
+      comissao_peca_pct: number;
+      ativo: boolean;
+      qtd_os_set: Set<string>;
+      qtd_servicos: number;
+      qtd_pecas: number;
+      total_servicos: number;
+      total_pecas: number;
+      total_produzido: number;
+      comissao_servicos: number;
+      comissao_pecas: number;
+      total_comissao: number;
+      total_pago: number;
+      saldo_a_pagar: number;
+      ticket_medio: number;
+      share_pct: number;
+    }>();
+
+    // Inicializa com todos os mecânicos cadastrados
+    for (const m of allMecanicos as any[]) {
+      const mId = Number(m.id);
+      mecanicosStats.set(mId, {
+        id: mId,
+        nome: m.nome,
+        apelido: m.apelido || null,
+        cpf: m.cpf || null,
+        telefone: m.telefone || null,
+        chave_pix: m.chave_pix || null,
+        comissao_servico_pct: Number(m.comissao_servico_pct || 0),
+        comissao_peca_pct: Number(m.comissao_peca_pct || 0),
+        ativo: Boolean(m.ativo),
+        qtd_os_set: new Set<string>(),
+        qtd_servicos: 0,
+        qtd_pecas: 0,
+        total_servicos: 0,
+        total_pecas: 0,
+        total_produzido: 0,
+        comissao_servicos: 0,
+        comissao_pecas: 0,
+        total_comissao: 0,
+        total_pago: pagamentosMap.get(mId) || 0,
+        saldo_a_pagar: 0,
+        ticket_medio: 0,
+        share_pct: 0,
+      });
+    }
+
+    // Adiciona slot para "Sem mecânico atribuído" (id 0) caso haja itens sem técnico
+    const SEM_MECANICO_KEY = 0;
+    mecanicosStats.set(SEM_MECANICO_KEY, {
+      id: 0,
+      nome: 'Não atribuído / Geral',
+      apelido: 'Sem técnico',
+      cpf: null,
+      telefone: null,
+      chave_pix: null,
+      comissao_servico_pct: 0,
+      comissao_peca_pct: 0,
+      ativo: true,
+      qtd_os_set: new Set<string>(),
+      qtd_servicos: 0,
+      qtd_pecas: 0,
+      total_servicos: 0,
+      total_pecas: 0,
+      total_produzido: 0,
+      comissao_servicos: 0,
+      comissao_pecas: 0,
+      total_comissao: 0,
+      total_pago: 0,
+      saldo_a_pagar: 0,
+      ticket_medio: 0,
+      share_pct: 0,
+    });
+
+    let faturamentoGeralServicos = 0;
+    let faturamentoGeralPecas = 0;
+    let totalComissoesGeral = 0;
+    const osDistintasTotal = new Set<string>();
+
+    const extratoItens: any[] = [];
+
+    for (const row of itemRows as any[]) {
+      const mecId = row.mecanico_id ? Number(row.mecanico_id) : 0;
+      const isServico = row.type === 'service';
+      const qtd = Number(row.quantity);
+      const unitPrice = Number(row.unit_price);
+      const laborPrice = Number(row.labor_price || 0);
+      const totalItem = Number(row.total);
+
+      // Base do serviço e da peça
+      const valorServico = isServico ? (totalItem + laborPrice) : laborPrice;
+      const valorPeca = isServico ? 0 : totalItem;
+      const valorTotalLinha = totalItem + laborPrice;
+
+      // Comissão calculada da linha
+      let comissaoLinha = 0;
+      let pctAplicado = 0;
+
+      if (row.comissao_valor !== null && row.comissao_valor !== undefined) {
+        comissaoLinha = Number(row.comissao_valor);
+        pctAplicado = Number(row.comissao_pct || 0);
+      } else if (mecId > 0 && mecanicosStats.has(mecId)) {
+        // Fallback: calcula baseado nas taxas cadastradas do técnico
+        const mec = mecanicosStats.get(mecId)!;
+        if (isServico) {
+          pctAplicado = mec.comissao_servico_pct;
+          comissaoLinha = pctAplicado > 0 ? (valorServico * pctAplicado) / 100 : 0;
+        } else {
+          pctAplicado = mec.comissao_peca_pct;
+          comissaoLinha = pctAplicado > 0 ? (valorPeca * pctAplicado) / 100 : 0;
+        }
+      }
+
+      faturamentoGeralServicos += valorServico;
+      faturamentoGeralPecas += valorPeca;
+      totalComissoesGeral += comissaoLinha;
+      osDistintasTotal.add(row.order_id);
+
+      // Acumula nas estatísticas do mecânico
+      let mecStat = mecanicosStats.get(mecId);
+      if (!mecStat) {
+        mecStat = {
+          id: mecId,
+          nome: row.mecanico_nome || row.cad_mecanico_nome || 'Mecânico #' + mecId,
+          apelido: row.cad_mecanico_apelido || null,
+          cpf: null,
+          telefone: null,
+          chave_pix: row.cad_chave_pix || null,
+          comissao_servico_pct: Number(row.cad_serv_pct || 0),
+          comissao_peca_pct: Number(row.cad_peca_pct || 0),
+          ativo: true,
+          qtd_os_set: new Set<string>(),
+          qtd_servicos: 0,
+          qtd_pecas: 0,
+          total_servicos: 0,
+          total_pecas: 0,
+          total_produzido: 0,
+          comissao_servicos: 0,
+          comissao_pecas: 0,
+          total_comissao: 0,
+          total_pago: pagamentosMap.get(mecId) || 0,
+          saldo_a_pagar: 0,
+          ticket_medio: 0,
+          share_pct: 0,
+        };
+        mecanicosStats.set(mecId, mecStat);
+      }
+
+      mecStat.qtd_os_set.add(row.order_id);
+      if (isServico) {
+        mecStat.qtd_servicos += 1;
+        mecStat.total_servicos += valorServico;
+        mecStat.comissao_servicos += comissaoLinha;
+      } else {
+        mecStat.qtd_pecas += 1;
+        mecStat.total_pecas += valorPeca;
+        mecStat.comissao_pecas += comissaoLinha;
+      }
+      mecStat.total_produzido += valorTotalLinha;
+      mecStat.total_comissao += comissaoLinha;
+
+      extratoItens.push({
+        item_id: row.item_id,
+        order_id: row.order_id,
+        os_numero: String(row.order_id).slice(0, 8).toUpperCase(),
+        plate: row.plate,
+        model: row.model,
+        mileage: Number(row.mileage || 0),
+        client_name: row.client_name || 'Sem nome',
+        client_phone: row.client_phone || '',
+        order_status: row.order_status,
+        venda_controle: row.venda_controle || null,
+        data_referencia: row.data_referencia,
+        data_os: row.order_created_at,
+        data_fechamento: row.order_closed_at,
+        descricao: row.description,
+        codigo: row.code,
+        tipo: row.type,
+        quantidade: qtd,
+        unit_price: unitPrice,
+        labor_price: laborPrice,
+        total_item: totalItem,
+        valor_base: isServico ? valorServico : valorPeca,
+        valor_total_linha: valorTotalLinha,
+        mecanico_id: mecId > 0 ? mecId : null,
+        mecanico_nome: row.mecanico_nome || row.cad_mecanico_nome || (mecId === 0 ? 'Não atribuído' : 'Técnico #' + mecId),
+        comissao_pct: pctAplicado,
+        comissao_valor: comissaoLinha,
+      });
+    }
+
+    // Calcula percentual de participação (share) e saldos por mecânico
+    const listaMecanicos = Array.from(mecanicosStats.values())
+      .filter(m => m.id !== 0 || m.total_produzido > 0)
+      .map(m => {
+        const totalProduzido = m.total_servicos + m.total_pecas;
+        const totalComissao = m.comissao_servicos + m.comissao_pecas;
+        const qtdOs = m.qtd_os_set.size;
+        const ticketMedio = qtdOs > 0 ? totalProduzido / qtdOs : 0;
+        const sharePct = faturamentoGeralServicos > 0 ? (m.total_servicos / faturamentoGeralServicos) * 100 : 0;
+        const saldoAPagar = Math.max(0, totalComissao - m.total_pago);
+
+        return {
+          id: m.id,
+          nome: m.nome,
+          apelido: m.apelido,
+          cpf: m.cpf,
+          telefone: m.telefone,
+          chave_pix: m.chave_pix,
+          comissao_servico_pct: m.comissao_servico_pct,
+          comissao_peca_pct: m.comissao_peca_pct,
+          ativo: m.ativo,
+          qtd_os: qtdOs,
+          qtd_servicos: m.qtd_servicos,
+          qtd_pecas: m.qtd_pecas,
+          total_servicos: m.total_servicos,
+          total_pecas: m.total_pecas,
+          total_produzido: totalProduzido,
+          comissao_servicos: m.comissao_servicos,
+          comissao_pecas: m.comissao_pecas,
+          total_comissao: totalComissao,
+          total_pago: m.total_pago,
+          saldo_a_pagar: saldoAPagar,
+          ticket_medio: ticketMedio,
+          share_pct: sharePct,
+        };
+      })
+      .sort((a, b) => b.total_servicos - a.total_servicos);
+
+    // Total de pagamentos realizados no período geral
+    let totalPagamentosGeral = 0;
+    for (const val of pagamentosMap.values()) {
+      totalPagamentosGeral += val;
+    }
+
+    const faturamentoTotalOficina = faturamentoGeralServicos + faturamentoGeralPecas;
+    const qtdOsTotal = osDistintasTotal.size;
+    const ticketMedioGeral = qtdOsTotal > 0 ? faturamentoTotalOficina / qtdOsTotal : 0;
+    const saldoComissoesPendente = Math.max(0, totalComissoesGeral - totalPagamentosGeral);
+
+    // Mecânico destaque (maior faturamento de serviços com id > 0)
+    const topMecanico = listaMecanicos.find(m => m.id > 0 && m.total_servicos > 0) || null;
+
+    res.json({
+      periodo: {
+        data_inicio: dtInicio,
+        data_fim: dtFim,
+        status_filtro: status || 'closed',
+      },
+      resumo: {
+        faturamento_total: faturamentoTotalOficina,
+        faturamento_servicos: faturamentoGeralServicos,
+        faturamento_pecas: faturamentoGeralPecas,
+        total_comissoes: totalComissoesGeral,
+        total_comissoes_pagas: totalPagamentosGeral,
+        saldo_comissoes_pendente: saldoComissoesPendente,
+        qtd_os: qtdOsTotal,
+        qtd_servicos: extratoItens.filter(i => i.tipo === 'service').length,
+        ticket_medio_os: ticketMedioGeral,
+        mecanico_destaque: topMecanico ? {
+          id: topMecanico.id,
+          nome: topMecanico.nome,
+          apelido: topMecanico.apelido,
+          total_servicos: topMecanico.total_servicos,
+          total_comissao: topMecanico.total_comissao,
+          share_pct: topMecanico.share_pct,
+        } : null,
+      },
+      mecanicos: listaMecanicos,
+      extrato: extratoItens,
+    });
+  } catch (err: any) {
+    console.error('[produtividade] Erro:', err);
+    res.status(500).json({ message: 'Erro ao gerar relatório de produtividade e comissões da oficina' });
+  }
+});
+
+// ── POST /erp/oficina/pagar-comissao ──────────────────────────────────────────
+// Registra pagamento de comissão e gera opcionalmente lançamento financeiro em Contas a Pagar
+router.post('/oficina/pagar-comissao', requireManagerUp, async (req: Request, res: Response) => {
+  try {
+    const {
+      mecanico_id,
+      valor,
+      data_pagamento,
+      periodo_inicio,
+      periodo_fim,
+      forma_pagamento = 'PIX',
+      observacoes,
+      gerar_contas_pagar = true,
+      id_caixa,
+    } = req.body;
+
+    const mecId = Number(mecanico_id);
+    const vrPagto = Math.max(0, parseFloat(String(valor)) || 0);
+
+    if (!mecId || vrPagto <= 0) {
+      res.status(400).json({ message: 'Mecânico e valor válido maior que zero são obrigatórios' });
+      return;
+    }
+
+    const [[mec]] = await pool.query<any>('SELECT * FROM cad_mecanicos WHERE id = ?', [mecId]);
+    if (!mec) {
+      res.status(404).json({ message: 'Mecânico não encontrado' });
+      return;
+    }
+
+    const tenantId = Number(mec.tenant_id) || getErpWriteTenantId(req);
+    const dtPagto = data_pagamento && /^\d{4}-\d{2}-\d{2}$/.test(data_pagamento) ? data_pagamento : new Date().toISOString().slice(0, 10);
+    const user = (req.user as JwtPayload | undefined)?.email ?? 'Admin';
+
+    let lancamentoId: number | null = null;
+
+    // Se solicitado gerar lançamento financeiro em cad_lancamentos
+    if (gerar_contas_pagar) {
+      const periodoTxt = (periodo_inicio && periodo_fim) ? ` Ref: ${periodo_inicio} a ${periodo_fim}` : '';
+      const desc = `Comissão Oficina - ${mec.nome}${periodoTxt}`;
+      const obsLanc = observacoes ? ` [${observacoes}]` : '';
+
+      const [insLanc] = await pool.query<any>(
+        `INSERT INTO cad_lancamentos
+           (id_planejamento, tipo_lancamento, documento, descricao, favorecido, vr_total, vr_liquido,
+            data_lancamento, data_vencimento, data_confirmacao, status_lancamento, tenant_id, id_caixa)
+         VALUES
+           (12, 'D', ?, ?, ?, ?, ?, CURDATE(), ?, ?, 1, ?, ?)`,
+        [
+          `COMISS-MEC-${mecId}-${Date.now().toString().slice(-6)}`,
+          (desc + obsLanc).slice(0, 200),
+          `Mecânico: ${mec.nome}`.slice(0, 150),
+          vrPagto,
+          vrPagto,
+          dtPagto,
+          dtPagto,
+          tenantId,
+          id_caixa ? Number(id_caixa) : null,
+        ]
+      );
+      lancamentoId = insLanc.insertId;
+    }
+
+    // Registra na tabela de pagamentos de comissão
+    const [insPagto] = await pool.query<any>(
+      `INSERT INTO mecanico_pagamentos
+         (tenant_id, mecanico_id, valor, data_pagamento, periodo_inicio, periodo_fim, forma_pagamento, observacoes, id_lancamento, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        tenantId,
+        mecId,
+        vrPagto,
+        dtPagto,
+        periodo_inicio || null,
+        periodo_fim || null,
+        String(forma_pagamento || 'PIX').slice(0, 50),
+        observacoes ? String(observacoes).slice(0, 255) : null,
+        lancamentoId,
+        user.slice(0, 100),
+      ]
+    );
+
+    res.status(201).json({
+      success: true,
+      pagamento_id: insPagto.insertId,
+      lancamento_id: lancamentoId,
+      mecanico_id: mecId,
+      mecanico_nome: mec.nome,
+      valor: vrPagto,
+      data_pagamento: dtPagto,
+      forma_pagamento,
+      message: `Pagamento de comissão de R$ ${vrPagto.toFixed(2)} registrado com sucesso para ${mec.nome}`,
+    });
+  } catch (err: any) {
+    console.error('[pagar-comissao] Erro:', err);
+    res.status(500).json({ message: 'Erro ao registrar pagamento de comissão' });
+  }
+});
+
+// ── GET /erp/oficina/mecanicos/:id/pagamentos ─────────────────────────────────
+// Retorna histórico de pagamentos de comissão do mecânico
+router.get('/oficina/mecanicos/:id/pagamentos', async (req: Request, res: Response) => {
+  try {
+    const mecId = Number(req.params.id);
+    const { clause, params } = getErpTenantFilter(req, true, 'p.tenant_id');
+
+    const [rows] = await pool.query<any>(
+      `SELECT p.*, l.documento AS lancamento_documento
+       FROM mecanico_pagamentos p
+       LEFT JOIN cad_lancamentos l ON l.id = p.id_lancamento
+       WHERE p.mecanico_id = ?
+       ${clause}
+       ORDER BY p.data_pagamento DESC, p.id DESC
+       LIMIT 100`,
+      [mecId, ...params]
+    );
+
+    res.json(rows.map((r: any) => ({
+      id: Number(r.id),
+      mecanico_id: Number(r.mecanico_id),
+      valor: Number(r.valor),
+      data_pagamento: r.data_pagamento,
+      periodo_inicio: r.periodo_inicio || null,
+      periodo_fim: r.periodo_fim || null,
+      forma_pagamento: r.forma_pagamento,
+      observacoes: r.observacoes || null,
+      id_lancamento: r.id_lancamento ? Number(r.id_lancamento) : null,
+      lancamento_documento: r.lancamento_documento || null,
+      created_by: r.created_by || null,
+      created_at: r.created_at,
+    })));
+  } catch (err: any) {
+    console.error('[mecanico pagamentos] Erro:', err);
+    res.status(500).json({ message: 'Erro ao buscar histórico de pagamentos de comissão' });
+  }
+});
+
 export default router;

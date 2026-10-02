@@ -5,6 +5,7 @@ import type {
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
   ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
   CurvaAbcResponse,
+  Mecanico, MecanicoProdutividade, ExtratoItemComissao, ProdutividadeOficinaResponse, MecanicoPagamento,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -46,10 +47,21 @@ export const api = {
     vehicle: Vehicle,
     status: 'quote' | 'open' = 'open',
     client?: OrderClient,
+    mecanicoId?: number | null,
   ) =>
     request<Order>('/orders', {
       method: 'POST',
-      body: JSON.stringify({ vehicle, status, client }),
+      body: JSON.stringify({ vehicle, status, client, mecanicoId }),
+    }),
+  updateOrderMechanic: (orderId: string, mecanicoId: number | null, aplicarAosItens = true) =>
+    request<Order>(`/orders/${orderId}/mecanico`, {
+      method: 'PATCH',
+      body: JSON.stringify({ mecanicoId, aplicarAosItens }),
+    }),
+  updateItemMechanic: (orderId: string, itemId: string, mecanicoId: number | null, comissaoPct?: number) =>
+    request<Order>(`/orders/${orderId}/items/${itemId}/mecanico`, {
+      method: 'PATCH',
+      body: JSON.stringify({ mecanicoId, comissaoPct }),
     }),
   updateOrderClient: (
     id: string,
@@ -88,6 +100,7 @@ export const api = {
       unitPrice?: number
       laborPrice?: number
       instalacaoId?: number | null
+      mecanicoId?: number | null
     }
   ) =>
     request<OrderItem>(`/orders/${orderId}/items`, {
@@ -530,4 +543,72 @@ export const adminApi = {
     adminRequest<ProdutoTipo>(`/admin/product-types/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProductType: (id: number) =>
     adminRequest(`/admin/product-types/${id}`, { method: 'DELETE' }),
+}
+
+export const oficinaApi = {
+  listMecanicos: (params?: boolean | { apenasAtivos?: boolean }) => {
+    let ativo: boolean | undefined
+    if (typeof params === 'boolean') {
+      ativo = params
+    } else if (params && typeof params === 'object') {
+      ativo = params.apenasAtivos
+    }
+    const q = ativo !== undefined ? `?ativo=${ativo ? 1 : 0}` : ''
+    return request<Mecanico[]>(`/erp/mecanicos${q}`)
+  },
+  createMecanico: (data: Partial<Mecanico>) =>
+    request<Mecanico>('/erp/mecanicos', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateMecanico: (id: number, data: Partial<Mecanico>) =>
+    request<Mecanico>(`/erp/mecanicos/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteMecanico: (id: number) =>
+    request<{ message: string }>(`/erp/mecanicos/${id}`, {
+      method: 'DELETE',
+    }),
+  getProdutividade: (params?: {
+    data_inicio?: string
+    data_fim?: string
+    mecanico_id?: number | string
+    status?: string
+  }) => {
+    const sp = new URLSearchParams()
+    if (params?.data_inicio) sp.append('data_inicio', params.data_inicio)
+    if (params?.data_fim) sp.append('data_fim', params.data_fim)
+    if (params?.mecanico_id) sp.append('mecanico_id', String(params.mecanico_id))
+    if (params?.status) sp.append('status', params.status)
+    const qs = sp.toString() ? `?${sp.toString()}` : ''
+    return request<ProdutividadeOficinaResponse>(`/erp/oficina/produtividade${qs}`)
+  },
+  pagarComissao: (payload: {
+    mecanico_id: number
+    valor: number
+    data_pagamento?: string
+    periodo_inicio?: string
+    periodo_fim?: string
+    forma_pagamento?: string
+    observacoes?: string
+    gerar_contas_pagar?: boolean
+    id_caixa?: number | null
+  }) =>
+    request<{
+      success: boolean
+      pagamento_id: number
+      lancamento_id?: number | null
+      mecanico_id: number
+      mecanico_nome: string
+      valor: number
+      data_pagamento: string
+      forma_pagamento: string
+      message: string
+    }>('/erp/oficina/pagar-comissao', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  listPagamentosMecanico: (mecanicoId: number) =>
+    request<MecanicoPagamento[]>(`/erp/oficina/mecanicos/${mecanicoId}/pagamentos`),
 }

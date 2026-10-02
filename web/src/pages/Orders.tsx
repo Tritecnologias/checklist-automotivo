@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../lib/api'
+import { api, oficinaApi } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
-import type { Order, OrderStatus } from '../types'
+import type { Order, OrderStatus, Mecanico } from '../types'
 import { useAuth } from '../contexts/AuthContext'
+import { Wrench } from 'lucide-react'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -32,6 +33,7 @@ export default function Orders() {
   const tid = currentTenant?.id ?? null
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatus] = useState<StatusFilter>('all')
+  const [mecanicoFilter, setMecanicoFilter] = useState<string>('all')
 
   // Estado do Modal de Nova OS / Orçamento
   const [modalOpen, setModalOpen]           = useState(false)
@@ -42,6 +44,7 @@ export default function Orders() {
   const [newClientPhone, setNewClientPhone] = useState('')
   const [newClientDoc, setNewClientDoc]     = useState('')
   const [newClientId, setNewClientId]       = useState<number | null>(null)
+  const [newMecanicoId, setNewMecanicoId]   = useState<number | null>(null)
   const [newStatus, setNewStatus]           = useState<'quote' | 'open'>('open')
   const [createError, setCreateError]       = useState('')
   const [lookupLoading, setLookupLoading]   = useState(false)
@@ -51,6 +54,11 @@ export default function Orders() {
     queryKey: ['orders', tid],
     queryFn: () => api.listOrders(),
     staleTime: 30_000,
+  })
+
+  const { data: mecanicos = [] } = useQuery<Mecanico[]>({
+    queryKey: ['mecanicos', tid],
+    queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true }),
   })
 
   const triggerLookup = async (plateToSearch: string) => {
@@ -111,7 +119,8 @@ export default function Orders() {
           name: clientName,
           phone: clientPhone,
           document: clientDoc || undefined,
-        }
+        },
+        newMecanicoId || undefined
       )
     },
     onSuccess: (created) => {
@@ -124,6 +133,7 @@ export default function Orders() {
       setNewClientPhone('')
       setNewClientDoc('')
       setNewClientId(null)
+      setNewMecanicoId(null)
       setLookupFeedback(null)
       setCreateError('')
       navigate(`/orders/${created.id}`)
@@ -137,18 +147,26 @@ export default function Orders() {
     const q = search.trim().toLowerCase()
     return orders.filter((o) => {
       if (statusFilter !== 'all' && o.status !== statusFilter) return false
+      if (mecanicoFilter !== 'all') {
+        if (mecanicoFilter === 'sem_mecanico') {
+          if (o.mecanicoId) return false
+        } else {
+          if (String(o.mecanicoId) !== mecanicoFilter) return false
+        }
+      }
       if (q) {
         return (
           o.vehicle.plate.toLowerCase().includes(q) ||
           o.vehicle.model.toLowerCase().includes(q) ||
           o.id.toLowerCase().includes(q) ||
           (o.client?.name && o.client.name.toLowerCase().includes(q)) ||
-          (o.client?.phone && o.client.phone.includes(q))
+          (o.client?.phone && o.client.phone.includes(q)) ||
+          (o.mecanicoNome && o.mecanicoNome.toLowerCase().includes(q))
         )
       }
       return true
     })
-  }, [orders, search, statusFilter])
+  }, [orders, search, statusFilter, mecanicoFilter])
 
   return (
     <div className="space-y-6">
@@ -213,6 +231,21 @@ export default function Orders() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 bg-slate-800 border border-slate-700 text-white placeholder-slate-500 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+
+        <select
+          value={mecanicoFilter}
+          onChange={(e) => setMecanicoFilter(e.target.value)}
+          className="bg-slate-800 border border-slate-700 text-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+        >
+          <option value="all">🔧 Todos os Mecânicos</option>
+          <option value="sem_mecanico">Sem Mecânico Atribuído</option>
+          {mecanicos.map((m) => (
+            <option key={m.id} value={m.id}>
+              🔧 {m.nome} {m.apelido ? `(${m.apelido})` : ''}
+            </option>
+          ))}
+        </select>
+
         <div className="flex gap-1 bg-slate-800 rounded-xl p-1 overflow-x-auto">
           {STATUS_TABS.map(({ key, label }) => (
             <button
@@ -257,6 +290,7 @@ export default function Orders() {
                     <th className="px-5 py-3">Registro</th>
                     <th className="px-5 py-3">Placa / Cliente</th>
                     <th className="px-5 py-3">Modelo</th>
+                    <th className="px-5 py-3">Mecânico / Técnico</th>
                     <th className="px-5 py-3">Km</th>
                     <th className="px-5 py-3">Status</th>
                     <th className="px-5 py-3 text-right">Total</th>
@@ -287,6 +321,16 @@ export default function Orders() {
                       </td>
                       <td className="px-5 py-3 text-slate-300 max-w-[180px] truncate">
                         {o.vehicle.model}
+                      </td>
+                      <td className="px-5 py-3 whitespace-nowrap">
+                        {o.mecanicoNome ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-200 border border-slate-700/80">
+                            <Wrench className="w-3 h-3 text-blue-400" />
+                            <span>{o.mecanicoNome}</span>
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-500 italic">Não atribuído</span>
+                        )}
                       </td>
                       <td className="px-5 py-3 text-slate-400">
                         {o.vehicle.mileage.toLocaleString('pt-BR')}
@@ -548,6 +592,24 @@ export default function Orders() {
                       className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       required
                     />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Mecânico / Técnico Responsável (Opcional)
+                    </label>
+                    <select
+                      value={newMecanicoId ?? ''}
+                      onChange={(e) => setNewMecanicoId(e.target.value ? Number(e.target.value) : null)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Atribuir depois / Geral da Oficina</option>
+                      {mecanicos.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.nome} {m.apelido ? `(${m.apelido})` : ''} — Serv: {m.comissao_servico_pct}% | Peça: {m.comissao_peca_pct}%
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>

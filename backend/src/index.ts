@@ -539,6 +539,89 @@ async function runMigrations() {
     VALUES ('limite_desconto_padrao', NULL, '4.00', 'Percentual máximo de desconto para usuários comuns sem PIN de admin')
   `);
 
+  // ── Módulo Oficina & Produtividade (Mecânicos e Comissões) ───────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`cad_mecanicos\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`tenant_id\` INT NOT NULL DEFAULT 1,
+      \`nome\` VARCHAR(100) NOT NULL,
+      \`apelido\` VARCHAR(50) DEFAULT NULL,
+      \`cpf\` VARCHAR(20) DEFAULT NULL,
+      \`telefone\` VARCHAR(30) DEFAULT NULL,
+      \`chave_pix\` VARCHAR(100) DEFAULT NULL,
+      \`comissao_servico_pct\` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+      \`comissao_peca_pct\` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+      \`ativo\` TINYINT(1) NOT NULL DEFAULT 1,
+      \`created_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY \`idx_cad_mecanicos_tenant\` (\`tenant_id\`, \`ativo\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // mecanico_id e mecanico_nome em os_orders
+  const [[{ cntMecOrders }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntMecOrders FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'mecanico_id'`
+  );
+  if (Number(cntMecOrders) === 0) {
+    await pool.query(`
+      ALTER TABLE os_orders
+      ADD COLUMN mecanico_id INT NULL DEFAULT NULL,
+      ADD COLUMN mecanico_nome VARCHAR(100) NULL DEFAULT NULL,
+      ADD INDEX idx_os_orders_mecanico (mecanico_id)
+    `);
+    console.log('[migration] os_orders colunas de mecânico adicionadas');
+  }
+
+  // mecanico_id, mecanico_nome, comissao_pct e comissao_valor em os_order_items
+  const [[{ cntMecItems }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntMecItems FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_order_items' AND COLUMN_NAME = 'mecanico_id'`
+  );
+  if (Number(cntMecItems) === 0) {
+    await pool.query(`
+      ALTER TABLE os_order_items
+      ADD COLUMN mecanico_id INT NULL DEFAULT NULL,
+      ADD COLUMN mecanico_nome VARCHAR(100) NULL DEFAULT NULL,
+      ADD COLUMN comissao_pct DECIMAL(5,2) NULL DEFAULT NULL,
+      ADD COLUMN comissao_valor DECIMAL(10,2) NULL DEFAULT NULL,
+      ADD INDEX idx_os_order_items_mecanico (mecanico_id)
+    `);
+    console.log('[migration] os_order_items colunas de mecânico e comissão adicionadas');
+  }
+
+  // Tabela de pagamentos / adiantamentos de comissão
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`mecanico_pagamentos\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`tenant_id\` INT NOT NULL DEFAULT 1,
+      \`mecanico_id\` INT NOT NULL,
+      \`valor\` DECIMAL(10,2) NOT NULL,
+      \`data_pagamento\` DATE NOT NULL,
+      \`periodo_inicio\` DATE NULL DEFAULT NULL,
+      \`periodo_fim\` DATE NULL DEFAULT NULL,
+      \`forma_pagamento\` VARCHAR(50) NOT NULL DEFAULT 'PIX',
+      \`observacoes\` VARCHAR(255) NULL DEFAULT NULL,
+      \`id_lancamento\` INT NULL DEFAULT NULL,
+      \`created_by\` VARCHAR(100) NULL DEFAULT NULL,
+      \`created_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY \`idx_mecanico_pagamentos\` (\`mecanico_id\`, \`tenant_id\`, \`data_pagamento\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Seed inicial de técnicos se tabela estiver vazia
+  const [[{ cntMecanicosInit }]] = await pool.query<any>('SELECT COUNT(*) as cntMecanicosInit FROM cad_mecanicos');
+  if (Number(cntMecanicosInit) === 0) {
+    await pool.query(`
+      INSERT INTO cad_mecanicos (tenant_id, nome, apelido, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo)
+      VALUES
+        (1, 'Carlos Eduardo Souza', 'Carlão', '(31) 98877-1122', '31988771122', 10.00, 2.00, 1),
+        (1, 'Marcos Vinícius Santos', 'Marquinhos', '(31) 98765-4321', 'marcos.vinicius@pix.com', 8.00, 0.00, 1),
+        (1, 'Roberto Ferreira Lima', 'Betão', '(31) 99123-4567', 'beto.mecanico@pix.com', 12.00, 3.00, 1)
+    `).catch(() => {});
+    console.log('[migration] Mecânicos padrão iniciais semeados com sucesso');
+  }
+
   console.log('[migration] tabelas de multi-tenant e financeiro OK');
 }
 
