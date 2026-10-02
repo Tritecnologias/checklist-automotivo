@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi, adminApi } from '../lib/api'
@@ -20,6 +20,10 @@ import {
   Package,
   Sparkles,
   Info,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from 'lucide-react'
 
 const R = (v: number) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -36,7 +40,7 @@ export default function CurvaAbc() {
   const qc = useQueryClient()
 
   // Filtros
-  const [dias, setDias] = useState<number>(90)
+  const [dias, setDias] = useState<number>(30)
   const [dataInicio, setDataInicio] = useState<string>('')
   const [dataFim, setDataFim] = useState<string>('')
   const [isCustomDate, setIsCustomDate] = useState<boolean>(false)
@@ -45,6 +49,10 @@ export default function CurvaAbc() {
   const [apenasProdutos, setApenasProdutos] = useState<boolean>(true)
   const [busca, setBusca] = useState<string>('')
   const [sort, setSort] = useState<string>('faturamento_desc')
+
+  // Paginação
+  const [pagina, setPagina] = useState<number>(1)
+  const [itensPorPagina, setItensPorPagina] = useState<number>(50)
 
   // Modal de Ajuste Rápido
   const [modalProduto, setModalProduto] = useState<ProdutoCurvaAbc | null>(null)
@@ -58,16 +66,12 @@ export default function CurvaAbc() {
     staleTime: 5 * 60_000,
   })
 
-  // Query Curva ABC
+  // Query Curva ABC (recarrega no servidor apenas quando o período ou flag de peças muda)
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: [
       'curva-abc',
       isCustomDate ? `${dataInicio}_${dataFim}` : dias,
       apenasProdutos,
-      classeFiltro,
-      tipoFiltro,
-      busca,
-      sort,
     ],
     queryFn: () =>
       erpApi.curvaAbc({
@@ -75,17 +79,60 @@ export default function CurvaAbc() {
         data_inicio: isCustomDate ? dataInicio : undefined,
         data_fim: isCustomDate ? dataFim : undefined,
         apenas_produtos: apenasProdutos ? '1' : '0',
-        classe: classeFiltro,
-        tipo: tipoFiltro !== 'todos' ? Number(tipoFiltro) : undefined,
-        search: busca,
-        sort,
       }),
     staleTime: 60_000,
   })
 
   const resumo = data?.resumo
   const periodo = data?.periodo
-  const produtos = data?.produtos || []
+
+  // Filtros e Ordenação locais instantâneos (zero latência ao alternar abas, categorias ou digitar na busca)
+  const produtosFiltrados = useMemo(() => {
+    let list = data?.produtos || []
+
+    if (classeFiltro === 'A') {
+      list = list.filter(p => p.classe === 'A')
+    } else if (classeFiltro === 'B') {
+      list = list.filter(p => p.classe === 'B')
+    } else if (classeFiltro === 'C') {
+      list = list.filter(p => p.classe === 'C')
+    } else if (classeFiltro === 'dinheiro_parado') {
+      list = list.filter(p => p.status_estoque === 'dinheiro_parado')
+    } else if (classeFiltro === 'ruptura') {
+      list = list.filter(p => p.status_estoque === 'ruptura')
+    }
+
+    if (tipoFiltro !== 'todos') {
+      const tid = Number(tipoFiltro)
+      list = list.filter(p => p.id_tipo === tid)
+    }
+
+    if (busca.trim()) {
+      const q = busca.trim().toLowerCase()
+      list = list.filter(p =>
+        p.nome_produto.toLowerCase().includes(q) ||
+        (p.cod_barra && p.cod_barra.toLowerCase().includes(q)) ||
+        (p.tipo_nome && p.tipo_nome.toLowerCase().includes(q))
+      )
+    }
+
+    return [...list].sort((a, b) => {
+      if (sort === 'faturamento_desc') return b.faturamento_total - a.faturamento_total
+      if (sort === 'qtd_desc') return b.qtd_vendida - a.qtd_vendida
+      if (sort === 'imobilizado_desc') return b.valor_estoque_custo - a.valor_estoque_custo
+      if (sort === 'estoque_asc') return a.estoque - b.estoque
+      if (sort === 'nome_asc') return a.nome_produto.localeCompare(b.nome_produto)
+      return 0
+    })
+  }, [data?.produtos, classeFiltro, tipoFiltro, busca, sort])
+
+  // Cálculos de paginação
+  const totalProdutosFiltrados = produtosFiltrados.length
+  const totalPaginas = Math.max(1, Math.ceil(totalProdutosFiltrados / itensPorPagina))
+  const paginaAtualValida = Math.min(pagina, totalPaginas)
+  const inicioIdx = (paginaAtualValida - 1) * itensPorPagina
+  const fimIdx = Math.min(inicioIdx + itensPorPagina, totalProdutosFiltrados)
+  const produtosPaginados = produtosFiltrados.slice(inicioIdx, fimIdx)
 
   // Mutação para Ajuste de Estoque
   const mutAjuste = useMutation({
@@ -104,8 +151,6 @@ export default function CurvaAbc() {
   const handlePrint = () => {
     window.print()
   }
-
-  const totalProdutosFiltrados = produtos.length
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12 print:p-0 print:max-w-none">
@@ -520,12 +565,15 @@ export default function CurvaAbc() {
               { id: 'A', label: '🔥 Classe A (Alto Giro)' },
               { id: 'B', label: '⚡ Classe B' },
               { id: 'C', label: '📦 Classe C' },
-              { id: 'dinheiro_parado', label: '🧊 Dinheiro Parado' },
+              { id: 'dinheiro_parado', label: '💸 Dinheiro Parado' },
               { id: 'ruptura', label: '🚨 Ruptura Classe A' },
             ].map(f => (
               <button
                 key={f.id}
-                onClick={() => setClasseFiltro(f.id)}
+                onClick={() => {
+                  setClasseFiltro(f.id)
+                  setPagina(1)
+                }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                   classeFiltro === f.id
                     ? f.id === 'ruptura'
@@ -549,7 +597,10 @@ export default function CurvaAbc() {
               <span className="text-xs text-slate-400">Categoria:</span>
               <select
                 value={tipoFiltro}
-                onChange={e => setTipoFiltro(e.target.value)}
+                onChange={e => {
+                  setTipoFiltro(e.target.value)
+                  setPagina(1)
+                }}
                 className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
               >
                 <option value="todos">Todas as Categorias</option>
@@ -570,13 +621,19 @@ export default function CurvaAbc() {
             <input
               type="text"
               value={busca}
-              onChange={e => setBusca(e.target.value)}
+              onChange={e => {
+                setBusca(e.target.value)
+                setPagina(1)
+              }}
               placeholder="Buscar por código de barras ou nome da peça..."
               className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
             />
             {busca && (
               <button
-                onClick={() => setBusca('')}
+                onClick={() => {
+                  setBusca('')
+                  setPagina(1)
+                }}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white"
               >
                 ✕
@@ -589,7 +646,10 @@ export default function CurvaAbc() {
             <ArrowUpDown className="w-4 h-4 text-slate-400 shrink-0" />
             <select
               value={sort}
-              onChange={e => setSort(e.target.value)}
+              onChange={e => {
+                setSort(e.target.value)
+                setPagina(1)
+              }}
               className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 w-full sm:w-auto"
             >
               <option value="faturamento_desc">Maior Faturamento (R$)</option>
@@ -632,7 +692,7 @@ export default function CurvaAbc() {
             <RefreshCw className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
             <p className="text-sm text-slate-400 font-medium">Processando curva ABC e saldos de estoque...</p>
           </div>
-        ) : produtos.length === 0 ? (
+        ) : totalProdutosFiltrados === 0 ? (
           <div className="py-16 text-center text-slate-400 space-y-2">
             <Boxes className="w-12 h-12 text-slate-600 mx-auto" />
             <p className="text-base font-semibold text-white">Nenhum produto encontrado com os filtros atuais</p>
@@ -657,7 +717,7 @@ export default function CurvaAbc() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {produtos.map(p => {
+                {produtosPaginados.map(p => {
                   const isRuptura = p.status_estoque === 'ruptura'
                   const isSemGiro = p.status_estoque === 'dinheiro_parado'
                   const isBaixo = p.status_estoque === 'baixo'
@@ -708,12 +768,12 @@ export default function CurvaAbc() {
                       <td className="py-3 px-3.5 whitespace-nowrap">
                         {isRuptura ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                            <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                             Ruptura Crítica
                           </span>
                         ) : isSemGiro ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                            <Snowflake className="w-3 h-3 text-indigo-400 shrink-0" />
+                            <Snowflake className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                             Dinheiro Parado
                           </span>
                         ) : isBaixo ? (
@@ -837,6 +897,77 @@ export default function CurvaAbc() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* ── BARRA DE PAGINAÇÃO ── */}
+        {!isLoading && totalProdutosFiltrados > 0 && (
+          <div className="p-3.5 border-t border-slate-800 bg-slate-950/40 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 print:hidden">
+            <div className="flex items-center gap-2">
+              <span>
+                Mostrando <strong className="text-white">{inicioIdx + 1}</strong> a{' '}
+                <strong className="text-white">{fimIdx}</strong> de{' '}
+                <strong className="text-white">{totalProdutosFiltrados}</strong> produtos
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500">Por página:</span>
+              <select
+                value={itensPorPagina}
+                onChange={e => {
+                  setItensPorPagina(Number(e.target.value))
+                  setPagina(1)
+                }}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none"
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+                <option value={500}>500</option>
+              </select>
+
+              <div className="flex items-center gap-1 ml-2">
+                <button
+                  onClick={() => setPagina(1)}
+                  disabled={paginaAtualValida === 1}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:hover:bg-slate-800"
+                  title="Primeira página"
+                >
+                  <ChevronsLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setPagina(p => Math.max(1, p - 1))}
+                  disabled={paginaAtualValida === 1}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:hover:bg-slate-800"
+                  title="Página anterior"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+
+                <span className="px-3 py-1 font-semibold text-slate-200">
+                  {paginaAtualValida} / {totalPaginas}
+                </span>
+
+                <button
+                  onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
+                  disabled={paginaAtualValida === totalPaginas}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:hover:bg-slate-800"
+                  title="Próxima página"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setPagina(totalPaginas)}
+                  disabled={paginaAtualValida === totalPaginas}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:hover:bg-slate-800"
+                  title="Última página"
+                >
+                  <ChevronsRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

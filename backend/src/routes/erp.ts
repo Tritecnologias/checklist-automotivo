@@ -3587,6 +3587,9 @@ router.get('/crm/manutencoes-preventivas', requireManagerUp, async (req, res) =>
   }
 });
 
+// Cache em memória para Curva ABC (60s TTL) para resposta instantânea ao alternar filtros
+const curvaAbcCache = new Map<string, { timestamp: number; payload: { listaComVendas: any[]; resumoBase: any } }>();
+
 // ── RELATÓRIO / GESTÃO: CURVA ABC DE PEÇAS & DINHEIRO PARADO ─────────────────
 
 router.get('/estoque/curva-abc', requireManagerUp, async (req, res) => {
@@ -3610,182 +3613,238 @@ router.get('/estoque/curva-abc', requireManagerUp, async (req, res) => {
       dataInicio = toIso(inicioDate);
     }
 
+    const dtIniClean = dataInicio.split('T')[0].split(' ')[0];
+    const dtFimClean = dataFim.split('T')[0].split(' ')[0];
+
     const apenasProdutos = req.query.apenas_produtos !== '0';
     const classeFiltro = req.query.classe ? String(req.query.classe).trim() : 'todas';
     const tipoFiltro = req.query.tipo ? Number(req.query.tipo) : null;
     const search = req.query.search ? String(req.query.search).trim() : '';
     const sort = req.query.sort ? String(req.query.sort).trim() : 'faturamento_desc';
 
-    // 1. Total de vendas por produto no período para o tenant
-    const [vendasRows] = await pool.query<any>(
-      `SELECT 
-         m.id_produto,
-         SUM(m.quant) as qtd_vendida,
-         SUM(m.vr_total) as faturamento_total
-       FROM mv_vendas_movimento m
-       JOIN mv_vendas v ON v.controle = m.controle
-       WHERE v.tenant_id = ?
-         AND (m.data_venda BETWEEN ? AND ? OR DATE(m.data_venda) BETWEEN ? AND ?)
-       GROUP BY m.id_produto`,
-      [tenantId, dataInicio, dataFim, dataInicio, dataFim]
-    );
+    // Verificação de cache em memória (60 segundos)
+    const cacheKey = `${tenantId}_${dtIniClean}_${dtFimClean}_${apenasProdutos ? '1' : '0'}`;
+    const cached = curvaAbcCache.get(cacheKey);
+    const useCache = cached && (Date.now() - cached.timestamp < 60_000) && req.query.fresh !== '1' && req.query.nocache !== '1';
 
-    const vendasMap = new Map<number, { qtd_vendida: number; faturamento_total: number }>();
-    let faturamentoGeralPeriodo = 0;
-    let qtdGeralPeriodo = 0;
+    let listaComVendas: any[];
+    let resumoBase: any;
 
-    for (const vr of vendasRows) {
-      const id = Number(vr.id_produto);
-      const fat = Number(vr.faturamento_total || 0);
-      const qtd = Number(vr.qtd_vendida || 0);
-      vendasMap.set(id, { qtd_vendida: qtd, faturamento_total: fat });
-      faturamentoGeralPeriodo += fat;
-      qtdGeralPeriodo += qtd;
-    }
+    if (useCache) {
+      listaComVendas = cached.payload.listaComVendas;
+      resumoBase = cached.payload.resumoBase;
+    } else {
+      // 1. Total de vendas por produto no período para o tenant (otimizado com índices)
+      const [vendasRows] = await pool.query<any>(
+        `SELECT 
+           m.id_produto,
+           SUM(m.quant) as qtd_vendida,
+           SUM(m.vr_total) as faturamento_total
+         FROM mv_vendas v
+         JOIN mv_vendas_movimento m ON m.controle = v.controle
+         WHERE v.tenant_id = ?
+           AND v.data_venda >= ? AND v.data_venda <= ?
+         GROUP BY m.id_produto`,
+        [tenantId, dtIniClean, dtFimClean]
+      );
 
-    // 2. Consulta catálogo de produtos e saldos do tenant
-    const [prodRows] = await pool.query<any>(
-      `SELECT 
-         p.id,
-         p.nome_produto,
-         p.cod_barra,
-         p.unidade,
-         p.id_tipo,
-         COALESCE(t.nome_tipo, 'DIVERSOS') as tipo_nome,
-         COALESCE(t.is_service, 0) as is_service,
-         COALESCE(p.vr_compra, 0) as vr_compra,
-         COALESCE(p.vr_venda, 0) as vr_venda,
-         COALESCE(p.min_estoque, 0) as min_estoque,
-         COALESCE(p.controla_estoque, 1) as controla_estoque,
-         COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) as estoque
-       FROM cad_produtos p
-       LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
-       LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-       WHERE p.inativo = 0
-         AND (? = 1 OR pst.produto_id IS NOT NULL)`,
-      [tenantId, tenantId, tenantId]
-    );
+      const vendasMap = new Map<number, { qtd_vendida: number; faturamento_total: number }>();
+      let faturamentoGeralPeriodo = 0;
+      let qtdGeralPeriodo = 0;
 
-    // Filtra serviços se apenas_produtos estiver ativo
-    const produtosBase = apenasProdutos
-      ? prodRows.filter((p: any) => Number(p.is_service) === 0)
-      : prodRows;
-
-    // 3. Monta lista completa e ordena por faturamento decrescente para classificar ABC
-    const listaComVendas = produtosBase.map((p: any) => {
-      const v = vendasMap.get(p.id) || { qtd_vendida: 0, faturamento_total: 0 };
-      const vrCompra = Number(p.vr_compra || 0);
-      const vrVenda = Number(p.vr_venda || 0);
-      const estoque = Number(p.estoque || 0);
-      const minEstoque = Number(p.min_estoque || 0);
-      const margemUnitariaPct = vrVenda > 0 ? ((vrVenda - vrCompra) / vrVenda) * 100 : 0;
-      const valorEstoqueCusto = estoque * vrCompra;
-      const valorEstoqueVenda = estoque * vrVenda;
-
-      return {
-        id: p.id,
-        nome_produto: p.nome_produto,
-        cod_barra: p.cod_barra || null,
-        unidade: p.unidade || 'UN',
-        id_tipo: p.id_tipo ? Number(p.id_tipo) : null,
-        tipo_nome: p.tipo_nome,
-        is_service: Boolean(p.is_service),
-        vr_compra: vrCompra,
-        vr_venda: vrVenda,
-        margem_unitaria_pct: margemUnitariaPct,
-        estoque,
-        min_estoque: minEstoque,
-        controla_estoque: Boolean(p.controla_estoque),
-        qtd_vendida: v.qtd_vendida,
-        faturamento_total: v.faturamento_total,
-        valor_estoque_custo: valorEstoqueCusto,
-        valor_estoque_venda: valorEstoqueVenda,
-        share_pct: 0,
-        acumulado_pct: 0,
-        classe: 'C' as 'A' | 'B' | 'C',
-        status_estoque: 'normal' as 'ruptura' | 'baixo' | 'zerado' | 'normal' | 'dinheiro_parado',
-        sugestao_compra: 0,
-      };
-    });
-
-    // Ordena por faturamento desc
-    listaComVendas.sort((a: any, b: any) => b.faturamento_total - a.faturamento_total);
-
-    // 4. Atribuição de classes ABC pelo faturamento acumulado
-    let acumulado = 0;
-    let countA = 0;
-    let countB = 0;
-    let countC = 0;
-    let fatA = 0;
-    let fatB = 0;
-    let fatC = 0;
-    let estCustoA = 0;
-    let estCustoB = 0;
-    let estCustoC = 0;
-    let dinheiroParadoC = 0;
-    let itensRupturaA = 0;
-    let valorTotalEstoqueCusto = 0;
-    let valorTotalEstoqueVenda = 0;
-
-    for (const item of listaComVendas) {
-      valorTotalEstoqueCusto += item.valor_estoque_custo;
-      valorTotalEstoqueVenda += item.valor_estoque_venda;
-
-      const share = faturamentoGeralPeriodo > 0
-        ? (item.faturamento_total / faturamentoGeralPeriodo) * 100
-        : 0;
-      acumulado += share;
-
-      item.share_pct = Number(share.toFixed(2));
-      item.acumulado_pct = Number(acumulado.toFixed(2));
-
-      if (item.faturamento_total > 0 && (acumulado <= 80 || countA === 0)) {
-        item.classe = 'A';
-        countA++;
-        fatA += item.faturamento_total;
-        estCustoA += item.valor_estoque_custo;
-      } else if (item.faturamento_total > 0 && acumulado <= 95) {
-        item.classe = 'B';
-        countB++;
-        fatB += item.faturamento_total;
-        estCustoB += item.valor_estoque_custo;
-      } else {
-        item.classe = 'C';
-        countC++;
-        fatC += item.faturamento_total;
-        estCustoC += item.valor_estoque_custo;
-
-        if (item.qtd_vendida === 0 && item.estoque > 0) {
-          dinheiroParadoC += item.valor_estoque_custo;
-        }
+      for (const vr of vendasRows) {
+        const id = Number(vr.id_produto);
+        const fat = Number(vr.faturamento_total || 0);
+        const qtd = Number(vr.qtd_vendida || 0);
+        vendasMap.set(id, { qtd_vendida: qtd, faturamento_total: fat });
+        faturamentoGeralPeriodo += fat;
+        qtdGeralPeriodo += qtd;
       }
 
-      if (item.controla_estoque) {
-        if (item.estoque <= 0 && item.classe === 'A') {
-          item.status_estoque = 'ruptura';
-          itensRupturaA++;
-          const mediaMensal = item.qtd_vendida > 0 ? (item.qtd_vendida / Math.max(1, diasParam)) * 30 : Math.max(2, item.min_estoque);
-          item.sugestao_compra = Math.ceil(mediaMensal);
-        } else if (item.min_estoque > 0 && item.estoque <= item.min_estoque && item.classe === 'A') {
-          item.status_estoque = 'ruptura';
-          itensRupturaA++;
-          const mediaMensal = item.qtd_vendida > 0 ? (item.qtd_vendida / Math.max(1, diasParam)) * 30 : item.min_estoque;
-          item.sugestao_compra = Math.max(1, Math.ceil(mediaMensal - item.estoque));
-        } else if (item.estoque <= 0) {
-          item.status_estoque = 'zerado';
-        } else if (item.min_estoque > 0 && item.estoque <= item.min_estoque) {
-          item.status_estoque = 'baixo';
-        } else if (item.qtd_vendida === 0 && item.estoque > 0) {
-          item.status_estoque = 'dinheiro_parado';
+      // 2. Consulta catálogo de produtos e saldos do tenant (já filtrando serviços no SQL se solicitado)
+      const serviceFilter = apenasProdutos ? 'AND (COALESCE(t.is_service, 0) = 0)' : '';
+
+      const [produtosBase] = await pool.query<any>(
+        `SELECT 
+           p.id,
+           p.nome_produto,
+           p.cod_barra,
+           p.unidade,
+           p.id_tipo,
+           COALESCE(t.nome_tipo, 'DIVERSOS') as tipo_nome,
+           COALESCE(t.is_service, 0) as is_service,
+           COALESCE(p.vr_compra, 0) as vr_compra,
+           COALESCE(p.vr_venda, 0) as vr_venda,
+           COALESCE(p.min_estoque, 0) as min_estoque,
+           COALESCE(p.controla_estoque, 1) as controla_estoque,
+           COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) as estoque
+         FROM cad_produtos p
+         LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
+         LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+         WHERE p.inativo = 0
+           ${serviceFilter}
+           AND (? = 1 OR pst.produto_id IS NOT NULL)`,
+        [tenantId, tenantId, tenantId]
+      );
+
+      // 3. Monta lista completa e ordena por faturamento decrescente para classificar ABC
+      listaComVendas = produtosBase.map((p: any) => {
+        const v = vendasMap.get(p.id) || { qtd_vendida: 0, faturamento_total: 0 };
+        const vrCompra = Number(p.vr_compra || 0);
+        const vrVenda = Number(p.vr_venda || 0);
+        const estoque = Number(p.estoque || 0);
+        const minEstoque = Number(p.min_estoque || 0);
+        const margemUnitariaPct = vrVenda > 0 ? ((vrVenda - vrCompra) / vrVenda) * 100 : 0;
+        const valorEstoqueCusto = estoque * vrCompra;
+        const valorEstoqueVenda = estoque * vrVenda;
+
+        return {
+          id: p.id,
+          nome_produto: p.nome_produto,
+          cod_barra: p.cod_barra || null,
+          unidade: p.unidade || 'UN',
+          id_tipo: p.id_tipo ? Number(p.id_tipo) : null,
+          tipo_nome: p.tipo_nome,
+          is_service: Boolean(p.is_service),
+          vr_compra: vrCompra,
+          vr_venda: vrVenda,
+          margem_unitaria_pct: margemUnitariaPct,
+          estoque,
+          min_estoque: minEstoque,
+          controla_estoque: Boolean(p.controla_estoque),
+          qtd_vendida: v.qtd_vendida,
+          faturamento_total: v.faturamento_total,
+          valor_estoque_custo: valorEstoqueCusto,
+          valor_estoque_venda: valorEstoqueVenda,
+          share_pct: 0,
+          acumulado_pct: 0,
+          classe: 'C' as 'A' | 'B' | 'C',
+          status_estoque: 'normal' as 'ruptura' | 'baixo' | 'zerado' | 'normal' | 'dinheiro_parado',
+          sugestao_compra: 0,
+        };
+      });
+
+      // Ordena por faturamento desc
+      listaComVendas.sort((a: any, b: any) => b.faturamento_total - a.faturamento_total);
+
+      // 4. Atribuição de classes ABC pelo faturamento acumulado
+      let acumulado = 0;
+      let countA = 0;
+      let countB = 0;
+      let countC = 0;
+      let fatA = 0;
+      let fatB = 0;
+      let fatC = 0;
+      let estCustoA = 0;
+      let estCustoB = 0;
+      let estCustoC = 0;
+      let dinheiroParadoC = 0;
+      let itensRupturaA = 0;
+      let valorTotalEstoqueCusto = 0;
+      let valorTotalEstoqueVenda = 0;
+
+      for (const item of listaComVendas) {
+        valorTotalEstoqueCusto += item.valor_estoque_custo;
+        valorTotalEstoqueVenda += item.valor_estoque_venda;
+
+        const share = faturamentoGeralPeriodo > 0
+          ? (item.faturamento_total / faturamentoGeralPeriodo) * 100
+          : 0;
+        acumulado += share;
+
+        item.share_pct = Number(share.toFixed(2));
+        item.acumulado_pct = Number(acumulado.toFixed(2));
+
+        if (item.faturamento_total > 0 && (acumulado <= 80 || countA === 0)) {
+          item.classe = 'A';
+          countA++;
+          fatA += item.faturamento_total;
+          estCustoA += item.valor_estoque_custo;
+        } else if (item.faturamento_total > 0 && acumulado <= 95) {
+          item.classe = 'B';
+          countB++;
+          fatB += item.faturamento_total;
+          estCustoB += item.valor_estoque_custo;
         } else {
-          item.status_estoque = 'normal';
+          item.classe = 'C';
+          countC++;
+          fatC += item.faturamento_total;
+          estCustoC += item.valor_estoque_custo;
+
+          if (item.qtd_vendida === 0 && item.estoque > 0) {
+            dinheiroParadoC += item.valor_estoque_custo;
+          }
+        }
+
+        if (item.controla_estoque) {
+          if (item.estoque <= 0 && item.classe === 'A') {
+            item.status_estoque = 'ruptura';
+            itensRupturaA++;
+            const mediaMensal = item.qtd_vendida > 0 ? (item.qtd_vendida / Math.max(1, diasParam)) * 30 : Math.max(2, item.min_estoque);
+            item.sugestao_compra = Math.ceil(mediaMensal);
+          } else if (item.min_estoque > 0 && item.estoque <= item.min_estoque && item.classe === 'A') {
+            item.status_estoque = 'ruptura';
+            itensRupturaA++;
+            const mediaMensal = item.qtd_vendida > 0 ? (item.qtd_vendida / Math.max(1, diasParam)) * 30 : item.min_estoque;
+            item.sugestao_compra = Math.max(1, Math.ceil(mediaMensal - item.estoque));
+          } else if (item.estoque <= 0) {
+            item.status_estoque = 'zerado';
+          } else if (item.min_estoque > 0 && item.estoque <= item.min_estoque) {
+            item.status_estoque = 'baixo';
+          } else if (item.qtd_vendida === 0 && item.estoque > 0) {
+            item.status_estoque = 'dinheiro_parado';
+          } else {
+            item.status_estoque = 'normal';
+          }
+        }
+      }
+
+      const margemMediaEstoque = valorTotalEstoqueVenda > 0
+        ? ((valorTotalEstoqueVenda - valorTotalEstoqueCusto) / valorTotalEstoqueVenda) * 100
+        : 0;
+
+      resumoBase = {
+        total_itens_catalogo: listaComVendas.length,
+        valor_total_estoque_custo: valorTotalEstoqueCusto,
+        valor_total_estoque_venda: valorTotalEstoqueVenda,
+        margem_media_estoque_pct: margemMediaEstoque,
+        dinheiro_parado_classe_c: dinheiroParadoC,
+        itens_em_ruptura_classe_a: itensRupturaA,
+        faturamento_total_periodo: faturamentoGeralPeriodo,
+        qtd_total_vendida_periodo: qtdGeralPeriodo,
+        classe_a: {
+          qtd_itens: countA,
+          faturamento: fatA,
+          share_faturamento_pct: faturamentoGeralPeriodo > 0 ? (fatA / faturamentoGeralPeriodo) * 100 : 0,
+          valor_estoque_custo: estCustoA,
+        },
+        classe_b: {
+          qtd_itens: countB,
+          faturamento: fatB,
+          share_faturamento_pct: faturamentoGeralPeriodo > 0 ? (fatB / faturamentoGeralPeriodo) * 100 : 0,
+          valor_estoque_custo: estCustoB,
+        },
+        classe_c: {
+          qtd_itens: countC,
+          faturamento: fatC,
+          share_faturamento_pct: faturamentoGeralPeriodo > 0 ? (fatC / faturamentoGeralPeriodo) * 100 : 0,
+          valor_estoque_custo: estCustoC,
+        },
+      };
+
+      // Salva no cache
+      curvaAbcCache.set(cacheKey, {
+        timestamp: Date.now(),
+        payload: { listaComVendas, resumoBase },
+      });
+
+      if (curvaAbcCache.size > 50) {
+        const threshold = Date.now() - 180_000;
+        for (const [k, v] of curvaAbcCache.entries()) {
+          if (v.timestamp < threshold) curvaAbcCache.delete(k);
         }
       }
     }
-
-    const margemMediaEstoque = valorTotalEstoqueVenda > 0
-      ? ((valorTotalEstoqueVenda - valorTotalEstoqueCusto) / valorTotalEstoqueVenda) * 100
-      : 0;
 
     // 5. Aplica filtros da requisição para listagem na tabela
     let filtrados = listaComVendas;
@@ -3836,34 +3895,7 @@ router.get('/estoque/curva-abc', requireManagerUp, async (req, res) => {
         data_fim: dataFim,
         dias: diasParam,
       },
-      resumo: {
-        total_itens_catalogo: listaComVendas.length,
-        valor_total_estoque_custo: valorTotalEstoqueCusto,
-        valor_total_estoque_venda: valorTotalEstoqueVenda,
-        margem_media_estoque_pct: margemMediaEstoque,
-        dinheiro_parado_classe_c: dinheiroParadoC,
-        itens_em_ruptura_classe_a: itensRupturaA,
-        faturamento_total_periodo: faturamentoGeralPeriodo,
-        qtd_total_vendida_periodo: qtdGeralPeriodo,
-        classe_a: {
-          qtd_itens: countA,
-          faturamento: fatA,
-          share_faturamento_pct: faturamentoGeralPeriodo > 0 ? (fatA / faturamentoGeralPeriodo) * 100 : 0,
-          valor_estoque_custo: estCustoA,
-        },
-        classe_b: {
-          qtd_itens: countB,
-          faturamento: fatB,
-          share_faturamento_pct: faturamentoGeralPeriodo > 0 ? (fatB / faturamentoGeralPeriodo) * 100 : 0,
-          valor_estoque_custo: estCustoB,
-        },
-        classe_c: {
-          qtd_itens: countC,
-          faturamento: fatC,
-          share_faturamento_pct: faturamentoGeralPeriodo > 0 ? (fatC / faturamentoGeralPeriodo) * 100 : 0,
-          valor_estoque_custo: estCustoC,
-        },
-      },
+      resumo: resumoBase,
       produtos: filtrados,
     });
   } catch (err: any) {

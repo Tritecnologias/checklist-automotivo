@@ -641,6 +641,65 @@ async function runMigrations() {
     console.log('[migration] Mecânicos padrão iniciais semeados com sucesso');
   }
 
+  // Índices para otimização extrema de relatórios, Curva ABC, DRE e vendas
+  try {
+    const [[{ cntIdxVendasData }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdxVendasData FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_vendas' AND INDEX_NAME = 'idx_mv_vendas_tenant_data'`
+    );
+    if (Number(cntIdxVendasData) === 0) {
+      await pool.query('ALTER TABLE mv_vendas ADD INDEX idx_mv_vendas_tenant_data (tenant_id, data_venda)');
+      console.log('[migration] idx_mv_vendas_tenant_data adicionada');
+    }
+
+    const [[{ cntIdxVendasControle }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdxVendasControle FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_vendas' AND INDEX_NAME = 'idx_mv_vendas_controle'`
+    );
+    if (Number(cntIdxVendasControle) === 0) {
+      await pool.query('ALTER TABLE mv_vendas ADD INDEX idx_mv_vendas_controle (controle)');
+      console.log('[migration] idx_mv_vendas_controle adicionada');
+    }
+
+    const [[{ cntIdxMovControle }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdxMovControle FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_vendas_movimento' AND INDEX_NAME = 'idx_mv_mov_controle'`
+    );
+    if (Number(cntIdxMovControle) === 0) {
+      await pool.query('ALTER TABLE mv_vendas_movimento ADD INDEX idx_mv_mov_controle (controle)');
+      console.log('[migration] idx_mv_mov_controle adicionada');
+    }
+
+    const [[{ cntIdxMovProduto }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdxMovProduto FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_vendas_movimento' AND INDEX_NAME = 'idx_mv_mov_produto'`
+    );
+    if (Number(cntIdxMovProduto) === 0) {
+      await pool.query('ALTER TABLE mv_vendas_movimento ADD INDEX idx_mv_mov_produto (id_produto)');
+      console.log('[migration] idx_mv_mov_produto adicionada');
+    }
+
+    const [[{ cntIdxMovData }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdxMovData FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_vendas_movimento' AND INDEX_NAME = 'idx_mv_mov_data'`
+    );
+    if (Number(cntIdxMovData) === 0) {
+      await pool.query('ALTER TABLE mv_vendas_movimento ADD INDEX idx_mv_mov_data (data_venda)');
+      console.log('[migration] idx_mv_mov_data adicionada');
+    }
+
+    const [[{ cntIdxPst }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdxPst FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'produto_saldo_tenant' AND INDEX_NAME = 'idx_pst_tenant_prod'`
+    );
+    if (Number(cntIdxPst) === 0) {
+      await pool.query('ALTER TABLE produto_saldo_tenant ADD INDEX idx_pst_tenant_prod (tenant_id, produto_id)');
+      console.log('[migration] idx_pst_tenant_prod adicionada');
+    }
+  } catch (idxErr) {
+    console.warn('[migration] Aviso ao configurar índices de vendas/estoque:', idxErr);
+  }
+
   console.log('[migration] tabelas de multi-tenant e financeiro OK');
 }
 
