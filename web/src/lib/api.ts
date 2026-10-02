@@ -6,6 +6,7 @@ import type {
   ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
   CurvaAbcResponse,
   Mecanico, MecanicoProdutividade, ExtratoItemComissao, ProdutividadeOficinaResponse, MecanicoPagamento,
+  DreResponse,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -460,6 +461,20 @@ export const erpApi = {
       method: 'PATCH',
       body: JSON.stringify({ tipo, quantidade }),
     }),
+  getDre: (params?: {
+    data_inicio?: string
+    data_fim?: string
+    regime?: 'competencia' | 'caixa'
+    aliquota_imposto?: number
+  }) => {
+    const sp = new URLSearchParams()
+    if (params?.data_inicio) sp.append('data_inicio', params.data_inicio)
+    if (params?.data_fim) sp.append('data_fim', params.data_fim)
+    if (params?.regime) sp.append('regime', params.regime)
+    if (params?.aliquota_imposto !== undefined) sp.append('aliquota_imposto', String(params.aliquota_imposto))
+    const qs = sp.toString() ? `?${sp.toString()}` : ''
+    return request<DreResponse>(`/erp/financeiro/dre${qs}`)
+  },
 }
 
 export const tenantsApi = {

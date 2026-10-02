@@ -32,6 +32,7 @@ import RelatorioMultiLojas from './pages/RelatorioMultiLojas'
 import CrmManutencoes from './pages/CrmManutencoes'
 import CurvaAbc from './pages/CurvaAbc'
 import OficinaProdutividade from './pages/OficinaProdutividade'
+import DreGerencial from './pages/DreGerencial'
 
 export default function App() {
   return (
@@ -65,6 +66,7 @@ export default function App() {
               <Route path="/erp/vendas"       element={<Vendas />} />
               <Route path="/erp/contas"       element={<Contas />} />
               <Route path="/erp/contas-pagar" element={<ContasPagar />} />
+              <Route path="/erp/dre"          element={<DreGerencial />} />
               <Route path="/erp/clientes"     element={<Clientes />} />
               <Route path="/erp/clientes/:id" element={<ClienteHistorico />} />
               <Route path="/erp/crm"          element={<CrmManutencoes />} />

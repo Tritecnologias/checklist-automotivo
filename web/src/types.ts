@@ -796,4 +796,93 @@ export interface MecanicoPagamento {
   created_at: string
 }
 
+// ── DRE Gerencial Types ───────────────────────────────────────────────────────
+
+export interface DreItemLinhaFilho {
+  codigo: string
+  descricao: string
+  valor: number
+  percentual: number
+  detalhes?: {
+    qtd_itens?: number
+    aliquota_estimada_pct?: number
+    [key: string]: any
+  }
+}
+
+export interface DreLinha {
+  codigo: string
+  descricao: string
+  tipo: 'titulo' | 'deducao' | 'subtotal' | 'destaque' | 'resultado_financeiro' | 'total_final'
+  valor: number
+  percentual: number
+  filhos?: DreItemLinhaFilho[]
+}
+
+export interface DreIndicadores {
+  receita_bruta: number
+  receita_liquida: number
+  total_custos_variaveis: number
+  margem_contribuicao: number
+  margem_contribuicao_pct: number
+  total_despesas_fixas: number
+  resultado_operacional: number
+  margem_operacional_pct: number
+  resultado_liquido: number
+  margem_liquida_pct: number
+  ponto_equilibrio: number
+  markup_medio: number
+  total_vendas_qtd: number
+  ticket_medio: number
+}
+
+export interface DreHistoricoMes {
+  mes: string
+  ano: number
+  mes_num: number
+  receita_liquida: number
+  cmv: number
+  despesas_fixas: number
+  lucro_liquido: number
+  margem_liquida_pct: number
+}
+
+export interface DreLancamentoItem {
+  id: number
+  documento: string
+  favorecido: string
+  historico: string
+  data: string
+  data_pagamento: string | null
+  valor: number
+  status: 'pago' | 'pendente'
+}
+
+export interface DreCategoriaDetalhes {
+  nome: string
+  total: number
+  lancamentos: DreLancamentoItem[]
+}
+
+export interface DreResponse {
+  periodo: {
+    data_inicio: string
+    data_fim: string
+    regime: 'competencia' | 'caixa'
+    aliquota_imposto: number
+  }
+  indicadores: DreIndicadores
+  linhas_dre: DreLinha[]
+  meios_pagamento: {
+    dinheiro: number
+    pix: number
+    cartao: number
+    prazo: number
+  }
+  compras_fornecedores_periodo: number
+  historico_mensal: DreHistoricoMes[]
+  detalhes_categorias: Record<string, DreCategoriaDetalhes>
+}
+
+
 

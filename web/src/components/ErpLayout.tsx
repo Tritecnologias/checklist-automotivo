@@ -29,6 +29,7 @@ import {
   Building2,
   HeartHandshake,
   BarChart3,
+  PieChart,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -51,6 +52,7 @@ const nav: NavItem[] = [
   { to: '/erp/vendas',       label: 'Vendas',           icon: Receipt,         roles: ['owner', 'manager'] },
   { to: '/erp/contas',       label: 'Contas a Receber', icon: CircleDollarSign,roles: ['owner', 'manager'] },
   { to: '/erp/contas-pagar', label: 'Contas a Pagar',   icon: TrendingDown,    roles: ['owner', 'manager'] },
+  { to: '/erp/dre',          label: 'DRE Gerencial',    icon: PieChart,        roles: ['owner', 'manager'] },
   { to: '/erp/clientes',     label: 'Clientes',         icon: Users,           roles: ['owner', 'manager'] },
   { to: '/erp/crm',          label: 'CRM / Retorno',    icon: HeartHandshake,  roles: ['owner', 'manager'] },
 ]

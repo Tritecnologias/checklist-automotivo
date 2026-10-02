@@ -4557,41 +4557,542 @@ router.post('/oficina/pagar-comissao', requireManagerUp, async (req: Request, re
   }
 });
 
-// ── GET /erp/oficina/mecanicos/:id/pagamentos ─────────────────────────────────
-// Retorna histórico de pagamentos de comissão do mecânico
-router.get('/oficina/mecanicos/:id/pagamentos', async (req: Request, res: Response) => {
+// ── GET /erp/financeiro/dre ──────────────────────────────────────────────────
+// Demonstrativo de Resultado do Exercício (DRE Gerencial Simplificado)
+router.get('/financeiro/dre', async (req: Request, res: Response) => {
   try {
-    const mecId = Number(req.params.id);
-    const { clause, params } = getErpTenantFilter(req, true, 'p.tenant_id');
+    const { condition: tenantCondV, params: tenantParamsV } = getErpTenantCondition(req, 'v.tenant_id');
+    const { condition: tenantCondL, params: tenantParamsL } = getErpTenantCondition(req, 'l.tenant_id');
+    const { condition: tenantCondO, params: tenantParamsO } = getErpTenantCondition(req, 'o.tenant_id');
+    const { condition: tenantCondP, params: tenantParamsP } = getErpTenantCondition(req, 'p.tenant_id');
 
-    const [rows] = await pool.query<any>(
-      `SELECT p.*, l.documento AS lancamento_documento
-       FROM mecanico_pagamentos p
-       LEFT JOIN cad_lancamentos l ON l.id = p.id_lancamento
-       WHERE p.mecanico_id = ?
-       ${clause}
-       ORDER BY p.data_pagamento DESC, p.id DESC
-       LIMIT 100`,
-      [mecId, ...params]
+    // Período padrão: mês atual
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const defaultInicio = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const defaultFim = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(lastDayOfMonth)}`;
+
+    const dataInicio = String(req.query.data_inicio || defaultInicio);
+    const dataFim = String(req.query.data_fim || defaultFim);
+    const regime = req.query.regime === 'caixa' ? 'caixa' : 'competencia';
+    const aliquotaImposto = req.query.aliquota_imposto !== undefined ? Math.max(0, Number(req.query.aliquota_imposto)) : 0;
+
+    // 1. Receita de Vendas e CMV por Tipo (Peças vs Serviços)
+    const vWhereClause = tenantCondV ? `AND ${tenantCondV}` : '';
+    const [itensVendasRows] = await pool.query<any>(
+      `SELECT
+         COALESCE(t.is_service, 0) as is_service,
+         SUM(m.vr_total) as receita_total,
+         SUM(m.quant * COALESCE(p.vr_compra, p.vr_custo, 0)) as custo_total,
+         SUM(m.quant) as qtd_itens,
+         COUNT(DISTINCT m.id_produto) as qtd_produtos_distintos
+       FROM mv_vendas_movimento m
+       JOIN mv_vendas v ON v.controle = m.controle
+       JOIN cad_produtos p ON p.id = m.id_produto
+       LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
+       WHERE (v.data_venda BETWEEN ? AND ? OR DATE(v.data_venda) BETWEEN ? AND ?)
+         ${vWhereClause}
+       GROUP BY COALESCE(t.is_service, 0)`,
+      [dataInicio, dataFim, dataInicio, dataFim, ...tenantParamsV]
     );
 
-    res.json(rows.map((r: any) => ({
-      id: Number(r.id),
-      mecanico_id: Number(r.mecanico_id),
-      valor: Number(r.valor),
-      data_pagamento: r.data_pagamento,
-      periodo_inicio: r.periodo_inicio || null,
-      periodo_fim: r.periodo_fim || null,
-      forma_pagamento: r.forma_pagamento,
-      observacoes: r.observacoes || null,
-      id_lancamento: r.id_lancamento ? Number(r.id_lancamento) : null,
-      lancamento_documento: r.lancamento_documento || null,
-      created_by: r.created_by || null,
-      created_at: r.created_at,
-    })));
+    let receitaPecas = 0;
+    let cmvPecas = 0;
+    let qtdPecas = 0;
+    let receitaServicos = 0;
+    let custoServicos = 0;
+    let qtdServicos = 0;
+
+    for (const r of itensVendasRows) {
+      if (Number(r.is_service) === 1) {
+        receitaServicos = Number(r.receita_total || 0);
+        custoServicos = Number(r.custo_total || 0);
+        qtdServicos = Number(r.qtd_itens || 0);
+      } else {
+        receitaPecas = Number(r.receita_total || 0);
+        cmvPecas = Number(r.custo_total || 0);
+        qtdPecas = Number(r.qtd_itens || 0);
+      }
+    }
+
+    // 2. Totais da Capa de Vendas (Descontos, Acréscimos e Meios de Pagamento)
+    const [[vendasTotais]] = await pool.query<any>(
+      `SELECT
+         COUNT(*) as total_vendas,
+         COALESCE(SUM(vr_total), 0) as faturamento_bruto_vendas,
+         COALESCE(SUM(vr_desconto), 0) as total_descontos,
+         COALESCE(SUM(vr_adicional), 0) as total_acrescimos,
+         COALESCE(SUM(vr_cartao), 0) as total_cartao,
+         COALESCE(SUM(vr_pix), 0) as total_pix,
+         COALESCE(SUM(vr_dinheiro), 0) as total_dinheiro,
+         COALESCE(SUM(COALESCE(vr_nota, 0) + COALESCE(vr_carne, 0)), 0) as total_prazo
+       FROM mv_vendas v
+       WHERE (v.data_venda BETWEEN ? AND ? OR DATE(v.data_venda) BETWEEN ? AND ?)
+         ${vWhereClause}`,
+      [dataInicio, dataFim, dataInicio, dataFim, ...tenantParamsV]
+    );
+
+    const totalVendasQtd = Number(vendasTotais?.total_vendas || 0);
+    const totalDescontosVendas = Number(vendasTotais?.total_descontos || 0);
+    const totalAcrescimosVendas = Number(vendasTotais?.total_acrescimos || 0);
+    const totalCartao = Number(vendasTotais?.total_cartao || 0);
+    const totalPix = Number(vendasTotais?.total_pix || 0);
+    const totalDinheiro = Number(vendasTotais?.total_dinheiro || 0);
+    const totalPrazo = Number(vendasTotais?.total_prazo || 0);
+
+    // Ajusta receita bruta se os itens somarem diferente da capa
+    const somaItens = receitaPecas + receitaServicos;
+    const faturamentoBrutoVendas = Number(vendasTotais?.faturamento_bruto_vendas || 0);
+    if (somaItens === 0 && faturamentoBrutoVendas > 0) {
+      receitaPecas = faturamentoBrutoVendas;
+    }
+
+    // 3. Comissões da Oficina Apuradas no Período
+    const oWhereClause = tenantCondO ? `AND ${tenantCondO}` : '';
+    const [[comissoesRow]] = await pool.query<any>(
+      `SELECT
+         COALESCE(SUM(oi.comissao_valor), 0) as comissoes_geradas
+       FROM os_order_items oi
+       JOIN os_orders o ON o.id = oi.order_id
+       WHERE o.status != 'canceled'
+         AND (
+           (o.closed_at IS NOT NULL AND DATE(o.closed_at) BETWEEN ? AND ?)
+           OR (o.closed_at IS NULL AND DATE(o.created_at) BETWEEN ? AND ?)
+         )
+         ${oWhereClause}`,
+      [dataInicio, dataFim, dataInicio, dataFim, ...tenantParamsO]
+    );
+
+    const pWhereClause = tenantCondP ? `AND ${tenantCondP}` : '';
+    const [[pagamentosComissoesRow]] = await pool.query<any>(
+      `SELECT COALESCE(SUM(valor), 0) as comissoes_pagas
+       FROM mecanico_pagamentos p
+       WHERE p.data_pagamento BETWEEN ? AND ?
+         ${pWhereClause}`,
+      [dataInicio, dataFim, ...tenantParamsP]
+    );
+
+    // No regime de competência usamos as comissões geradas no período; no regime de caixa, as comissões efetivamente pagas
+    const comissoesOficina = regime === 'caixa'
+      ? Number(pagamentosComissoesRow?.comissoes_pagas || 0)
+      : Number(comissoesRow?.comissoes_geradas || 0);
+
+    // Taxas estimadas de meios de pagamento (média de ~2% sobre cartões)
+    const taxasMeiosPagamento = Number((totalCartao * 0.02).toFixed(2));
+
+    // 4. Despesas e Outras Entradas do Plano de Contas (cad_lancamentos)
+    const lWhereTenant = tenantCondL ? `AND ${tenantCondL}` : '';
+    const dateField = regime === 'caixa' ? 'COALESCE(l.data_confirmacao, l.data_vencimento)' : 'l.data_vencimento';
+    const statusFilter = regime === 'caixa' ? 'AND l.status_lancamento = 1' : '';
+
+    const [lancamentosRows] = await pool.query<any>(
+      `SELECT
+         l.id,
+         l.id_planejamento,
+         COALESCE(pl.plane_descricao, 'OUTRAS DESPESAS') as categoria_nome,
+         pl.plane_cod,
+         pl.plane_tipo,
+         l.documento,
+         l.favorecido,
+         l.historico,
+         l.data_vencimento,
+         l.data_confirmacao,
+         l.status_lancamento,
+         (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) as vr_liquido
+       FROM cad_lancamentos l
+       LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+       WHERE (DATE(${dateField}) BETWEEN ? AND ?)
+         ${statusFilter}
+         ${lWhereTenant}
+       ORDER BY l.data_vencimento ASC, l.id ASC`,
+      [dataInicio, dataFim, ...tenantParamsL]
+    );
+
+    // Categorização de Despesas Operacionais e Outras Receitas
+    let outrasReceitasOperacionais = 0;
+    let receitasFinanceiras = 0;
+    let devolucoesConcedidas = 0;
+    let despesasPessoal = 0;
+    let despesasOcupacao = 0;
+    let despesasConsumo = 0;
+    let despesasManutencao = 0;
+    let despesasTributosLancadas = 0;
+    let despesasGeraisAdmin = 0;
+    let despesasFinanceiras = 0;
+    let comprasFornecedoresEstoque = 0;
+
+    const detalhesPorCategoria: Record<string, { nome: string; total: number; lancamentos: any[] }> = {};
+
+    for (const l of lancamentosRows) {
+      const pid = Number(l.id_planejamento || 0);
+      const ptipo = l.plane_tipo;
+      const valor = Number(l.vr_liquido || 0);
+      const catNome = l.categoria_nome;
+
+      if (!detalhesPorCategoria[catNome]) {
+        detalhesPorCategoria[catNome] = { nome: catNome, total: 0, lancamentos: [] };
+      }
+      detalhesPorCategoria[catNome].total += valor;
+      detalhesPorCategoria[catNome].lancamentos.push({
+        id: l.id,
+        documento: l.documento,
+        favorecido: l.favorecido,
+        historico: l.historico,
+        data: l.data_vencimento,
+        data_pagamento: l.data_confirmacao,
+        valor,
+        status: l.status_lancamento === 1 ? 'pago' : 'pendente',
+      });
+
+      if (ptipo === 'E') {
+        if (pid === 1 || pid === 3) {
+          outrasReceitasOperacionais += valor;
+        } else if (pid === 2) {
+          // Venda realizada (já considerada em mv_vendas)
+        } else {
+          receitasFinanceiras += valor;
+        }
+      } else {
+        // Despesas (Saídas)
+        if (pid === 5) {
+          devolucoesConcedidas += valor;
+        } else if (pid === 12) {
+          despesasPessoal += valor;
+        } else if (pid === 10) {
+          despesasOcupacao += valor;
+        } else if ([6, 7, 8, 9].includes(pid)) {
+          despesasConsumo += valor;
+        } else if (pid === 14) {
+          despesasManutencao += valor;
+        } else if (pid === 13) {
+          despesasTributosLancadas += valor;
+        } else if (pid === 11) {
+          comprasFornecedoresEstoque += valor;
+        } else {
+          despesasGeraisAdmin += valor;
+        }
+      }
+    }
+
+    // 5. Linhas do DRE (Cálculo em Cascata)
+    const receitaBrutaTotal = receitaPecas + receitaServicos + outrasReceitasOperacionais;
+
+    // Deduções: Descontos + Devoluções + Impostos s/ Venda
+    const impostosVendas = aliquotaImposto > 0
+      ? Number(((receitaPecas + receitaServicos) * (aliquotaImposto / 100)).toFixed(2))
+      : despesasTributosLancadas;
+
+    const totalDeducoes = totalDescontosVendas + devolucoesConcedidas + impostosVendas;
+    const receitaLiquida = Math.max(0, receitaBrutaTotal - totalDeducoes);
+
+    // Custos Variáveis: CMV Peças + Custo Direto Serviços + Comissões + Taxas Cartão
+    const totalCustosVariaveis = cmvPecas + custoServicos + comissoesOficina + taxasMeiosPagamento;
+
+    // Margem de Contribuição / Lucro Bruto
+    const margemContribuicao = receitaLiquida - totalCustosVariaveis;
+    const margemContribuicaoPct = receitaLiquida > 0 ? (margemContribuicao / receitaLiquida) * 100 : 0;
+
+    // Despesas Fixas e Operacionais
+    // (No regime de competência, estoque de fornecedor já entra via CMV das peças vendidas)
+    const totalDespesasFixas = despesasPessoal + despesasOcupacao + despesasConsumo + despesasManutencao + despesasGeraisAdmin;
+
+    // Resultado Operacional (EBITDA / LAJIDA)
+    const resultadoOperacional = margemContribuicao - totalDespesasFixas;
+    const margemOperacionalPct = receitaLiquida > 0 ? (resultadoOperacional / receitaLiquida) * 100 : 0;
+
+    // Resultado Financeiro
+    const resultadoFinanceiro = receitasFinanceiras - despesasFinanceiras + totalAcrescimosVendas;
+
+    // Resultado Líquido do Exercício (Lucro Líquido / Prejuízo)
+    const resultadoLiquido = resultadoOperacional + resultadoFinanceiro;
+    const margemLiquidaPct = receitaLiquida > 0 ? (resultadoLiquido / receitaLiquida) * 100 : 0;
+
+    // Ponto de Equilíbrio Operacional (Break-even): quanto precisa faturar para cobrir custos e despesas fixas
+    const pontoEquilibrio = margemContribuicaoPct > 0
+      ? Number((totalDespesasFixas / (margemContribuicaoPct / 100)).toFixed(2))
+      : 0;
+
+    // Markup Médio Praticado nas Peças
+    const markupMedio = cmvPecas > 0 ? Number((receitaPecas / cmvPecas).toFixed(2)) : 0;
+
+    // 6. Evolução Mensal dos Últimos 6 Meses para o Gráfico de Tendência
+    const mesesHistorico = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mY = d.getFullYear();
+      const mM = d.getMonth() + 1;
+      const mLabel = `${pad(mM)}/${mY}`;
+      const mInicio = `${mY}-${pad(mM)}-01`;
+      const mFimDia = new Date(mY, mM, 0).getDate();
+      const mFim = `${mY}-${pad(mM)}-${pad(mFimDia)}`;
+
+      const [[hFatRow]] = await pool.query<any>(
+        `SELECT
+           COALESCE(SUM(vr_total), 0) as fat,
+           COALESCE(SUM(vr_desconto), 0) as desc_total
+         FROM mv_vendas v
+         WHERE (v.data_venda BETWEEN ? AND ? OR DATE(v.data_venda) BETWEEN ? AND ?)
+           ${vWhereClause}`,
+        [mInicio, mFim, mInicio, mFim, ...tenantParamsV]
+      );
+
+      const [[hCmvRow]] = await pool.query<any>(
+        `SELECT
+           COALESCE(SUM(m.quant * COALESCE(p.vr_compra, p.vr_custo, 0)), 0) as cmv
+         FROM mv_vendas_movimento m
+         JOIN mv_vendas v ON v.controle = m.controle
+         JOIN cad_produtos p ON p.id = m.id_produto
+         WHERE (v.data_venda BETWEEN ? AND ? OR DATE(v.data_venda) BETWEEN ? AND ?)
+           ${vWhereClause}`,
+        [mInicio, mFim, mInicio, mFim, ...tenantParamsV]
+      );
+
+      const [[hDespRow]] = await pool.query<any>(
+        `SELECT
+           COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as desp
+         FROM cad_lancamentos l
+         LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+         WHERE l.data_vencimento BETWEEN ? AND ?
+           AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 6, 7, 8, 9, 10, 12, 13, 14))
+           ${lWhereTenant}`,
+        [mInicio, mFim, ...tenantParamsL]
+      );
+
+      const mFatLiq = Math.max(0, Number(hFatRow?.fat || 0) - Number(hFatRow?.desc_total || 0));
+      const mCmv = Number(hCmvRow?.cmv || 0);
+      const mDesp = Number(hDespRow?.desp || 0);
+      const mLucro = mFatLiq - mCmv - mDesp;
+      const mMargemPct = mFatLiq > 0 ? (mLucro / mFatLiq) * 100 : 0;
+
+      mesesHistorico.push({
+        mes: mLabel,
+        ano: mY,
+        mes_num: mM,
+        receita_liquida: mFatLiq,
+        cmv: mCmv,
+        despesas_fixas: mDesp,
+        lucro_liquido: mLucro,
+        margem_liquida_pct: Number(mMargemPct.toFixed(1)),
+      });
+    }
+
+    res.json({
+      periodo: {
+        data_inicio: dataInicio,
+        data_fim: dataFim,
+        regime,
+        aliquota_imposto: aliquotaImposto,
+      },
+      indicadores: {
+        receita_bruta: receitaBrutaTotal,
+        receita_liquida: receitaLiquida,
+        total_custos_variaveis: totalCustosVariaveis,
+        margem_contribuicao: margemContribuicao,
+        margem_contribuicao_pct: Number(margemContribuicaoPct.toFixed(2)),
+        total_despesas_fixas: totalDespesasFixas,
+        resultado_operacional: resultadoOperacional,
+        margem_operacional_pct: Number(margemOperacionalPct.toFixed(2)),
+        resultado_liquido: resultadoLiquido,
+        margem_liquida_pct: Number(margemLiquidaPct.toFixed(2)),
+        ponto_equilibrio: pontoEquilibrio,
+        markup_medio: markupMedio,
+        total_vendas_qtd: totalVendasQtd,
+        ticket_medio: totalVendasQtd > 0 ? Number((receitaLiquida / totalVendasQtd).toFixed(2)) : 0,
+      },
+      linhas_dre: [
+        {
+          codigo: '1',
+          descricao: 'RECEITA OPERACIONAL BRUTA',
+          tipo: 'titulo',
+          valor: receitaBrutaTotal,
+          percentual: receitaLiquida > 0 ? Number(((receitaBrutaTotal / receitaLiquida) * 100).toFixed(2)) : 100,
+          filhos: [
+            {
+              codigo: '1.1',
+              descricao: 'Venda de Peças e Produtos',
+              valor: receitaPecas,
+              percentual: receitaLiquida > 0 ? Number(((receitaPecas / receitaLiquida) * 100).toFixed(2)) : 0,
+              detalhes: { qtd_itens: qtdPecas },
+            },
+            {
+              codigo: '1.2',
+              descricao: 'Prestação de Serviços / Mão de Obra',
+              valor: receitaServicos,
+              percentual: receitaLiquida > 0 ? Number(((receitaServicos / receitaLiquida) * 100).toFixed(2)) : 0,
+              detalhes: { qtd_itens: qtdServicos },
+            },
+            {
+              codigo: '1.3',
+              descricao: 'Outras Receitas Operacionais',
+              valor: outrasReceitasOperacionais,
+              percentual: receitaLiquida > 0 ? Number(((outrasReceitasOperacionais / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+          ],
+        },
+        {
+          codigo: '2',
+          descricao: '(-) DEDUÇÕES DA RECEITA BRUTA',
+          tipo: 'deducao',
+          valor: -totalDeducoes,
+          percentual: receitaLiquida > 0 ? Number(((-totalDeducoes / receitaLiquida) * 100).toFixed(2)) : 0,
+          filhos: [
+            {
+              codigo: '2.1',
+              descricao: 'Descontos Comerciais Concedidos',
+              valor: -totalDescontosVendas,
+              percentual: receitaLiquida > 0 ? Number(((-totalDescontosVendas / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '2.2',
+              descricao: 'Devoluções e Cancelamentos',
+              valor: -devolucoesConcedidas,
+              percentual: receitaLiquida > 0 ? Number(((-devolucoesConcedidas / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '2.3',
+              descricao: 'Tributos e Impostos sobre Faturamento',
+              valor: -impostosVendas,
+              percentual: receitaLiquida > 0 ? Number(((-impostosVendas / receitaLiquida) * 100).toFixed(2)) : 0,
+              detalhes: { aliquota_estimada_pct: aliquotaImposto },
+            },
+          ],
+        },
+        {
+          codigo: '3',
+          descricao: '(=) RECEITA OPERACIONAL LÍQUIDA',
+          tipo: 'subtotal',
+          valor: receitaLiquida,
+          percentual: 100.0,
+        },
+        {
+          codigo: '4',
+          descricao: '(-) CUSTOS VARIÁVEIS / CMV & COMISSÕES',
+          tipo: 'deducao',
+          valor: -totalCustosVariaveis,
+          percentual: receitaLiquida > 0 ? Number(((-totalCustosVariaveis / receitaLiquida) * 100).toFixed(2)) : 0,
+          filhos: [
+            {
+              codigo: '4.1',
+              descricao: 'Custo das Mercadorias Vendidas (CMV Peças)',
+              valor: -cmvPecas,
+              percentual: receitaLiquida > 0 ? Number(((-cmvPecas / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '4.2',
+              descricao: 'Custos Diretos de Mão de Obra / Serviços',
+              valor: -custoServicos,
+              percentual: receitaLiquida > 0 ? Number(((-custoServicos / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '4.3',
+              descricao: 'Comissões de Mecânicos / Técnicos',
+              valor: -comissoesOficina,
+              percentual: receitaLiquida > 0 ? Number(((-comissoesOficina / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '4.4',
+              descricao: 'Taxas de Meios de Pagamento (Cartões / PIX)',
+              valor: -taxasMeiosPagamento,
+              percentual: receitaLiquida > 0 ? Number(((-taxasMeiosPagamento / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+          ],
+        },
+        {
+          codigo: '5',
+          descricao: '(=) LUCRO BRUTO / MARGEM DE CONTRIBUIÇÃO',
+          tipo: 'destaque',
+          valor: margemContribuicao,
+          percentual: Number(margemContribuicaoPct.toFixed(2)),
+        },
+        {
+          codigo: '6',
+          descricao: '(-) DESPESAS OPERACIONAIS FIXAS',
+          tipo: 'deducao',
+          valor: -totalDespesasFixas,
+          percentual: receitaLiquida > 0 ? Number(((-totalDespesasFixas / receitaLiquida) * 100).toFixed(2)) : 0,
+          filhos: [
+            {
+              codigo: '6.1',
+              descricao: 'Pessoal e Pró-Labore',
+              valor: -despesasPessoal,
+              percentual: receitaLiquida > 0 ? Number(((-despesasPessoal / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '6.2',
+              descricao: 'Ocupação e Imóvel (Aluguel / Condomínio)',
+              valor: -despesasOcupacao,
+              percentual: receitaLiquida > 0 ? Number(((-despesasOcupacao / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '6.3',
+              descricao: 'Contas de Consumo (Luz, Água, Internet, Telefone)',
+              valor: -despesasConsumo,
+              percentual: receitaLiquida > 0 ? Number(((-despesasConsumo / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '6.4',
+              descricao: 'Manutenção da Oficina & Ferramental',
+              valor: -despesasManutencao,
+              percentual: receitaLiquida > 0 ? Number(((-despesasManutencao / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '6.5',
+              descricao: 'Despesas Gerais e Administrativas',
+              valor: -despesasGeraisAdmin,
+              percentual: receitaLiquida > 0 ? Number(((-despesasGeraisAdmin / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+          ],
+        },
+        {
+          codigo: '7',
+          descricao: '(=) RESULTADO OPERACIONAL (EBITDA / LAJIDA)',
+          tipo: 'subtotal',
+          valor: resultadoOperacional,
+          percentual: Number(margemOperacionalPct.toFixed(2)),
+        },
+        {
+          codigo: '8',
+          descricao: '(+/-) RESULTADO FINANCEIRO',
+          tipo: 'resultado_financeiro',
+          valor: resultadoFinanceiro,
+          percentual: receitaLiquida > 0 ? Number(((resultadoFinanceiro / receitaLiquida) * 100).toFixed(2)) : 0,
+          filhos: [
+            {
+              codigo: '8.1',
+              descricao: 'Receitas Financeiras (Juros / Descontos Obtidos)',
+              valor: receitasFinanceiras + totalAcrescimosVendas,
+              percentual: receitaLiquida > 0 ? Number((((receitasFinanceiras + totalAcrescimosVendas) / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+            {
+              codigo: '8.2',
+              descricao: 'Despesas Financeiras (Juros Pagos / Tarifas)',
+              valor: -despesasFinanceiras,
+              percentual: receitaLiquida > 0 ? Number(((-despesasFinanceiras / receitaLiquida) * 100).toFixed(2)) : 0,
+            },
+          ],
+        },
+        {
+          codigo: '9',
+          descricao: '(=) RESULTADO LÍQUIDO DO EXERCÍCIO (LUCRO / PREJUÍZO)',
+          tipo: 'total_final',
+          valor: resultadoLiquido,
+          percentual: Number(margemLiquidaPct.toFixed(2)),
+        },
+      ],
+      meios_pagamento: {
+        dinheiro: totalDinheiro,
+        pix: totalPix,
+        cartao: totalCartao,
+        prazo: totalPrazo,
+      },
+      compras_fornecedores_periodo: comprasFornecedoresEstoque,
+      historico_mensal: mesesHistorico,
+      detalhes_categorias: detalhesPorCategoria,
+    });
   } catch (err: any) {
-    console.error('[mecanico pagamentos] Erro:', err);
-    res.status(500).json({ message: 'Erro ao buscar histórico de pagamentos de comissão' });
+    console.error('[DRE Gerencial] Erro:', err);
+    res.status(500).json({ message: 'Erro ao gerar DRE Gerencial' });
   }
 });
 
