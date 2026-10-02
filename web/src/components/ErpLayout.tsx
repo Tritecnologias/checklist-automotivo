@@ -26,6 +26,7 @@ import {
   ChevronDown,
   Check,
   SlidersHorizontal,
+  Building2,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -196,6 +197,17 @@ export default function ErpLayout() {
           {isOwner && (
             <div className="px-3 py-3 border-t border-slate-800/80 space-y-1">
               <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-3 mb-1.5">Gestão</p>
+              <NavLink
+                to="/erp/relatorios/multi-lojas"
+                className={({ isActive }) =>
+                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                  }`
+                }
+              >
+                <Building2 className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                <span>Multi-Lojas</span>
+              </NavLink>
               <NavLink
                 to="/erp/lojas"
                 className={({ isActive }) =>

@@ -28,6 +28,7 @@ import ImportarEstoque   from './pages/ImportarEstoque'
 import ConfigInstalacoes from './pages/ConfigInstalacoes'
 import ConfigTiposProdutos from './pages/ConfigTiposProdutos'
 import ConfigParametros from './pages/ConfigParametros'
+import RelatorioMultiLojas from './pages/RelatorioMultiLojas'
 
 export default function App() {
   return (
@@ -65,6 +66,7 @@ export default function App() {
               <Route path="/erp/config/instalacoes" element={<ConfigInstalacoes />} />
               <Route path="/erp/config/tipos"       element={<ConfigTiposProdutos />} />
               <Route path="/erp/config/parametros"  element={<ConfigParametros />} />
+              <Route path="/erp/relatorios/multi-lojas" element={<RelatorioMultiLojas />} />
               <Route path="/erp/tipos-produtos"     element={<Navigate to="/erp/config/tipos" replace />} />
             </Route>
           </Route>

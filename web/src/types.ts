@@ -483,3 +483,87 @@ export interface ParametrosPdv {
   tenant_id: number | null
 }
 
+export interface LojaComparativo {
+  tenant: {
+    id: number
+    nome: string
+    slug: string
+    ativo: boolean
+    is_matriz: boolean
+  }
+  faturamento: {
+    total: number
+    qtd_vendas: number
+    ticket_medio: number
+    share_pct: number
+  }
+  pagamentos: {
+    dinheiro: number
+    cartao: number
+    pix: number
+    prazo: number
+    outros: number
+  }
+  descontos: {
+    total: number
+    pct_medio: number
+  }
+  oficina_os: {
+    qtd_total: number
+    qtd_encerradas: number
+    faturamento: number
+    ticket_medio: number
+  }
+  despesas: {
+    total: number
+    despesas_dinheiro: number
+    qtd: number
+  }
+  resultado: {
+    lucro_operacional: number
+    margem_lucro_pct: number
+  }
+  caixa_atual: {
+    id: number
+    status: 'A' | 'F'
+    terminal: string | null
+    turno: string | null
+    hora_abertura: string | null
+    data_abertura: string | null
+    vr_abertura: number
+  } | null
+}
+
+export interface ConsolidadoMultiLojas {
+  faturamento_total: number
+  qtd_vendas_total: number
+  ticket_medio_geral: number
+  despesas_total: number
+  lucro_operacional_total: number
+  margem_lucro_geral_pct: number
+  descontos_total: number
+  os_encerradas_total: number
+  os_faturamento_total: number
+  pagamentos_total: {
+    dinheiro: number
+    cartao: number
+    pix: number
+    prazo: number
+    outros: number
+  }
+  destaques: {
+    maior_faturamento: { id: number; nome: string; valor: number } | null
+    maior_ticket_medio: { id: number; nome: string; valor: number } | null
+    maior_margem: { id: number; nome: string; valor: number } | null
+  }
+}
+
+export interface RelatorioMultiLojasResponse {
+  periodo: {
+    data_inicio: string
+    data_fim: string
+  }
+  lojas: LojaComparativo[]
+  consolidados: ConsolidadoMultiLojas | null
+}
+

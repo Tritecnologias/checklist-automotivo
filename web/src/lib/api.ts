@@ -3,7 +3,7 @@ import type {
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
-  ProdutoTipo, ParametrosPdv,
+  ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -325,6 +325,14 @@ export const erpApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+
+  relatorioMultiLojas: (params?: { data_inicio?: string; data_fim?: string }) => {
+    const q = new URLSearchParams()
+    if (params?.data_inicio) q.set('data_inicio', params.data_inicio)
+    if (params?.data_fim) q.set('data_fim', params.data_fim)
+    const qs = q.toString() ? `?${q}` : ''
+    return adminRequest<RelatorioMultiLojasResponse>(`/erp/relatorios/multi-lojas${qs}`)
+  },
 
   clientes: (params: { search?: string; status?: 'ativos' | 'inativos' | 'todos'; page?: number }) => {
     const q = new URLSearchParams()

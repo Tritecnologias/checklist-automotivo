@@ -3028,4 +3028,319 @@ router.put('/config/parametros', requireManagerUp, async (req, res) => {
   }
 });
 
+// ── RELATÓRIO CONSOLIDADO MULTI-LOJAS (MATRIZ VS. FILIAIS) ─────────────────
+
+router.get('/relatorios/multi-lojas', requireManagerUp, async (req, res) => {
+  try {
+    const user = req.user as JwtPayload;
+    const isOwner = user.role === 'owner';
+
+    // Determina lojas acessíveis
+    let tenantsQuery = 'SELECT id, nome, slug, ativo FROM tenants ORDER BY id ASC';
+    let tenantsParams: any[] = [];
+
+    if (!isOwner) {
+      const allowed = user.tenantIds && user.tenantIds.length > 0
+        ? user.tenantIds
+        : (user.tenantId ? [user.tenantId] : []);
+      if (allowed.length === 0) {
+        return res.json({
+          periodo: { data_inicio: '', data_fim: '' },
+          lojas: [],
+          consolidados: {
+            faturamento_total: 0,
+            qtd_vendas_total: 0,
+            ticket_medio_geral: 0,
+            despesas_total: 0,
+            lucro_operacional_total: 0,
+            margem_lucro_geral_pct: 0,
+            descontos_total: 0,
+            os_encerradas_total: 0,
+            os_faturamento_total: 0,
+            pagamentos_total: { dinheiro: 0, cartao: 0, pix: 0, prazo: 0, outros: 0 },
+            destaques: { maior_faturamento: null, maior_ticket_medio: null, maior_margem: null },
+          },
+        });
+      }
+      tenantsQuery = `SELECT id, nome, slug, ativo FROM tenants WHERE id IN (${allowed.map(() => '?').join(',')}) ORDER BY id ASC`;
+      tenantsParams = allowed;
+    }
+
+    const [tenants] = await pool.query<any>(tenantsQuery, tenantsParams);
+    if (!tenants || tenants.length === 0) {
+      return res.json({
+        periodo: { data_inicio: '', data_fim: '' },
+        lojas: [],
+        consolidados: null,
+      });
+    }
+
+    // Período padrão: mês atual
+    const hoje = new Date();
+    const ano = hoje.getFullYear();
+    const mes = String(hoje.getMonth() + 1).padStart(2, '0');
+    const dia = String(hoje.getDate()).padStart(2, '0');
+    const primeiroDiaMes = `${ano}-${mes}-01`;
+    const hojeStr = `${ano}-${mes}-${dia}`;
+
+    const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : primeiroDiaMes;
+    const dataFim = req.query.data_fim ? String(req.query.data_fim).trim() : hojeStr;
+
+    const tenantIds = tenants.map((t: any) => t.id);
+    const tenantPlaceholders = tenantIds.map(() => '?').join(',');
+
+    // 1. Vendas e formas de pagamento por tenant no período
+    const [vendasRows] = await pool.query<any>(
+      `SELECT 
+         v.tenant_id,
+         COUNT(v.id) as qtd_vendas,
+         COALESCE(SUM(COALESCE(v.vr_dinheiro, 0) + COALESCE(v.vr_cartao, 0) + COALESCE(v.vr_pix, 0) + COALESCE(v.vr_nota, 0) + COALESCE(v.vr_carne, 0) + COALESCE(v.vr_ticket, 0)), 0) as faturamento_total,
+         COALESCE(SUM(COALESCE(v.vr_dinheiro, 0)), 0) as vr_dinheiro,
+         COALESCE(SUM(COALESCE(v.vr_cartao, 0)), 0) as vr_cartao,
+         COALESCE(SUM(COALESCE(v.vr_pix, 0)), 0) as vr_pix,
+         COALESCE(SUM(COALESCE(v.vr_nota, 0) + COALESCE(v.vr_carne, 0)), 0) as vr_prazo,
+         COALESCE(SUM(COALESCE(v.vr_ticket, 0)), 0) as vr_outros,
+         COALESCE(SUM(CASE WHEN v.vr_adicional < 0 THEN ABS(v.vr_adicional) ELSE 0 END), 0) as total_descontos
+       FROM mv_vendas v
+       WHERE v.tenant_id IN (${tenantPlaceholders})
+         AND (v.data_venda BETWEEN ? AND ? OR DATE(v.data_venda) BETWEEN ? AND ?)
+       GROUP BY v.tenant_id`,
+      [...tenantIds, dataInicio, dataFim, dataInicio, dataFim]
+    );
+
+    const vendasMap = new Map<number, any>();
+    for (const r of vendasRows) {
+      vendasMap.set(Number(r.tenant_id), r);
+    }
+
+    // 2. Ordens de Serviço (Oficina) por tenant no período
+    const [osRows] = await pool.query<any>(
+      `SELECT
+         o.tenant_id,
+         COUNT(o.id) as qtd_os_total,
+         SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) as qtd_os_encerradas,
+         COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.total_amount ELSE 0 END), 0) as faturamento_os
+       FROM os_orders o
+       WHERE o.tenant_id IN (${tenantPlaceholders})
+         AND DATE(COALESCE(o.closed_at, o.created_at)) BETWEEN ? AND ?
+       GROUP BY o.tenant_id`,
+      [...tenantIds, dataInicio, dataFim]
+    );
+
+    const osMap = new Map<number, any>();
+    for (const r of osRows) {
+      osMap.set(Number(r.tenant_id), r);
+    }
+
+    // 3. Despesas e Contas a Pagar quitadas por tenant no período
+    const [despesasRows] = await pool.query<any>(
+      `SELECT 
+         l.tenant_id,
+         COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+         COUNT(l.id) as qtd_despesas
+       FROM cad_lancamentos l
+       LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+       WHERE l.tenant_id IN (${tenantPlaceholders})
+         AND l.status_lancamento = 1
+         AND (pl.plane_tipo = 'S' OR l.id_planejamento IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14) OR l.id_venda IS NULL OR l.id_venda = 0)
+         AND (DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) BETWEEN ? AND ?)
+       GROUP BY l.tenant_id`,
+      [...tenantIds, dataInicio, dataFim]
+    );
+
+    const despesasMap = new Map<number, any>();
+    for (const r of despesasRows) {
+      despesasMap.set(Number(r.tenant_id), r);
+    }
+
+    // 4. Status mais recente de caixa de cada tenant
+    const [caixaRows] = await pool.query<any>(
+      `SELECT 
+         c.id, c.tenant_id, c.status_caixa, c.terminal, c.turno, c.hora_abertura, c.data_abertura, c.vr_abertura
+       FROM mv_caixa c
+       INNER JOIN (
+         SELECT tenant_id, MAX(id) as max_id
+         FROM mv_caixa
+         WHERE tenant_id IN (${tenantPlaceholders})
+         GROUP BY tenant_id
+       ) latest ON latest.tenant_id = c.tenant_id AND latest.max_id = c.id`,
+      tenantIds
+    );
+
+    const caixaMap = new Map<number, any>();
+    for (const r of caixaRows) {
+      caixaMap.set(Number(r.tenant_id), r);
+    }
+
+    // 5. Agrega e calcula indicadores individuais
+    let faturamentoTotalRede = 0;
+    let qtdVendasTotalRede = 0;
+    let despesasTotalRede = 0;
+    let descontosTotalRede = 0;
+    let osEncerradasTotalRede = 0;
+    let osFaturamentoTotalRede = 0;
+    const pagamentosTotalRede = {
+      dinheiro: 0,
+      cartao: 0,
+      pix: 0,
+      prazo: 0,
+      outros: 0,
+    };
+
+    const lojasCalculadasTemp = tenants.map((t: any, index: number) => {
+      const v = vendasMap.get(t.id) || {};
+      const os = osMap.get(t.id) || {};
+      const d = despesasMap.get(t.id) || {};
+      const c = caixaMap.get(t.id) || null;
+
+      const faturamentoLoja = Number(v.faturamento_total || 0);
+      const qtdVendas = Number(v.qtd_vendas || 0);
+      const ticketMedio = qtdVendas > 0 ? faturamentoLoja / qtdVendas : 0;
+      const despesasLoja = Number(d.total_despesas || 0);
+      const lucroOperacional = faturamentoLoja - despesasLoja;
+      const margemLucroPct = faturamentoLoja > 0 ? (lucroOperacional / faturamentoLoja) * 100 : 0;
+      const totalDescontos = Number(v.total_descontos || 0);
+      const pctDescontoMedio = (faturamentoLoja + totalDescontos) > 0
+        ? (totalDescontos / (faturamentoLoja + totalDescontos)) * 100
+        : 0;
+
+      const pagto = {
+        dinheiro: Number(v.vr_dinheiro || 0),
+        cartao: Number(v.vr_cartao || 0),
+        pix: Number(v.vr_pix || 0),
+        prazo: Number(v.vr_prazo || 0),
+        outros: Number(v.vr_outros || 0),
+      };
+
+      faturamentoTotalRede += faturamentoLoja;
+      qtdVendasTotalRede += qtdVendas;
+      despesasTotalRede += despesasLoja;
+      descontosTotalRede += totalDescontos;
+      osEncerradasTotalRede += Number(os.qtd_os_encerradas || 0);
+      osFaturamentoTotalRede += Number(os.faturamento_os || 0);
+
+      pagamentosTotalRede.dinheiro += pagto.dinheiro;
+      pagamentosTotalRede.cartao += pagto.cartao;
+      pagamentosTotalRede.pix += pagto.pix;
+      pagamentosTotalRede.prazo += pagto.prazo;
+      pagamentosTotalRede.outros += pagto.outros;
+
+      // É matriz se id == 1 ou slug == 'loja-principal' ou primeiro index
+      const isMatriz = t.id === 1 || t.slug === 'loja-principal' || index === 0;
+
+      return {
+        tenant: {
+          id: t.id,
+          nome: t.nome,
+          slug: t.slug,
+          ativo: Boolean(t.ativo),
+          is_matriz: isMatriz,
+        },
+        faturamento: {
+          total: faturamentoLoja,
+          qtd_vendas: qtdVendas,
+          ticket_medio: ticketMedio,
+          share_pct: 0,
+        },
+        pagamentos: pagto,
+        descontos: {
+          total: totalDescontos,
+          pct_medio: pctDescontoMedio,
+        },
+        oficina_os: {
+          qtd_total: Number(os.qtd_os_total || 0),
+          qtd_encerradas: Number(os.qtd_os_encerradas || 0),
+          faturamento: Number(os.faturamento_os || 0),
+          ticket_medio: Number(os.qtd_os_encerradas || 0) > 0
+            ? Number(os.faturamento_os || 0) / Number(os.qtd_os_encerradas || 0)
+            : 0,
+        },
+        despesas: {
+          total: despesasLoja,
+          despesas_dinheiro: Number(d.despesas_dinheiro || 0),
+          qtd: Number(d.qtd_despesas || 0),
+        },
+        resultado: {
+          lucro_operacional: lucroOperacional,
+          margem_lucro_pct: margemLucroPct,
+        },
+        caixa_atual: c ? {
+          id: c.id,
+          status: c.status_caixa === 'A' ? 'A' : 'F',
+          terminal: c.terminal,
+          turno: c.turno,
+          hora_abertura: c.hora_abertura,
+          data_abertura: c.data_abertura,
+          vr_abertura: Number(c.vr_abertura || 0),
+        } : null,
+      };
+    });
+
+    // 6. Atualiza share_pct de cada loja em relação ao total da rede
+    const lojas = lojasCalculadasTemp.map((l: any) => ({
+      ...l,
+      faturamento: {
+        ...l.faturamento,
+        share_pct: faturamentoTotalRede > 0
+          ? Number(((l.faturamento.total / faturamentoTotalRede) * 100).toFixed(1))
+          : 0,
+      },
+    }));
+
+    const ticketMedioGeral = qtdVendasTotalRede > 0
+      ? faturamentoTotalRede / qtdVendasTotalRede
+      : 0;
+    const lucroOperacionalTotal = faturamentoTotalRede - despesasTotalRede;
+    const margemLucroGeralPct = faturamentoTotalRede > 0
+      ? (lucroOperacionalTotal / faturamentoTotalRede) * 100
+      : 0;
+
+    // Destaques / Rankings
+    const lojasPorFaturamento = [...lojas].sort((a, b) => b.faturamento.total - a.faturamento.total);
+    const lojasPorTicket = [...lojas].filter(l => l.faturamento.qtd_vendas > 0).sort((a, b) => b.faturamento.ticket_medio - a.faturamento.ticket_medio);
+    const lojasPorMargem = [...lojas].filter(l => l.faturamento.total > 0).sort((a, b) => b.resultado.margem_lucro_pct - a.resultado.margem_lucro_pct);
+
+    res.json({
+      periodo: {
+        data_inicio: dataInicio,
+        data_fim: dataFim,
+      },
+      lojas,
+      consolidados: {
+        faturamento_total: faturamentoTotalRede,
+        qtd_vendas_total: qtdVendasTotalRede,
+        ticket_medio_geral: ticketMedioGeral,
+        despesas_total: despesasTotalRede,
+        lucro_operacional_total: lucroOperacionalTotal,
+        margem_lucro_geral_pct: margemLucroGeralPct,
+        descontos_total: descontosTotalRede,
+        os_encerradas_total: osEncerradasTotalRede,
+        os_faturamento_total: osFaturamentoTotalRede,
+        pagamentos_total: pagamentosTotalRede,
+        destaques: {
+          maior_faturamento: lojasPorFaturamento[0] ? {
+            id: lojasPorFaturamento[0].tenant.id,
+            nome: lojasPorFaturamento[0].tenant.nome,
+            valor: lojasPorFaturamento[0].faturamento.total,
+          } : null,
+          maior_ticket_medio: lojasPorTicket[0] ? {
+            id: lojasPorTicket[0].tenant.id,
+            nome: lojasPorTicket[0].tenant.nome,
+            valor: lojasPorTicket[0].faturamento.ticket_medio,
+          } : null,
+          maior_margem: lojasPorMargem[0] ? {
+            id: lojasPorMargem[0].tenant.id,
+            nome: lojasPorMargem[0].tenant.nome,
+            valor: lojasPorMargem[0].resultado.margem_lucro_pct,
+          } : null,
+        },
+      },
+    });
+  } catch (err: any) {
+    console.error('[relatorio-multi-lojas] Erro:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao gerar relatório consolidado multi-lojas' });
+  }
+});
+
 export default router;
