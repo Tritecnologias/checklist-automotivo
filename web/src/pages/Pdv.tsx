@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { SlidersHorizontal } from 'lucide-react'
 import { api, erpApi } from '../lib/api'
 import type { ProdutoPdv, ClientePdv, OsEncerradaPdv } from '../types'
 import { useAuth } from '../contexts/AuthContext'
@@ -70,6 +72,12 @@ export default function Pdv() {
     queryKey: ['caixa-status', tid],
     queryFn: erpApi.caixaStatus,
   })
+
+  const { data: parametros } = useQuery({
+    queryKey: ['pdv-parametros', tid],
+    queryFn: erpApi.obterParametrosPdv,
+  })
+  const limiteDescontoPct = Number(parametros?.limite_desconto_padrao ?? 4.0)
 
   const { data: produtos, isFetching: buscando } = useQuery({
     queryKey: ['pdv-produtos', tid, busca],
@@ -276,7 +284,7 @@ export default function Pdv() {
   const isVendaAvulsa = cart.length === 0 && outrosVal > 0
   const subtotal = cart.length > 0 ? cartSubtotal : outrosVal
   const descontoVal = parseDesconto(subtotal, desconto)
-  const limiteDescontoPermitido = Math.round((subtotal * 0.04) * 100) / 100
+  const limiteDescontoPermitido = Math.round((subtotal * (limiteDescontoPct / 100)) * 100) / 100
   const excedeLimiteDesconto = subtotal > 0 && descontoVal > (limiteDescontoPermitido + 0.005)
   const pctDesconto = subtotal > 0 ? (descontoVal / subtotal) * 100 : 0
   const isDescontoAutorizado = !excedeLimiteDesconto || (
@@ -616,9 +624,19 @@ export default function Pdv() {
           </div>
 
           <div className="flex justify-between items-center text-sm text-slate-400">
-            <span className="flex items-center gap-1">
-              Desconto
+            <span className="flex items-center gap-1.5">
+              <span>Desconto</span>
               <span className="text-[10px] text-slate-500">(R$ ou %)</span>
+              {(user?.role === 'owner' || user?.role === 'manager') && (
+                <Link
+                  to="/erp/config/parametros"
+                  title={`Configurar limite de desconto padrão (atual: ${limiteDescontoPct}%)`}
+                  className="inline-flex items-center gap-1 text-[10px] bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 px-1.5 py-0.5 rounded transition-all border border-slate-700/60"
+                >
+                  <SlidersHorizontal className="w-3 h-3" />
+                  <span>{limiteDescontoPct}%</span>
+                </Link>
+              )}
             </span>
             <div className="flex items-center gap-1.5">
               {descontoVal > 0 && (
@@ -642,7 +660,7 @@ export default function Pdv() {
                     }
                   }
                 }}
-                placeholder="0,00 ou 4%"
+                placeholder={`0,00 ou ${limiteDescontoPct}%`}
                 className={`w-28 text-right bg-slate-800 border rounded px-2 py-0.5 text-white text-sm focus:outline-none font-mono transition-colors ${
                   excedeLimiteDesconto && !isDescontoAutorizado
                     ? 'border-amber-500/80 focus:border-amber-400 text-amber-200'
@@ -664,7 +682,7 @@ export default function Pdv() {
                 <span className="truncate">
                   {isDescontoAutorizado
                     ? `Desconto de ${pctDesconto.toFixed(1)}% autorizado por ${user?.role === 'owner' ? 'Owner' : autorizacaoAdmin?.supervisorName || 'Administrador'}`
-                    : `Desconto de ${pctDesconto.toFixed(1)}% acima de 4% (máx: ${R(limiteDescontoPermitido)})`}
+                    : `Desconto de ${pctDesconto.toFixed(1)}% acima de ${limiteDescontoPct}% (máx: ${R(limiteDescontoPermitido)})`}
                 </span>
               </div>
               {!isDescontoAutorizado && (
@@ -774,7 +792,7 @@ export default function Pdv() {
             : total <= 0
             ? '⚠️ Venda Zerada (R$ 0,00) não permitida'
             : excedeLimiteDesconto && !isDescontoAutorizado
-            ? `🔒 Autorizar Desconto (> 4%) e Finalizar · ${R(total)}`
+            ? `🔒 Autorizar Desconto (> ${limiteDescontoPct}%) e Finalizar · ${R(total)}`
             : `✅ Finalizar Venda · ${R(total)}`}
         </button>
 
@@ -976,7 +994,7 @@ export default function Pdv() {
         </div>
       )}
 
-      {/* ── MODAL: AUTORIZAÇÃO DE DESCONTO (> 4%) ── */}
+      {/* ── MODAL: AUTORIZAÇÃO DE DESCONTO (> {limiteDescontoPct}%) ── */}
       {showPinModal && (
         <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 px-4">
           <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-sm shadow-2xl">
@@ -989,7 +1007,7 @@ export default function Pdv() {
             </div>
 
             <p className="text-slate-300 text-xs mb-3 leading-relaxed">
-              O desconto aplicado de <strong className="text-amber-400 font-mono">{R(descontoVal)} ({pctDesconto.toFixed(1)}%)</strong> excede o limite máximo padrão de <strong>4,0% ({R(limiteDescontoPermitido)})</strong>.
+              O desconto aplicado de <strong className="text-amber-400 font-mono">{R(descontoVal)} ({pctDesconto.toFixed(1)}%)</strong> excede o limite máximo padrão de <strong>{limiteDescontoPct.toFixed(1).replace('.', ',')}% ({R(limiteDescontoPermitido)})</strong>.
             </p>
 
             <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800 text-xs space-y-1.5 mb-4">
@@ -1002,7 +1020,7 @@ export default function Pdv() {
                 <span className="text-amber-400 font-mono font-bold">{R(descontoVal)} ({pctDesconto.toFixed(1)}%)</span>
               </div>
               <div className="flex justify-between text-slate-400">
-                <span>Limite sem PIN (4%):</span>
+                <span>Limite sem PIN ({limiteDescontoPct}%):</span>
                 <span className="text-slate-400 font-mono">{R(limiteDescontoPermitido)}</span>
               </div>
               <div className="flex justify-between border-t border-slate-800/80 pt-1 text-slate-300">

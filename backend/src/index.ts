@@ -521,6 +521,24 @@ async function runMigrations() {
     `).catch(() => {});
   }
 
+  // Tabela de configurações / parâmetros do sistema
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`app_config\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`chave\` VARCHAR(60) NOT NULL,
+      \`tenant_id\` INT DEFAULT NULL,
+      \`valor\` VARCHAR(255) NOT NULL,
+      \`descricao\` VARCHAR(255) DEFAULT NULL,
+      \`updated_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY \`uniq_chave_tenant\` (\`chave\`, \`tenant_id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await pool.query(`
+    INSERT IGNORE INTO \`app_config\` (chave, tenant_id, valor, descricao)
+    VALUES ('limite_desconto_padrao', NULL, '4.00', 'Percentual máximo de desconto para usuários comuns sem PIN de admin')
+  `);
+
   console.log('[migration] tabelas de multi-tenant e financeiro OK');
 }
 

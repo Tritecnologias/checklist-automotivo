@@ -3,7 +3,7 @@ import type {
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
-  ProdutoTipo,
+  ProdutoTipo, ParametrosPdv,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -318,6 +318,13 @@ export const erpApi = {
 
   buscaProdutos: (q: string) => adminRequest<ProdutoPdv[]>(`/erp/busca/produtos?q=${encodeURIComponent(q)}`),
   buscaClientes: (q: string) => adminRequest<ClientePdv[]>(`/erp/busca/clientes?q=${encodeURIComponent(q)}`),
+
+  obterParametrosPdv: () => adminRequest<ParametrosPdv>('/erp/config/parametros'),
+  salvarParametrosPdv: (data: { limite_desconto_padrao: number; aplicar_todas_lojas?: boolean }) =>
+    adminRequest<{ ok: boolean; limite_desconto_padrao: number }>('/erp/config/parametros', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 
   clientes: (params: { search?: string; status?: 'ativos' | 'inativos' | 'todos'; page?: number }) => {
     const q = new URLSearchParams()

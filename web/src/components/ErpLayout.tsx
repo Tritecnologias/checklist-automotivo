@@ -25,6 +25,7 @@ import {
   MapPin,
   ChevronDown,
   Check,
+  SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -260,6 +261,17 @@ export default function ErpLayout() {
               >
                 <Shield className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
                 <span>Admin</span>
+              </NavLink>
+              <NavLink
+                to="/erp/config/parametros"
+                className={({ isActive }) =>
+                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                  }`
+                }
+              >
+                <SlidersHorizontal className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                <span>Parâmetros PDV</span>
               </NavLink>
             </div>
           )}

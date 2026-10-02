@@ -1169,9 +1169,25 @@ router.post('/vendas', async (req, res) => {
     const subtotalCalculado = vr_itens > 0 ? vr_itens : (vr_pagto_total + (Number(vr_adicional) < 0 ? Math.abs(Number(vr_adicional)) : 0));
     const descontoAplicado = Number(vr_adicional) < 0 ? Math.abs(Number(vr_adicional)) : 0;
 
-    // Regra de segurança: Máximo de 4% de desconto sem autorização do Administrador
+    const tenantId = getErpWriteTenantId(req);
+
+    // Regra de segurança: Limite de desconto configurável para usuários comuns sem autorização do Administrador
     if (descontoAplicado > 0 && subtotalCalculado > 0) {
-      const limiteDescontoPermitido = Math.round((subtotalCalculado * 0.04) * 100) / 100;
+      let pctLimite = 4.0;
+      try {
+        const [[cfgRow]] = await pool.query<any>(
+          `SELECT valor FROM app_config WHERE chave = 'limite_desconto_padrao' AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY tenant_id DESC LIMIT 1`,
+          [tenantId]
+        );
+        if (cfgRow?.valor !== undefined && cfgRow?.valor !== null) {
+          const parsed = parseFloat(cfgRow.valor);
+          if (!isNaN(parsed)) pctLimite = Math.max(0, Math.min(100, parsed));
+        }
+      } catch {
+        pctLimite = 4.0;
+      }
+
+      const limiteDescontoPermitido = Math.round((subtotalCalculado * (pctLimite / 100)) * 100) / 100;
       if (descontoAplicado > limiteDescontoPermitido + 0.005) {
         const isOwner = req.user?.role === 'owner';
         let pinValido = false;
@@ -1188,14 +1204,13 @@ router.post('/vendas', async (req, res) => {
 
         if (!isOwner && !pinValido) {
           res.status(403).json({
-            message: `Desconto de R$ ${descontoAplicado.toFixed(2)} excede o limite máximo permitido de 4% (R$ ${limiteDescontoPermitido.toFixed(2)}). Requer autorização do Administrador via PIN.`
+            message: `Desconto de R$ ${descontoAplicado.toFixed(2)} excede o limite permitido de ${pctLimite}% (R$ ${limiteDescontoPermitido.toFixed(2)}). Requer autorização do Administrador via PIN.`
           });
           return;
         }
       }
     }
 
-    const tenantId = getErpWriteTenantId(req);
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const controle = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
@@ -2950,6 +2965,67 @@ router.post('/clientes/importar', requireManagerUp, async (req, res) => {
   }
 
   res.json({ existentes: existingIds.size, criados: insertedIds.length, associados: allIds.length });
+});
+
+// ── Parâmetros / Configurações do PDV ──────────────────────────────────────
+
+router.get('/config/parametros', async (req, res) => {
+  try {
+    const tenantId = Number(req.headers['x-tenant-id']) || null;
+    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave = 'limite_desconto_padrao'`;
+    const params: any[] = [];
+    if (tenantId) {
+      query += ` AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY tenant_id DESC LIMIT 1`;
+      params.push(tenantId);
+    } else {
+      query += ` AND tenant_id IS NULL LIMIT 1`;
+    }
+    const [[row]] = await pool.query<any>(query, params);
+    const limite = row?.valor ? Number(row.valor) : 4.0;
+    res.json({
+      limite_desconto_padrao: isNaN(limite) ? 4.0 : limite,
+      tenant_id: row?.tenant_id ?? null,
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao carregar parâmetros' });
+  }
+});
+
+router.put('/config/parametros', requireManagerUp, async (req, res) => {
+  try {
+    const { limite_desconto_padrao, aplicar_todas_lojas } = req.body;
+    const pct = parseFloat(String(limite_desconto_padrao).replace(',', '.'));
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+      res.status(400).json({ message: 'O percentual de desconto deve ser um número entre 0 e 100.' });
+      return;
+    }
+
+    const tenantId = Number(req.headers['x-tenant-id']) || null;
+    const targetTenantId = (Boolean(aplicar_todas_lojas) || (req.user?.role === 'owner' && !tenantId)) ? null : tenantId;
+
+    if (Boolean(aplicar_todas_lojas)) {
+      await pool.query(
+        `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+         VALUES ('limite_desconto_padrao', NULL, ?, 'Percentual máximo de desconto para usuários comuns sem PIN de admin')
+         ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+        [pct.toFixed(2)]
+      );
+      await pool.query(
+        `DELETE FROM app_config WHERE chave = 'limite_desconto_padrao' AND tenant_id IS NOT NULL`
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+         VALUES ('limite_desconto_padrao', ?, ?, 'Percentual máximo de desconto para usuários comuns sem PIN de admin')
+         ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+        [targetTenantId, pct.toFixed(2)]
+      );
+    }
+
+    res.json({ ok: true, limite_desconto_padrao: pct });
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao salvar parâmetros' });
+  }
 });
 
 export default router;

@@ -478,3 +478,8 @@ export interface ProdutoTipo {
   total_produtos?: number
 }
 
+export interface ParametrosPdv {
+  limite_desconto_padrao: number
+  tenant_id: number | null
+}
+
