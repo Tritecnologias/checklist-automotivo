@@ -3343,4 +3343,248 @@ router.get('/relatorios/multi-lojas', requireManagerUp, async (req, res) => {
   }
 });
 
+// ── CRM: MANUTENÇÕES PREVENTIVAS & RETORNO DE CLIENTES ───────────────────────
+
+router.get('/crm/manutencoes-preventivas', requireManagerUp, async (req, res) => {
+  try {
+    const user = req.user as JwtPayload;
+    const isOwner = user.role === 'owner';
+    const headerTenant = Number(req.headers['x-tenant-id']);
+
+    const statusFiltro = req.query.status ? String(req.query.status).trim().toLowerCase() : 'todos';
+    const categoriaFiltro = req.query.categoria ? String(req.query.categoria).trim().toLowerCase() : 'todos';
+    const search = req.query.search ? String(req.query.search).trim() : '';
+    const sort = req.query.sort ? String(req.query.sort).trim() : 'dias_desc';
+
+    // Cláusula de Tenant
+    let tenantCondition = '';
+    const tenantParams: any[] = [];
+    if (!isOwner) {
+      const allowed = user.tenantIds && user.tenantIds.length > 0
+        ? user.tenantIds
+        : (user.tenantId ? [user.tenantId] : []);
+      if (allowed.length === 0) {
+        return res.json({ resumo: null, clientes: [] });
+      }
+      if (headerTenant > 0 && allowed.includes(headerTenant)) {
+        tenantCondition = ' AND o.tenant_id = ?';
+        tenantParams.push(headerTenant);
+      } else {
+        tenantCondition = ` AND o.tenant_id IN (${allowed.map(() => '?').join(',')})`;
+        tenantParams.push(...allowed);
+      }
+    } else if (headerTenant > 0) {
+      tenantCondition = ' AND o.tenant_id = ?';
+      tenantParams.push(headerTenant);
+    }
+
+    // Busca os veículos com histórico em os_orders
+    const [rows] = await pool.query<any>(
+      `SELECT 
+         UPPER(REPLACE(REPLACE(o.plate, '-', ''), ' ', '')) as placa_limpa,
+         o.plate as placa_formatada,
+         COALESCE(NULLIF(TRIM(o.model), ''), 'Veículo') as modelo,
+         COALESCE(c.id, o.client_id) as cliente_id,
+         COALESCE(NULLIF(TRIM(c.nome_cliente), ''), NULLIF(TRIM(o.client_name), ''), 'Cliente sem nome') as cliente_nome,
+         COALESCE(NULLIF(TRIM(c.celular), ''), NULLIF(TRIM(c.telefone), ''), NULLIF(TRIM(o.client_phone), '')) as telefone,
+         o.tenant_id,
+         COALESCE(t.nome, 'Loja Principal') as tenant_nome,
+         COUNT(o.id) as total_visitas,
+         COALESCE(SUM(o.total_amount), 0) as total_gasto,
+         MAX(COALESCE(o.closed_at, o.created_at)) as data_ultima_visita,
+         SUBSTRING_INDEX(GROUP_CONCAT(o.id ORDER BY COALESCE(o.closed_at, o.created_at) DESC), ',', 1) as ultima_os_id,
+         SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(o.mileage, 0) ORDER BY COALESCE(o.closed_at, o.created_at) DESC), ',', 1) as km_ultima_os
+       FROM os_orders o
+       LEFT JOIN cad_clientes c ON c.id = o.client_id
+       LEFT JOIN tenants t ON t.id = o.tenant_id
+       WHERE o.plate IS NOT NULL AND TRIM(o.plate) != ''${tenantCondition}
+       GROUP BY placa_limpa, o.tenant_id
+       HAVING data_ultima_visita IS NOT NULL`,
+      tenantParams
+    );
+
+    // Coleta as últimas OS IDs para carregar os serviços executados
+    const latestOrderIds = rows.map((r: any) => r.ultima_os_id).filter(Boolean);
+    const orderItemsMap = new Map<string, string[]>();
+
+    if (latestOrderIds.length > 0) {
+      const chunkSize = 200;
+      for (let i = 0; i < latestOrderIds.length; i += chunkSize) {
+        const chunk = latestOrderIds.slice(i, i + chunkSize);
+        const placeholders = chunk.map(() => '?').join(',');
+        const [items] = await pool.query<any>(
+          `SELECT order_id, description FROM os_order_items WHERE order_id IN (${placeholders})`,
+          chunk
+        );
+        for (const item of items) {
+          const list = orderItemsMap.get(item.order_id) || [];
+          list.push(item.description);
+          orderItemsMap.set(item.order_id, list);
+        }
+      }
+    }
+
+    const now = Date.now();
+
+    // Contadores para o resumo
+    let countEmDia = 0;
+    let countProximos = 0;
+    let countVencidos = 0;
+    let countInativos = 0;
+    let somaGasto = 0;
+    let countGasto = 0;
+
+    const clientesMapeados = rows.map((r: any) => {
+      const dataUltima = new Date(r.data_ultima_visita);
+      const diffMs = now - dataUltima.getTime();
+      const diasSemVisita = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+      const mesesSemVisita = Math.max(0, Number((diasSemVisita / 30.4).toFixed(1)));
+      const kmUltima = Number(r.km_ultima_os || 0);
+
+      // Estimativa de KM atual: ~1000 km por mês rodado
+      const kmEstimado = kmUltima > 0
+        ? kmUltima + Math.round((diasSemVisita / 30.4) * 1000)
+        : null;
+
+      // Status de manutenção preventiva
+      let statusManutencao: 'em_dia' | 'proximo' | 'vencido' | 'inativo' = 'em_dia';
+      if (diasSemVisita > 365) {
+        statusManutencao = 'inativo';
+        countInativos++;
+      } else if (diasSemVisita > 180) {
+        statusManutencao = 'vencido';
+        countVencidos++;
+      } else if (diasSemVisita >= 120) {
+        statusManutencao = 'proximo';
+        countProximos++;
+      } else {
+        statusManutencao = 'em_dia';
+        countEmDia++;
+      }
+
+      const totalGasto = Number(r.total_gasto || 0);
+      somaGasto += totalGasto;
+      countGasto++;
+
+      const servicosRaw = orderItemsMap.get(r.ultima_os_id) || [];
+      const servicosStr = servicosRaw.join(' ').toLowerCase();
+
+      // Detecção de categoria do serviço anterior
+      let categoriaServico: 'oleo' | 'alinhamento' | 'freio' | 'geral' = 'geral';
+      let recomendacao = 'Revisão periódica preventiva de segurança e fluidos.';
+
+      if (servicosStr.includes('oleo') || servicosStr.includes('óleo') || servicosStr.includes('filtro') || servicosStr.includes('lubrific')) {
+        categoriaServico = 'oleo';
+        recomendacao = 'Troca preventiva de óleo do motor e filtros (recomendada a cada 6 meses ou 10.000 km).';
+      } else if (servicosStr.includes('alinhamento') || servicosStr.includes('balanceamento') || servicosStr.includes('geometria') || servicosStr.includes('pneu') || servicosStr.includes('rodizio')) {
+        categoriaServico = 'alinhamento';
+        recomendacao = 'Alinhamento, balanceamento e rodízio de pneus (recomendada a cada 10.000 km).';
+      } else if (servicosStr.includes('freio') || servicosStr.includes('pastilha') || servicosStr.includes('disco') || servicosStr.includes('suspens') || servicosStr.includes('amortecedor')) {
+        categoriaServico = 'freio';
+        recomendacao = 'Inspeção preventiva do sistema de freios e suspensão.';
+      }
+
+      const nomeCliente = stripPlate(r.cliente_nome);
+      const telOriginal = String(r.telefone || '').trim();
+      const cleanPhone = telOriginal.replace(/\D/g, '');
+      const telefoneValido = cleanPhone.length >= 10 && cleanPhone.length <= 13;
+
+      let linkWhatsapp: string | null = null;
+      let mensagemWhatsapp = '';
+
+      const servicoResumo = servicosRaw.slice(0, 2).join(', ') || 'serviços preventivos';
+      const mesesTexto = mesesSemVisita < 1 ? 'menos de 1 mês' : `${Math.round(mesesSemVisita)} meses`;
+
+      mensagemWhatsapp = `Olá, ${nomeCliente}! Tudo bem? 🚗\n` +
+        `Aqui é da *${r.tenant_nome}*.\n\n` +
+        `Constatamos que a última manutenção do seu *${r.modelo}* (placa *${r.placa_formatada}*) foi realizada há aproximadamente *${mesesTexto}* (${servicoResumo}).\n\n` +
+        `A revisão periódica preventiva garante a segurança da sua família, o melhor consumo de combustível e evita gastos imprevistos de oficina.\n\n` +
+        `Podemos agendar uma checagem preventiva para esta semana? Teremos o maior prazer em atendê-lo!`;
+
+      if (telefoneValido) {
+        const ddi = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+        linkWhatsapp = `https://wa.me/${ddi}?text=${encodeURIComponent(mensagemWhatsapp)}`;
+      }
+
+      return {
+        id: `${r.placa_limpa}_${r.tenant_id}`,
+        placa: r.placa_formatada,
+        placa_limpa: r.placa_limpa,
+        modelo: r.modelo,
+        cliente_id: r.cliente_id ? Number(r.cliente_id) : null,
+        cliente_nome: nomeCliente,
+        telefone: telOriginal || null,
+        telefone_valido: telefoneValido,
+        tenant_id: Number(r.tenant_id),
+        tenant_nome: r.tenant_nome,
+        total_visitas: Number(r.total_visitas || 1),
+        total_gasto: totalGasto,
+        data_ultima_visita: r.data_ultima_visita,
+        dias_sem_visita: diasSemVisita,
+        meses_sem_visita: mesesSemVisita,
+        km_ultima_visita: kmUltima,
+        km_estimado_atual: kmEstimado,
+        status_manutencao: statusManutencao,
+        servicos_recentes: servicosRaw.slice(0, 3),
+        categoria_servico: categoriaServico,
+        recomendacao,
+        mensagem_whatsapp: mensagemWhatsapp,
+        link_whatsapp: linkWhatsapp,
+      };
+    });
+
+    // Filtros em memória
+    let filtrados = clientesMapeados;
+
+    if (statusFiltro !== 'todos') {
+      filtrados = filtrados.filter((c: any) => c.status_manutencao === statusFiltro);
+    }
+
+    if (categoriaFiltro !== 'todos') {
+      filtrados = filtrados.filter((c: any) => c.categoria_servico === categoriaFiltro);
+    }
+
+    if (search) {
+      const q = search.toLowerCase();
+      filtrados = filtrados.filter((c: any) =>
+        c.placa.toLowerCase().includes(q) ||
+        c.placa_limpa.toLowerCase().includes(q) ||
+        c.cliente_nome.toLowerCase().includes(q) ||
+        c.modelo.toLowerCase().includes(q) ||
+        (c.telefone && c.telefone.includes(q))
+      );
+    }
+
+    // Ordenação
+    if (sort === 'dias_desc') {
+      filtrados.sort((a: any, b: any) => b.dias_sem_visita - a.dias_sem_visita);
+    } else if (sort === 'dias_asc') {
+      filtrados.sort((a: any, b: any) => a.dias_sem_visita - b.dias_sem_visita);
+    } else if (sort === 'gasto_desc') {
+      filtrados.sort((a: any, b: any) => b.total_gasto - a.total_gasto);
+    } else if (sort === 'nome_asc') {
+      filtrados.sort((a: any, b: any) => a.cliente_nome.localeCompare(b.cliente_nome));
+    }
+
+    const ticketMedioHistorico = countGasto > 0 ? somaGasto / countGasto : 180;
+    const potencialReceita = (countProximos + countVencidos) * ticketMedioHistorico;
+
+    res.json({
+      resumo: {
+        total_veiculos: clientesMapeados.length,
+        em_dia: countEmDia,
+        proximos: countProximos,
+        vencidos: countVencidos,
+        inativos: countInativos,
+        ticket_medio_historico: ticketMedioHistorico,
+        potencial_receita_estimada: potencialReceita,
+      },
+      clientes: filtrados,
+    });
+  } catch (err: any) {
+    console.error('[crm-manutencoes-preventivas] Erro:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao carregar manutenções preventivas do CRM' });
+  }
+});
+
 export default router;

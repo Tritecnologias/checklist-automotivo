@@ -3,7 +3,7 @@ import type {
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
-  ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse,
+  ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -332,6 +332,21 @@ export const erpApi = {
     if (params?.data_fim) q.set('data_fim', params.data_fim)
     const qs = q.toString() ? `?${q}` : ''
     return adminRequest<RelatorioMultiLojasResponse>(`/erp/relatorios/multi-lojas${qs}`)
+  },
+
+  crmManutencoesPreventivas: (params?: {
+    status?: string
+    categoria?: string
+    search?: string
+    sort?: string
+  }) => {
+    const q = new URLSearchParams()
+    if (params?.status) q.set('status', params.status)
+    if (params?.categoria) q.set('categoria', params.categoria)
+    if (params?.search) q.set('search', params.search)
+    if (params?.sort) q.set('sort', params.sort)
+    const qs = q.toString() ? `?${q}` : ''
+    return adminRequest<CrmManutencoesResponse>(`/erp/crm/manutencoes-preventivas${qs}`)
   },
 
   clientes: (params: { search?: string; status?: 'ativos' | 'inativos' | 'todos'; page?: number }) => {

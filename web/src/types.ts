@@ -567,3 +567,44 @@ export interface RelatorioMultiLojasResponse {
   consolidados: ConsolidadoMultiLojas | null
 }
 
+export interface CrmManutencaoPreventivaItem {
+  id: string
+  placa: string
+  placa_limpa: string
+  modelo: string
+  cliente_id: number | null
+  cliente_nome: string
+  telefone: string | null
+  telefone_valido: boolean
+  tenant_id: number
+  tenant_nome: string
+  total_visitas: number
+  total_gasto: number
+  data_ultima_visita: string
+  dias_sem_visita: number
+  meses_sem_visita: number
+  km_ultima_visita: number
+  km_estimado_atual: number | null
+  status_manutencao: 'em_dia' | 'proximo' | 'vencido' | 'inativo'
+  servicos_recentes: string[]
+  categoria_servico: 'oleo' | 'alinhamento' | 'freio' | 'geral'
+  recomendacao: string
+  mensagem_whatsapp: string
+  link_whatsapp: string | null
+}
+
+export interface CrmResumoManutencao {
+  total_veiculos: number
+  em_dia: number
+  proximos: number
+  vencidos: number
+  inativos: number
+  ticket_medio_historico: number
+  potencial_receita_estimada: number
+}
+
+export interface CrmManutencoesResponse {
+  resumo: CrmResumoManutencao | null
+  clientes: CrmManutencaoPreventivaItem[]
+}
+

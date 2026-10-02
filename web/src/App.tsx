@@ -29,6 +29,7 @@ import ConfigInstalacoes from './pages/ConfigInstalacoes'
 import ConfigTiposProdutos from './pages/ConfigTiposProdutos'
 import ConfigParametros from './pages/ConfigParametros'
 import RelatorioMultiLojas from './pages/RelatorioMultiLojas'
+import CrmManutencoes from './pages/CrmManutencoes'
 
 export default function App() {
   return (
@@ -60,6 +61,8 @@ export default function App() {
               <Route path="/erp/contas-pagar" element={<ContasPagar />} />
               <Route path="/erp/clientes"     element={<Clientes />} />
               <Route path="/erp/clientes/:id" element={<ClienteHistorico />} />
+              <Route path="/erp/crm"          element={<CrmManutencoes />} />
+              <Route path="/erp/crm/manutencoes" element={<CrmManutencoes />} />
               <Route path="/erp/lojas"        element={<Lojas />} />
               <Route path="/erp/usuarios"     element={<Usuarios />} />
               <Route path="/erp/importar"           element={<ImportarEstoque />} />
