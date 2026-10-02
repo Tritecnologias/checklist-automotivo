@@ -608,3 +608,67 @@ export interface CrmManutencoesResponse {
   clientes: CrmManutencaoPreventivaItem[]
 }
 
+export interface ProdutoCurvaAbc {
+  id: number
+  nome_produto: string
+  cod_barra: string | null
+  unidade: string
+  id_tipo: number | null
+  tipo_nome: string
+  is_service: boolean
+  vr_compra: number
+  vr_venda: number
+  margem_unitaria_pct: number
+  estoque: number
+  min_estoque: number
+  controla_estoque: boolean
+  qtd_vendida: number
+  faturamento_total: number
+  valor_estoque_custo: number
+  valor_estoque_venda: number
+  share_pct: number
+  acumulado_pct: number
+  classe: 'A' | 'B' | 'C'
+  status_estoque: 'ruptura' | 'baixo' | 'zerado' | 'normal' | 'dinheiro_parado'
+  sugestao_compra: number
+}
+
+export interface ResumoCurvaAbc {
+  total_itens_catalogo: number
+  valor_total_estoque_custo: number
+  valor_total_estoque_venda: number
+  margem_media_estoque_pct: number
+  dinheiro_parado_classe_c: number
+  itens_em_ruptura_classe_a: number
+  faturamento_total_periodo: number
+  qtd_total_vendida_periodo: number
+  classe_a: {
+    qtd_itens: number
+    faturamento: number
+    share_faturamento_pct: number
+    valor_estoque_custo: number
+  }
+  classe_b: {
+    qtd_itens: number
+    faturamento: number
+    share_faturamento_pct: number
+    valor_estoque_custo: number
+  }
+  classe_c: {
+    qtd_itens: number
+    faturamento: number
+    share_faturamento_pct: number
+    valor_estoque_custo: number
+  }
+}
+
+export interface CurvaAbcResponse {
+  periodo: {
+    data_inicio: string
+    data_fim: string
+    dias: number
+  }
+  resumo: ResumoCurvaAbc
+  produtos: ProdutoCurvaAbc[]
+}
+

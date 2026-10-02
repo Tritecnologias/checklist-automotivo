@@ -4,6 +4,7 @@ import type {
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
   ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
+  CurvaAbcResponse,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -347,6 +348,29 @@ export const erpApi = {
     if (params?.sort) q.set('sort', params.sort)
     const qs = q.toString() ? `?${q}` : ''
     return adminRequest<CrmManutencoesResponse>(`/erp/crm/manutencoes-preventivas${qs}`)
+  },
+
+  curvaAbc: (params?: {
+    dias?: number
+    data_inicio?: string
+    data_fim?: string
+    apenas_produtos?: string
+    classe?: string
+    tipo?: number
+    search?: string
+    sort?: string
+  }) => {
+    const q = new URLSearchParams()
+    if (params?.dias) q.set('dias', String(params.dias))
+    if (params?.data_inicio) q.set('data_inicio', params.data_inicio)
+    if (params?.data_fim) q.set('data_fim', params.data_fim)
+    if (params?.apenas_produtos) q.set('apenas_produtos', params.apenas_produtos)
+    if (params?.classe) q.set('classe', params.classe)
+    if (params?.tipo) q.set('tipo', String(params.tipo))
+    if (params?.search) q.set('search', params.search)
+    if (params?.sort) q.set('sort', params.sort)
+    const qs = q.toString() ? `?${q}` : ''
+    return adminRequest<CurvaAbcResponse>(`/erp/estoque/curva-abc${qs}`)
   },
 
   clientes: (params: { search?: string; status?: 'ativos' | 'inativos' | 'todos'; page?: number }) => {

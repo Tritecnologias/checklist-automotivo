@@ -30,6 +30,7 @@ import ConfigTiposProdutos from './pages/ConfigTiposProdutos'
 import ConfigParametros from './pages/ConfigParametros'
 import RelatorioMultiLojas from './pages/RelatorioMultiLojas'
 import CrmManutencoes from './pages/CrmManutencoes'
+import CurvaAbc from './pages/CurvaAbc'
 
 export default function App() {
   return (
@@ -55,6 +56,8 @@ export default function App() {
               <Route path="/erp/pdv"          element={<Pdv />} />
               <Route path="/erp/produtos"     element={<AdminProducts />} />
               <Route path="/erp/estoque"      element={<Estoque />} />
+              <Route path="/erp/estoque/curva-abc" element={<CurvaAbc />} />
+              <Route path="/erp/curva-abc"    element={<Navigate to="/erp/estoque/curva-abc" replace />} />
               <Route path="/erp/caixa"        element={<Caixa />} />
               <Route path="/erp/vendas"       element={<Vendas />} />
               <Route path="/erp/contas"       element={<Contas />} />
