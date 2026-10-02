@@ -358,11 +358,12 @@ export interface UserAdmin {
   id: number
   nome: string
   email: string
-  role: 'owner' | 'manager' | 'operator' | 'caixa'
+  role: 'owner' | 'manager' | 'operator' | 'caixa' | 'mecanico'
   tenant_id: number | null
   tenant_nome: string | null
   tenant_count: number
   ativo: number
+  mecanico_id?: number | null
 }
 
 // ── Checklist Types ───────────────────────────────────────────────────────────
@@ -684,6 +685,9 @@ export interface Mecanico {
   id: number
   tenant_id: number
   tenant_nome?: string | null
+  user_id?: number | null
+  user_nome?: string | null
+  user_email?: string | null
   nome: string
   apelido?: string | null
   cpf?: string | null
@@ -696,6 +700,15 @@ export interface Mecanico {
   total_servicos?: number
   created_at?: string
   updated_at?: string
+}
+
+export interface UsuarioSistema {
+  id: number
+  nome: string
+  email: string
+  role: string
+  mecanico_id?: number | null
+  mecanico_nome?: string | null
 }
 
 export interface MecanicoProdutividade {

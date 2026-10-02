@@ -25,6 +25,7 @@ import {
 } from '@/hooks/useOrderMutations';
 import { useDebounce } from '@/hooks/useDebounce';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/AuthContext';
 import type { CatalogItem, Order, OrderItem, PendingAction } from '@/types';
 
 const currency = (v: number) =>
@@ -40,6 +41,7 @@ function fmtDate(iso: string | null | undefined) {
 
 export default function OrderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
 
   const [search, setSearch] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -102,6 +104,21 @@ export default function OrderScreen() {
 
   const { mutate: approveQuote, isPending: approvingQuote } = useMutation({
     mutationFn: () => api.approveQuote(id),
+    onSuccess: (updated: Order) => {
+      qc.setQueryData(['order', id], updated);
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    },
+  });
+
+  const { mutate: assumirOS, isPending: assumindoOS } = useMutation({
+    mutationFn: () => {
+      if (!user?.mecanicoId) throw new Error('Usuário sem perfil de mecânico');
+      return api.updateOrderMechanic(id, user.mecanicoId, true);
+    },
     onSuccess: (updated: Order) => {
       qc.setQueryData(['order', id], updated);
       qc.invalidateQueries({ queryKey: ['orders'] });
@@ -439,6 +456,71 @@ export default function OrderScreen() {
                 : 'Encerrada'}
             </Text>
           </View>
+        </View>
+
+        {/* Técnico / Mecânico Responsável */}
+        <View className="mt-3">
+          {order.mecanicoNome ? (
+            <View className="flex-row items-center justify-between py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+              <View className="flex-row items-center gap-2 flex-1 mr-2">
+                <Text style={{ fontSize: 14 }}>🔧</Text>
+                <View className="flex-1">
+                  <Text className="text-[10px] font-bold uppercase text-slate-400 dark:text-slate-500">
+                    Técnico Responsável
+                  </Text>
+                  <Text className="text-xs font-bold text-slate-800 dark:text-white" numberOfLines={1}>
+                    {order.mecanicoNome}
+                    {user?.mecanicoId && order.mecanicoId === user.mecanicoId ? ' (Você)' : ''}
+                  </Text>
+                </View>
+              </View>
+
+              {!isClosed && user?.mecanicoId && order.mecanicoId !== user.mecanicoId && (
+                <TouchableOpacity
+                  onPress={() => assumirOS()}
+                  disabled={assumindoOS}
+                  className="px-2.5 py-1.5 rounded-lg bg-blue-600 dark:bg-blue-500"
+                >
+                  <Text className="text-[11px] font-bold text-white">
+                    {assumindoOS ? 'Assumindo…' : 'Mudar p/ mim'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            <View className="py-2.5 px-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex-row items-center justify-between">
+              <View className="flex-row items-center gap-2 flex-1 mr-2">
+                <Text style={{ fontSize: 16 }}>⏳</Text>
+                <View className="flex-1">
+                  <Text className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                    Sem técnico atribuído
+                  </Text>
+                  <Text className="text-[11px] text-amber-700 dark:text-amber-400">
+                    Esta OS ainda não possui técnico
+                  </Text>
+                </View>
+              </View>
+
+              {!isClosed && user?.mecanicoId && (
+                <TouchableOpacity
+                  onPress={() => assumirOS()}
+                  disabled={assumindoOS}
+                  className="px-3 py-2 rounded-xl bg-blue-600 dark:bg-blue-500 shadow-sm flex-row items-center gap-1.5"
+                >
+                  {assumindoOS ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <>
+                      <Text style={{ fontSize: 12 }}>🔧</Text>
+                      <Text className="text-xs font-bold text-white">
+                        Assumir OS
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
 
         {/* Banner de Orçamento */}

@@ -558,6 +558,25 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  // user_id em cad_mecanicos (vínculo com login de usuário)
+  const [[{ cntMecUser }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntMecUser FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_mecanicos' AND COLUMN_NAME = 'user_id'`
+  );
+  if (Number(cntMecUser) === 0) {
+    await pool.query(`
+      ALTER TABLE cad_mecanicos
+      ADD COLUMN user_id INT NULL DEFAULT NULL,
+      ADD INDEX idx_cad_mecanicos_user (user_id)
+    `);
+    console.log('[migration] cad_mecanicos.user_id adicionada');
+  }
+
+  // users.role suportando 'mecanico'
+  await pool.query(`
+    ALTER TABLE users MODIFY COLUMN role VARCHAR(30) NOT NULL DEFAULT 'operator'
+  `).catch(() => {});
+
   // mecanico_id e mecanico_nome em os_orders
   const [[{ cntMecOrders }]] = await pool.query<any>(
     `SELECT COUNT(*) as cntMecOrders FROM information_schema.COLUMNS

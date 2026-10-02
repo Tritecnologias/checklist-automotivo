@@ -51,12 +51,29 @@ router.post('/login', async (req, res) => {
     // se o usuário tem múltiplas lojas, não pré-seleciona; o app vai pedir escolha
     const activetenantId = tenantIds.length === 1 ? tenantIds[0] : (user.tenant_id ?? null);
 
+    // Verificar se o usuário está vinculado a um mecânico da oficina
+    const [mecRows] = await pool.query<any>(
+      `SELECT id, nome, apelido, user_id FROM cad_mecanicos 
+       WHERE (user_id = ? OR (user_id IS NULL AND LOWER(TRIM(nome)) = LOWER(TRIM(?))))
+         AND ativo = 1
+       LIMIT 1`,
+      [user.id, user.nome]
+    );
+    const mecVinculado = mecRows[0] || null;
+    const mecanicoId = mecVinculado ? Number(mecVinculado.id) : null;
+    const mecanicoNome = mecVinculado ? (mecVinculado.apelido || mecVinculado.nome) : null;
+    if (mecVinculado && !mecVinculado.user_id) {
+      await pool.query('UPDATE cad_mecanicos SET user_id = ? WHERE id = ?', [user.id, mecVinculado.id]).catch(() => {});
+    }
+
     const payload: JwtPayload = {
       userId: user.id,
       email: user.email,
       role: user.role,
       tenantId: activetenantId,
       tenantIds,
+      mecanicoId,
+      mecanicoNome,
     };
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
@@ -74,7 +91,14 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token,
-      user: { id: user.id, nome: user.nome, email: user.email, role: user.role },
+      user: {
+        id: user.id,
+        nome: user.nome,
+        email: user.email,
+        role: user.role,
+        mecanico_id: mecanicoId,
+        mecanico_nome: mecanicoNome,
+      },
       tenants,
     });
   } catch (err) {
@@ -107,7 +131,7 @@ router.get('/me', requireAuth, async (req, res) => {
       } else {
         tenantsQuery += ' AND 1=0';
       }
-    } else if (user.role === 'operator' || user.role === 'caixa') {
+    } else if (['operator', 'caixa', 'mecanico'].includes(user.role)) {
       // checar user_tenants (multi-loja) primeiro, depois fallback para tenant_id
       const [tRows] = await pool.query<any>(
         'SELECT tenant_id FROM user_tenants WHERE user_id = ?', [user.id]
@@ -124,8 +148,33 @@ router.get('/me', requireAuth, async (req, res) => {
       }
     }
 
+    // Verificar vínculo com mecânico
+    const [mecRows] = await pool.query<any>(
+      `SELECT id, nome, apelido, user_id FROM cad_mecanicos 
+       WHERE (user_id = ? OR (user_id IS NULL AND LOWER(TRIM(nome)) = LOWER(TRIM(?))))
+         AND ativo = 1
+       LIMIT 1`,
+      [user.id, user.nome]
+    );
+    const mecVinculado = mecRows[0] || null;
+    const mecanicoId = mecVinculado ? Number(mecVinculado.id) : null;
+    const mecanicoNome = mecVinculado ? (mecVinculado.apelido || mecVinculado.nome) : null;
+    if (mecVinculado && !mecVinculado.user_id) {
+      await pool.query('UPDATE cad_mecanicos SET user_id = ? WHERE id = ?', [user.id, mecVinculado.id]).catch(() => {});
+    }
+
     const [tenants] = await pool.query<any>(tenantsQuery, tenantsParams);
-    res.json({ user: { id: user.id, nome: user.nome, email: user.email, role: user.role }, tenants });
+    res.json({
+      user: {
+        id: user.id,
+        nome: user.nome,
+        email: user.email,
+        role: user.role,
+        mecanico_id: mecanicoId,
+        mecanico_nome: mecanicoNome,
+      },
+      tenants,
+    });
   } catch (err) {
     res.status(500).json({ message: 'Erro interno' });
   }
@@ -143,13 +192,14 @@ router.post('/users', requireAuth, requireRole('owner', 'manager'), async (req, 
     res.status(400).json({ message: 'nome, email, password e role são obrigatórios' });
     return;
   }
-  if (!['owner', 'manager', 'operator', 'caixa'].includes(role)) {
+  const ROLES_VALIDAS = ['owner', 'manager', 'operator', 'caixa', 'mecanico'];
+  if (!ROLES_VALIDAS.includes(role)) {
     res.status(400).json({ message: 'role inválida' });
     return;
   }
-  // manager só pode criar operator e caixa
-  if (req.user!.role === 'manager' && !['operator', 'caixa'].includes(role)) {
-    res.status(403).json({ message: 'Manager só pode criar operadores e caixas' });
+  // manager só pode criar operator, caixa e mecanico
+  if (req.user!.role === 'manager' && !['operator', 'caixa', 'mecanico'].includes(role)) {
+    res.status(403).json({ message: 'Manager só pode criar operadores, caixas e mecânicos' });
     return;
   }
 

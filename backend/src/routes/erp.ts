@@ -3895,10 +3895,14 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
       SELECT
         m.*,
         t.nome AS tenant_nome,
+        u.id AS user_id,
+        u.nome AS user_nome,
+        u.email AS user_email,
         (SELECT COUNT(DISTINCT o.id) FROM os_orders o WHERE o.mecanico_id = m.id OR EXISTS (SELECT 1 FROM os_order_items oi WHERE oi.order_id = o.id AND oi.mecanico_id = m.id)) AS total_os,
         (SELECT COUNT(oi.id) FROM os_order_items oi WHERE oi.mecanico_id = m.id AND oi.type = 'service') AS total_servicos
       FROM cad_mecanicos m
       LEFT JOIN tenants t ON t.id = m.tenant_id
+      LEFT JOIN users u ON u.id = m.user_id
       ${whereClause}
       ORDER BY m.ativo DESC, m.nome ASC
     `;
@@ -3908,6 +3912,9 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
       id: Number(r.id),
       tenant_id: Number(r.tenant_id),
       tenant_nome: r.tenant_nome || null,
+      user_id: r.user_id ? Number(r.user_id) : null,
+      user_nome: r.user_nome || null,
+      user_email: r.user_email || null,
       nome: r.nome,
       apelido: r.apelido || null,
       cpf: r.cpf || null,
@@ -3927,10 +3934,35 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /erp/mecanicos/usuarios-sistema ─────────────────────────────────────
+// Retorna os usuários do sistema ativos para seleção de vínculo com mecânico
+router.get('/mecanicos/usuarios-sistema', requireManagerUp, async (req: Request, res: Response) => {
+  try {
+    const [rows] = await pool.query<any>(`
+      SELECT u.id, u.nome, u.email, u.role, u.ativo, m.id as mecanico_id, m.nome as mecanico_nome
+      FROM users u
+      LEFT JOIN cad_mecanicos m ON m.user_id = u.id AND m.ativo = 1
+      WHERE u.ativo = 1
+      ORDER BY u.nome ASC
+    `);
+    res.json(rows.map((r: any) => ({
+      id: Number(r.id),
+      nome: r.nome,
+      email: r.email,
+      role: r.role,
+      mecanico_id: r.mecanico_id ? Number(r.mecanico_id) : null,
+      mecanico_nome: r.mecanico_nome || null,
+    })));
+  } catch (err: any) {
+    console.error('[mecanicos/usuarios-sistema] erro:', err);
+    res.status(500).json({ message: 'Erro ao buscar usuários do sistema' });
+  }
+});
+
 // ── POST /erp/mecanicos ───────────────────────────────────────────────────────
 router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) => {
   try {
-    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, tenant_id } = req.body;
+    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, tenant_id, user_id } = req.body;
     if (!nome || !String(nome).trim()) {
       res.status(400).json({ message: 'Nome do mecânico / técnico é obrigatório' });
       return;
@@ -3939,13 +3971,15 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
     const tId = tenant_id && Number(tenant_id) > 0 ? Number(tenant_id) : getErpWriteTenantId(req);
     const servPct = Math.max(0, parseFloat(String(comissao_servico_pct ?? 0)) || 0);
     const pecaPct = Math.max(0, parseFloat(String(comissao_peca_pct ?? 0)) || 0);
+    const linkedUserId = user_id && Number(user_id) > 0 ? Number(user_id) : null;
 
     const [result] = await pool.query<any>(
       `INSERT INTO cad_mecanicos
-         (tenant_id, nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+         (tenant_id, user_id, nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [
         tId,
+        linkedUserId,
         String(nome).trim(),
         apelido ? String(apelido).trim() : null,
         cpf ? String(cpf).trim() : null,
@@ -3956,10 +3990,19 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
       ]
     );
 
-    const [[created]] = await pool.query<any>('SELECT * FROM cad_mecanicos WHERE id = ?', [result.insertId]);
+    const [[created]] = await pool.query<any>(
+      `SELECT m.*, u.nome as user_nome, u.email as user_email
+       FROM cad_mecanicos m
+       LEFT JOIN users u ON u.id = m.user_id
+       WHERE m.id = ?`,
+      [result.insertId]
+    );
     res.status(201).json({
       id: Number(created.id),
       tenant_id: Number(created.tenant_id),
+      user_id: created.user_id ? Number(created.user_id) : null,
+      user_nome: created.user_nome || null,
+      user_email: created.user_email || null,
       nome: created.nome,
       apelido: created.apelido || null,
       cpf: created.cpf || null,
@@ -3979,7 +4022,7 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
 router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
-    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo, tenant_id } = req.body;
+    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo, tenant_id, user_id } = req.body;
 
     const [[existing]] = await pool.query<any>('SELECT * FROM cad_mecanicos WHERE id = ?', [id]);
     if (!existing) {
@@ -3991,13 +4034,15 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
     const pecaPct = comissao_peca_pct !== undefined ? Math.max(0, parseFloat(String(comissao_peca_pct)) || 0) : Number(existing.comissao_peca_pct);
     const isAtivo = ativo !== undefined ? (Boolean(ativo) ? 1 : 0) : existing.ativo;
     const finalTenant = tenant_id ? Number(tenant_id) : existing.tenant_id;
+    const linkedUserId = user_id !== undefined ? (user_id && Number(user_id) > 0 ? Number(user_id) : null) : existing.user_id;
 
     await pool.query(
       `UPDATE cad_mecanicos
-       SET nome = ?, apelido = ?, cpf = ?, telefone = ?, chave_pix = ?,
+       SET user_id = ?, nome = ?, apelido = ?, cpf = ?, telefone = ?, chave_pix = ?,
            comissao_servico_pct = ?, comissao_peca_pct = ?, ativo = ?, tenant_id = ?, updated_at = NOW()
        WHERE id = ?`,
       [
+        linkedUserId,
         nome ? String(nome).trim() : existing.nome,
         apelido !== undefined ? (apelido ? String(apelido).trim() : null) : existing.apelido,
         cpf !== undefined ? (cpf ? String(cpf).trim() : null) : existing.cpf,
@@ -4017,10 +4062,19 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
       await pool.query('UPDATE os_order_items SET mecanico_nome = ? WHERE mecanico_id = ?', [String(nome).trim(), id]);
     }
 
-    const [[updated]] = await pool.query<any>('SELECT * FROM cad_mecanicos WHERE id = ?', [id]);
+    const [[updated]] = await pool.query<any>(
+      `SELECT m.*, u.nome as user_nome, u.email as user_email
+       FROM cad_mecanicos m
+       LEFT JOIN users u ON u.id = m.user_id
+       WHERE m.id = ?`,
+      [id]
+    );
     res.json({
       id: Number(updated.id),
       tenant_id: Number(updated.tenant_id),
+      user_id: updated.user_id ? Number(updated.user_id) : null,
+      user_nome: updated.user_nome || null,
+      user_email: updated.user_email || null,
       nome: updated.nome,
       apelido: updated.apelido || null,
       cpf: updated.cpf || null,

@@ -26,6 +26,7 @@ import {
   X,
   History,
   FileSpreadsheet,
+  Smartphone,
 } from 'lucide-react'
 import { oficinaApi, erpApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -104,7 +105,17 @@ export default function OficinaProdutividade() {
   // Modais
   const [mecanicoModalOpen, setMecanicoModalOpen] = useState(false)
   const [editingMecanico, setEditingMecanico] = useState<Mecanico | null>(null)
-  const [mecanicoForm, setMecanicoForm] = useState({
+  const [mecanicoForm, setMecanicoForm] = useState<{
+    nome: string
+    apelido: string
+    cpf: string
+    telefone: string
+    chave_pix: string
+    comissao_servico_pct: number
+    comissao_peca_pct: number
+    ativo: boolean
+    user_id: string | number
+  }>({
     nome: '',
     apelido: '',
     cpf: '',
@@ -113,6 +124,7 @@ export default function OficinaProdutividade() {
     comissao_servico_pct: 10,
     comissao_peca_pct: 2,
     ativo: true,
+    user_id: '',
   })
   const [mecanicoFormError, setMecanicoFormError] = useState('')
 
@@ -150,6 +162,12 @@ export default function OficinaProdutividade() {
     queryFn: () => oficinaApi.listMecanicos(),
   })
 
+  // Lista de usuários do sistema disponíveis para vínculo
+  const { data: usuariosSistema = [] } = useQuery({
+    queryKey: ['usuarios-sistema', tid],
+    queryFn: () => oficinaApi.listUsuariosSistema(),
+  })
+
   const {
     data: dadosProdutividade,
     isLoading: loadingProdutividade,
@@ -185,14 +203,19 @@ export default function OficinaProdutividade() {
   const { mutate: salvarMecanico, isPending: salvandoMecanico } = useMutation({
     mutationFn: () => {
       if (!mecanicoForm.nome.trim()) throw new Error('Nome do mecânico / técnico é obrigatório')
-      if (editingMecanico) {
-        return oficinaApi.updateMecanico(editingMecanico.id, mecanicoForm)
+      const payload = {
+        ...mecanicoForm,
+        user_id: mecanicoForm.user_id ? Number(mecanicoForm.user_id) : null,
       }
-      return oficinaApi.createMecanico(mecanicoForm)
+      if (editingMecanico) {
+        return oficinaApi.updateMecanico(editingMecanico.id, payload)
+      }
+      return oficinaApi.createMecanico(payload)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['mecanicos'] })
       qc.invalidateQueries({ queryKey: ['oficina-produtividade'] })
+      qc.invalidateQueries({ queryKey: ['usuarios-sistema'] })
       setMecanicoModalOpen(false)
       setEditingMecanico(null)
     },
@@ -475,6 +498,7 @@ export default function OficinaProdutividade() {
                 comissao_servico_pct: 10,
                 comissao_peca_pct: 2,
                 ativo: true,
+                user_id: '',
               })
               setMecanicoFormError('')
               setMecanicoModalOpen(true)
@@ -1261,6 +1285,7 @@ export default function OficinaProdutividade() {
                   comissao_servico_pct: 10,
                   comissao_peca_pct: 2,
                   ativo: true,
+                  user_id: '',
                 })
                 setMecanicoFormError('')
                 setMecanicoModalOpen(true)
@@ -1308,6 +1333,23 @@ export default function OficinaProdutividade() {
                     >
                       {m.ativo ? 'Ativo ✓' : 'Inativo ✕'}
                     </button>
+                  </div>
+
+                  {/* Usuário Vinculado ao App */}
+                  <div className="mb-3">
+                    {m.user_nome ? (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-purple-950/40 border border-purple-800/50 text-[11px] text-purple-200">
+                        <Smartphone className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                        <span className="truncate">
+                          App: <strong className="text-white">{m.user_nome}</strong> <span className="text-purple-300">({m.user_email})</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/40 border border-slate-700/40 text-[11px] text-slate-500">
+                        <Smartphone className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                        <span>Sem login vinculado ao App</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Informações de Contato & PIX */}
@@ -1396,6 +1438,7 @@ export default function OficinaProdutividade() {
                           comissao_servico_pct: m.comissao_servico_pct,
                           comissao_peca_pct: m.comissao_peca_pct,
                           ativo: m.ativo,
+                          user_id: m.user_id || '',
                         })
                         setMecanicoFormError('')
                         setMecanicoModalOpen(true)
@@ -1584,6 +1627,34 @@ export default function OficinaProdutividade() {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Vínculo com Usuário do Sistema */}
+              <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                <label className="block text-xs font-semibold text-purple-300 flex items-center gap-1.5">
+                  <Smartphone className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Vincular a Usuário do Sistema (Login no App Mobile / Web)</span>
+                </label>
+                <select
+                  value={mecanicoForm.user_id}
+                  onChange={(e) =>
+                    setMecanicoForm({
+                      ...mecanicoForm,
+                      user_id: e.target.value ? Number(e.target.value) : '',
+                    })
+                  }
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">Nenhum usuário vinculado (apenas controle interno da oficina)</option>
+                  {usuariosSistema.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.nome} ({u.email}) {u.role === 'mecanico' ? '• Perfil Mecânico' : `• ${u.role}`}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-400">
+                  💡 Quando o técnico fizer login no app com esta conta, suas Ordens de Serviço serão vinculadas automaticamente para acompanhamento de produtividade e comissão.
+                </p>
               </div>
 
               <div className="flex items-center gap-2 pt-1">

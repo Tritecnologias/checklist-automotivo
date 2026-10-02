@@ -117,7 +117,8 @@ export default function IdentificationScreen() {
       vehicle: { plate: string; model: string; mileage: number };
       client: { id?: number | null; name: string; phone: string; document?: string };
       status: 'quote' | 'open';
-    }) => api.createOrder(vars.vehicle, vars.status, vars.client),
+      mecanicoId?: number | null;
+    }) => api.createOrder(vars.vehicle, vars.status, vars.client, vars.mecanicoId),
     onSuccess: (order) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.push(`/order/${order.id}`);
@@ -184,6 +185,7 @@ export default function IdentificationScreen() {
         document: clientDoc.trim() || undefined,
       },
       status: orderType,
+      mecanicoId: user?.mecanicoId || undefined,
     });
   }
 
@@ -210,9 +212,16 @@ export default function IdentificationScreen() {
           <View className="w-full flex-row justify-between items-center mb-2">
             {/* Nome do usuário logado */}
             {user && (
-              <Text className="text-xs text-slate-500 dark:text-slate-400 flex-shrink">
-                👤 {user.nome}
-              </Text>
+              <View className="flex-shrink">
+                <Text className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  👤 {user.nome}
+                </Text>
+                {user.mecanicoNome && (
+                  <Text className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">
+                    🔧 {user.mecanicoNome}
+                  </Text>
+                )}
+              </View>
             )}
             <View className="flex-row items-center gap-2 ml-auto">
               {hasContent && (

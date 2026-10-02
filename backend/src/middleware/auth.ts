@@ -6,9 +6,11 @@ export const JWT_SECRET = process.env.JWT_SECRET ?? 'checklist-jwt-secret-change
 export interface JwtPayload {
   userId: number;
   email: string;
-  role: 'owner' | 'manager' | 'operator' | 'caixa';
+  role: 'owner' | 'manager' | 'operator' | 'caixa' | 'mecanico' | string;
   tenantId: number | null;
   tenantIds: number[];
+  mecanicoId?: number | null;
+  mecanicoNome?: string | null;
 }
 
 declare global {

@@ -41,7 +41,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export interface LoginResult {
   token: string;
-  user: { id: number; nome: string; email: string; role: string };
+  user: {
+    id: number;
+    nome: string;
+    email: string;
+    role: string;
+    mecanicoId?: number | null;
+    mecanicoNome?: string | null;
+  };
   tenants: { id: number; nome: string; slug: string }[];
 }
 
@@ -84,10 +91,15 @@ export const api = {
       source?: string;
     }>(`/orders/lookup-plate/${encodeURIComponent(plate)}`),
 
-  createOrder: (vehicle: Vehicle, status: 'quote' | 'open' = 'open', client?: OrderClient) =>
+  createOrder: (
+    vehicle: Vehicle,
+    status: 'quote' | 'open' = 'open',
+    client?: OrderClient,
+    mecanicoId?: number | null,
+  ) =>
     request<Order>('/orders', {
       method: 'POST',
-      body: JSON.stringify({ vehicle, status, client }),
+      body: JSON.stringify({ vehicle, status, client, mecanicoId }),
     }),
 
   updateOrderClient: (id: string, client: { name: string; phone: string; document?: string }) =>
@@ -101,8 +113,22 @@ export const api = {
       method: 'POST',
     }),
 
-  listOrders: (search?: string) =>
-    request<Order[]>(search ? `/orders?search=${encodeURIComponent(search)}` : '/orders'),
+  listOrders: (search?: string, status?: string, mecanicoId?: string | number) => {
+    const params = new URLSearchParams();
+    if (search) params.append('search', search);
+    if (status && status !== 'all') params.append('status', status);
+    if (mecanicoId !== undefined && mecanicoId !== null && mecanicoId !== '') {
+      params.append('mecanico_id', String(mecanicoId));
+    }
+    const qs = params.toString();
+    return request<Order[]>(qs ? `/orders?${qs}` : '/orders');
+  },
+
+  updateOrderMechanic: (id: string, mecanicoId: number | null, aplicarAosItens: boolean = true) =>
+    request<Order>(`/orders/${id}/mecanico`, {
+      method: 'PATCH',
+      body: JSON.stringify({ mecanicoId, aplicarAosItens }),
+    }),
 
   getOrder: (id: string) => request<Order>(`/orders/${id}`),
 

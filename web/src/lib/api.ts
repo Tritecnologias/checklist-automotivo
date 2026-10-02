@@ -6,7 +6,7 @@ import type {
   ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
   CurvaAbcResponse,
   Mecanico, MecanicoProdutividade, ExtratoItemComissao, ProdutividadeOficinaResponse, MecanicoPagamento,
-  DreResponse,
+  DreResponse, UsuarioSistema,
 } from '../types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -571,6 +571,8 @@ export const oficinaApi = {
     const q = ativo !== undefined ? `?ativo=${ativo ? 1 : 0}` : ''
     return request<Mecanico[]>(`/erp/mecanicos${q}`)
   },
+  listUsuariosSistema: () =>
+    request<UsuarioSistema[]>('/erp/mecanicos/usuarios-sistema'),
   createMecanico: (data: Partial<Mecanico>) =>
     request<Mecanico>('/erp/mecanicos', {
       method: 'POST',

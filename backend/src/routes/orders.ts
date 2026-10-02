@@ -209,7 +209,9 @@ router.get('/', async (req: Request, res: Response) => {
       params.push(status.trim());
     }
 
-    if (mecanico_id && Number(mecanico_id) > 0) {
+    if (mecanico_id === 'sem_mecanico' || req.query.sem_mecanico === '1' || req.query.sem_mecanico === 'true') {
+      whereParts.push('(o.mecanico_id IS NULL OR o.mecanico_id = 0)');
+    } else if (mecanico_id && Number(mecanico_id) > 0) {
       whereParts.push('(o.mecanico_id = ? OR EXISTS (SELECT 1 FROM os_order_items oi WHERE oi.order_id = o.id AND oi.mecanico_id = ?))');
       params.push(Number(mecanico_id), Number(mecanico_id));
     }
@@ -500,9 +502,13 @@ router.post('/', async (req: Request, res: Response) => {
 
     let finalMecId: number | null = (mecanicoId && Number(mecanicoId) > 0) ? Number(mecanicoId) : null;
     let finalMecNome: string | null = null;
+    if (!finalMecId && req.user?.mecanicoId) {
+      finalMecId = Number(req.user.mecanicoId);
+      finalMecNome = req.user.mecanicoNome ?? null;
+    }
     if (finalMecId) {
-      const [[mecRow]] = await pool.execute<any>('SELECT nome FROM cad_mecanicos WHERE id = ?', [finalMecId]);
-      if (mecRow) finalMecNome = mecRow.nome;
+      const [[mecRow]] = await pool.execute<any>('SELECT nome, apelido FROM cad_mecanicos WHERE id = ?', [finalMecId]);
+      if (mecRow) finalMecNome = mecRow.apelido || mecRow.nome;
     }
 
     await pool.execute(

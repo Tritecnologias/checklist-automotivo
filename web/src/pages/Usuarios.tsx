@@ -4,13 +4,14 @@ import { tenantsApi, usersApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import type { UserAdmin } from '../types'
 
-const MULTI_TENANT_ROLES = ['manager', 'operator', 'caixa']
+const MULTI_TENANT_ROLES = ['manager', 'operator', 'caixa', 'mecanico']
 
 const ROLE_OPTS = [
   { value: 'owner',    label: 'Proprietário' },
   { value: 'manager',  label: 'Gerente' },
   { value: 'operator', label: 'Operador' },
   { value: 'caixa',    label: 'Caixa' },
+  { value: 'mecanico', label: 'Mecânico / Técnico' },
 ]
 
 const ROLE_COLOR: Record<string, string> = {
@@ -18,6 +19,7 @@ const ROLE_COLOR: Record<string, string> = {
   manager:  'bg-blue-500/20 text-blue-300',
   operator: 'bg-slate-500/20 text-slate-300',
   caixa:    'bg-green-500/20 text-green-300',
+  mecanico: 'bg-purple-500/20 text-purple-300',
 }
 
 const EMPTY_FORM = {

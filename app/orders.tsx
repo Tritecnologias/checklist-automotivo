@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useColorScheme } from 'nativewind';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { Order } from '@/types';
 
@@ -46,35 +47,86 @@ function formatDate(iso: string) {
   });
 }
 
-function OrderCard({ order }: { order: Order }) {
+function OrderCard({ order, currentMecanicoId }: { order: Order; currentMecanicoId?: number | null }) {
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(`/order/${order.id}`);
   }, [order.id]);
 
+  const isMyOrder = currentMecanicoId && order.mecanicoId === currentMecanicoId;
+
   return (
     <TouchableOpacity
       onPress={handlePress}
       activeOpacity={0.75}
-      className="mx-4 mb-3 bg-white dark:bg-slate-800 rounded-2xl p-4 border border-gray-100 dark:border-slate-700 shadow-sm"
+      className={`mx-4 mb-3 bg-white dark:bg-slate-800 rounded-2xl p-4 border shadow-sm ${
+        isMyOrder
+          ? 'border-blue-300 dark:border-blue-700/80 bg-blue-50/20 dark:bg-slate-800'
+          : 'border-gray-100 dark:border-slate-700'
+      }`}
     >
       <View className="flex-row items-start justify-between">
         <View className="flex-1 mr-3">
-          <Text className="text-xs font-mono text-gray-400 dark:text-slate-500">
-            {order.status === 'quote' ? 'ORÇAMENTO' : 'OS'} #{order.id.split('-')[0].toUpperCase()}
-          </Text>
+          <View className="flex-row items-center gap-2">
+            <Text className="text-xs font-mono text-gray-400 dark:text-slate-500">
+              {order.status === 'quote' ? 'ORÇAMENTO' : 'OS'} #{order.id.split('-')[0].toUpperCase()}
+            </Text>
+            {isMyOrder && (
+              <View className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/60">
+                <Text className="text-[10px] font-bold text-blue-700 dark:text-blue-300">
+                  MINHA OS
+                </Text>
+              </View>
+            )}
+          </View>
           <Text className="text-xl font-bold text-gray-900 dark:text-white mt-0.5">
             {order.vehicle.plate}
           </Text>
           <Text className="text-sm text-gray-500 dark:text-slate-400 mt-0.5" numberOfLines={1}>
             {order.vehicle.model} · {order.vehicle.mileage.toLocaleString('pt-BR')} km
           </Text>
+          {order.client?.name && (
+            <Text className="text-xs text-slate-500 dark:text-slate-400 mt-0.5" numberOfLines={1}>
+              👤 {order.client.name}
+            </Text>
+          )}
         </View>
         <View className={`px-3 py-1 rounded-full ${STATUS_STYLE[order.status] ?? STATUS_STYLE.closed}`}>
           <Text className={`text-xs font-bold uppercase ${STATUS_TEXT[order.status] ?? STATUS_TEXT.closed}`}>
             {STATUS_LABEL[order.status] ?? order.status}
           </Text>
         </View>
+      </View>
+
+      {/* Badge de Mecânico / Responsável */}
+      <View className="mt-2.5 flex-row items-center">
+        {order.mecanicoNome ? (
+          <View
+            className={`px-2.5 py-1 rounded-lg flex-row items-center gap-1.5 ${
+              isMyOrder
+                ? 'bg-blue-100 dark:bg-blue-900/50 border border-blue-200 dark:border-blue-800'
+                : 'bg-slate-100 dark:bg-slate-700/60'
+            }`}
+          >
+            <Text style={{ fontSize: 11 }}>🔧</Text>
+            <Text
+              className={`text-xs font-medium ${
+                isMyOrder
+                  ? 'text-blue-700 dark:text-blue-300 font-semibold'
+                  : 'text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              {order.mecanicoNome}
+            </Text>
+          </View>
+        ) : (
+          <View className="px-2.5 py-1 rounded-lg flex-row items-center gap-1.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-800/60">
+            <Text style={{ fontSize: 11 }}>⏳</Text>
+            <Text className="text-xs font-medium text-amber-700 dark:text-amber-400">
+              Sem mecânico atribuído
+            </Text>
+          </View>
+        )}
       </View>
 
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-slate-700">
@@ -107,8 +159,10 @@ const TABS: { key: 'all' | 'quote' | 'open' | 'in_progress' | 'closed'; label: s
 export default function OrdersScreen() {
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'quote' | 'open' | 'in_progress' | 'closed'>('all');
+  const [assignmentFilter, setAssignmentFilter] = useState<'all' | 'mine' | 'unassigned'>('all');
   const debouncedSearch = useDebounce(search, 400);
 
   const { data: orders, isLoading, isError, refetch, isFetching } = useQuery({
@@ -119,9 +173,17 @@ export default function OrdersScreen() {
 
   const filteredOrders = useMemo(() => {
     if (!orders) return [];
-    if (statusFilter === 'all') return orders;
-    return orders.filter((o) => o.status === statusFilter);
-  }, [orders, statusFilter]);
+    return orders.filter((o) => {
+      if (statusFilter !== 'all' && o.status !== statusFilter) return false;
+      if (assignmentFilter === 'mine' && user?.mecanicoId) {
+        return o.mecanicoId === user.mecanicoId;
+      }
+      if (assignmentFilter === 'unassigned') {
+        return !o.mecanicoId;
+      }
+      return true;
+    });
+  }, [orders, statusFilter, assignmentFilter, user?.mecanicoId]);
 
   const handleClear = useCallback(() => {
     setSearch('');
@@ -176,6 +238,70 @@ export default function OrdersScreen() {
         </View>
       </View>
 
+      {/* Filtro Rápido de Atribuição (Minhas OS / Sem Mecânico / Todas) */}
+      <View className="px-4 pb-2 flex-row gap-2">
+        <TouchableOpacity
+          onPress={() => setAssignmentFilter('all')}
+          className={`flex-1 py-1.5 rounded-xl border items-center justify-center ${
+            assignmentFilter === 'all'
+              ? 'bg-slate-800 border-slate-700 dark:bg-slate-700'
+              : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800'
+          }`}
+        >
+          <Text
+            className={`text-xs font-semibold ${
+              assignmentFilter === 'all'
+                ? 'text-white'
+                : 'text-gray-600 dark:text-slate-400'
+            }`}
+          >
+            Todas ({orders?.length || 0})
+          </Text>
+        </TouchableOpacity>
+
+        {user?.mecanicoId && (
+          <TouchableOpacity
+            onPress={() => setAssignmentFilter('mine')}
+            className={`flex-1 py-1.5 rounded-xl border items-center justify-center flex-row gap-1 ${
+              assignmentFilter === 'mine'
+                ? 'bg-blue-600 border-blue-600'
+                : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800'
+            }`}
+          >
+            <Text style={{ fontSize: 11 }}>🔧</Text>
+            <Text
+              className={`text-xs font-semibold ${
+                assignmentFilter === 'mine'
+                  ? 'text-white'
+                  : 'text-blue-600 dark:text-blue-400'
+              }`}
+            >
+              Minhas OS
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        <TouchableOpacity
+          onPress={() => setAssignmentFilter('unassigned')}
+          className={`flex-1 py-1.5 rounded-xl border items-center justify-center flex-row gap-1 ${
+            assignmentFilter === 'unassigned'
+              ? 'bg-amber-600 border-amber-600'
+              : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800'
+          }`}
+        >
+          <Text style={{ fontSize: 11 }}>⏳</Text>
+          <Text
+            className={`text-xs font-semibold ${
+              assignmentFilter === 'unassigned'
+                ? 'text-white'
+                : 'text-amber-600 dark:text-amber-400'
+            }`}
+          >
+            Sem Mecânico
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Abas de filtro por status */}
       <View className="pb-2">
         <ScrollView
@@ -216,7 +342,9 @@ export default function OrdersScreen() {
       <FlatList
         data={filteredOrders}
         keyExtractor={(o) => o.id}
-        renderItem={({ item }) => <OrderCard order={item} />}
+        renderItem={({ item }) => (
+          <OrderCard order={item} currentMecanicoId={user?.mecanicoId} />
+        )}
         contentContainerStyle={{ paddingBottom: 40, paddingTop: 4 }}
         refreshControl={
           <RefreshControl
