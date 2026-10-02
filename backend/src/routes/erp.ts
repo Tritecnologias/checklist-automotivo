@@ -3930,7 +3930,7 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
         u.id AS user_id,
         u.nome AS user_nome,
         u.email AS user_email,
-        (SELECT COUNT(DISTINCT o.id) FROM os_orders o WHERE o.mecanico_id = m.id OR EXISTS (SELECT 1 FROM os_order_items oi WHERE oi.order_id = o.id AND oi.mecanico_id = m.id)) AS total_os,
+        (SELECT COUNT(DISTINCT o.id) FROM os_orders o WHERE o.mecanico_id = m.id OR o.auxiliar_id = m.id OR EXISTS (SELECT 1 FROM os_order_items oi WHERE oi.order_id = o.id AND oi.mecanico_id = m.id)) AS total_os,
         (SELECT COUNT(oi.id) FROM os_order_items oi WHERE oi.mecanico_id = m.id AND oi.type = 'service') AS total_servicos
       FROM cad_mecanicos m
       LEFT JOIN tenants t ON t.id = m.tenant_id
@@ -3955,6 +3955,7 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
       comissao_servico_pct: Number(r.comissao_servico_pct || 0),
       comissao_peca_pct: Number(r.comissao_peca_pct || 0),
       ativo: Boolean(r.ativo),
+      is_auxiliar: Boolean(r.is_auxiliar),
       total_os: Number(r.total_os || 0),
       total_servicos: Number(r.total_servicos || 0),
       created_at: r.created_at,
@@ -3994,7 +3995,7 @@ router.get('/mecanicos/usuarios-sistema', requireManagerUp, async (req: Request,
 // ── POST /erp/mecanicos ───────────────────────────────────────────────────────
 router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) => {
   try {
-    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, tenant_id, user_id } = req.body;
+    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, tenant_id, user_id, is_auxiliar } = req.body;
     if (!nome || !String(nome).trim()) {
       res.status(400).json({ message: 'Nome do mecânico / técnico é obrigatório' });
       return;
@@ -4004,11 +4005,12 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
     const servPct = Math.max(0, parseFloat(String(comissao_servico_pct ?? 0)) || 0);
     const pecaPct = Math.max(0, parseFloat(String(comissao_peca_pct ?? 0)) || 0);
     const linkedUserId = user_id && Number(user_id) > 0 ? Number(user_id) : null;
+    const isAux = is_auxiliar ? 1 : 0;
 
     const [result] = await pool.query<any>(
       `INSERT INTO cad_mecanicos
-         (tenant_id, user_id, nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+         (tenant_id, user_id, nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
       [
         tId,
         linkedUserId,
@@ -4019,6 +4021,7 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
         chave_pix ? String(chave_pix).trim() : null,
         servPct,
         pecaPct,
+        isAux,
       ]
     );
 
@@ -4043,6 +4046,7 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
       comissao_servico_pct: Number(created.comissao_servico_pct),
       comissao_peca_pct: Number(created.comissao_peca_pct),
       ativo: Boolean(created.ativo),
+      is_auxiliar: Boolean(created.is_auxiliar),
     });
   } catch (err: any) {
     console.error('[mecanicos] POST erro:', err);
@@ -4054,7 +4058,7 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
 router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
-    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo, tenant_id, user_id } = req.body;
+    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, tenant_id, user_id } = req.body;
 
     const [[existing]] = await pool.query<any>('SELECT * FROM cad_mecanicos WHERE id = ?', [id]);
     if (!existing) {
@@ -4065,13 +4069,14 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
     const servPct = comissao_servico_pct !== undefined ? Math.max(0, parseFloat(String(comissao_servico_pct)) || 0) : Number(existing.comissao_servico_pct);
     const pecaPct = comissao_peca_pct !== undefined ? Math.max(0, parseFloat(String(comissao_peca_pct)) || 0) : Number(existing.comissao_peca_pct);
     const isAtivo = ativo !== undefined ? (Boolean(ativo) ? 1 : 0) : existing.ativo;
+    const isAux = is_auxiliar !== undefined ? (Boolean(is_auxiliar) ? 1 : 0) : (existing.is_auxiliar ?? 0);
     const finalTenant = tenant_id ? Number(tenant_id) : existing.tenant_id;
     const linkedUserId = user_id !== undefined ? (user_id && Number(user_id) > 0 ? Number(user_id) : null) : existing.user_id;
 
     await pool.query(
       `UPDATE cad_mecanicos
        SET user_id = ?, nome = ?, apelido = ?, cpf = ?, telefone = ?, chave_pix = ?,
-           comissao_servico_pct = ?, comissao_peca_pct = ?, ativo = ?, tenant_id = ?, updated_at = NOW()
+           comissao_servico_pct = ?, comissao_peca_pct = ?, ativo = ?, is_auxiliar = ?, tenant_id = ?, updated_at = NOW()
        WHERE id = ?`,
       [
         linkedUserId,
@@ -4083,6 +4088,7 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
         servPct,
         pecaPct,
         isAtivo,
+        isAux,
         finalTenant,
         id,
       ]
@@ -4091,6 +4097,7 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
     // Se o nome foi alterado, atualiza também a desnormalização de nome nas OSs e Itens
     if (nome && String(nome).trim() !== existing.nome) {
       await pool.query('UPDATE os_orders SET mecanico_nome = ? WHERE mecanico_id = ?', [String(nome).trim(), id]);
+      await pool.query('UPDATE os_orders SET auxiliar_nome = ? WHERE auxiliar_id = ?', [String(nome).trim(), id]);
       await pool.query('UPDATE os_order_items SET mecanico_nome = ? WHERE mecanico_id = ?', [String(nome).trim(), id]);
     }
 
@@ -4115,6 +4122,7 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
       comissao_servico_pct: Number(updated.comissao_servico_pct),
       comissao_peca_pct: Number(updated.comissao_peca_pct),
       ativo: Boolean(updated.ativo),
+      is_auxiliar: Boolean(updated.is_auxiliar),
     });
   } catch (err: any) {
     console.error('[mecanicos] PUT erro:', err);
@@ -4178,12 +4186,12 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
       statusFilter = " AND o.status IN ('open', 'in_progress')";
     }
 
-    // Filtro de mecânico se especificado
+    // Filtro de mecânico se especificado (inclui titular ou auxiliar da OS)
     let mecItemFilter = '';
     const mecParams: any[] = [];
     if (mecanico_id && Number(mecanico_id) > 0) {
-      mecItemFilter = ' AND oi.mecanico_id = ?';
-      mecParams.push(Number(mecanico_id));
+      mecItemFilter = ' AND (oi.mecanico_id = ? OR o.mecanico_id = ? OR o.auxiliar_id = ?)';
+      mecParams.push(Number(mecanico_id), Number(mecanico_id), Number(mecanico_id));
     }
 
     // 1. Busca todos os itens de OS executados no período com seus respectivos mecânicos
@@ -4213,6 +4221,10 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
         o.discount_amount AS order_discount,
         o.client_name,
         o.client_phone,
+        o.mecanico_id AS order_mecanico_id,
+        o.mecanico_nome AS order_mecanico_nome,
+        o.auxiliar_id,
+        o.auxiliar_nome,
         o.created_at AS order_created_at,
         o.closed_at AS order_closed_at,
         DATE(COALESCE(o.closed_at, o.created_at)) AS data_referencia,
@@ -4270,6 +4282,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
       comissao_servico_pct: number;
       comissao_peca_pct: number;
       ativo: boolean;
+      is_auxiliar: boolean;
       qtd_os_set: Set<string>;
       qtd_servicos: number;
       qtd_pecas: number;
@@ -4298,6 +4311,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
         comissao_servico_pct: Number(m.comissao_servico_pct || 0),
         comissao_peca_pct: Number(m.comissao_peca_pct || 0),
         ativo: Boolean(m.ativo),
+        is_auxiliar: Boolean(m.is_auxiliar),
         qtd_os_set: new Set<string>(),
         qtd_servicos: 0,
         qtd_pecas: 0,
@@ -4326,6 +4340,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
       comissao_servico_pct: 0,
       comissao_peca_pct: 0,
       ativo: true,
+      is_auxiliar: false,
       qtd_os_set: new Set<string>(),
       qtd_servicos: 0,
       qtd_pecas: 0,
@@ -4398,6 +4413,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
           comissao_servico_pct: Number(row.cad_serv_pct || 0),
           comissao_peca_pct: Number(row.cad_peca_pct || 0),
           ativo: true,
+          is_auxiliar: false,
           qtd_os_set: new Set<string>(),
           qtd_servicos: 0,
           qtd_pecas: 0,
@@ -4415,18 +4431,28 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
         mecanicosStats.set(mecId, mecStat);
       }
 
-      mecStat.qtd_os_set.add(row.order_id);
+      const currentMecStat = mecStat;
+      currentMecStat.qtd_os_set.add(row.order_id);
       if (isServico) {
-        mecStat.qtd_servicos += 1;
-        mecStat.total_servicos += valorServico;
-        mecStat.comissao_servicos += comissaoLinha;
+        currentMecStat.qtd_servicos += 1;
+        currentMecStat.total_servicos += valorServico;
+        currentMecStat.comissao_servicos += comissaoLinha;
       } else {
-        mecStat.qtd_pecas += 1;
-        mecStat.total_pecas += valorPeca;
-        mecStat.comissao_pecas += comissaoLinha;
+        currentMecStat.qtd_pecas += 1;
+        currentMecStat.total_pecas += valorPeca;
+        currentMecStat.comissao_pecas += comissaoLinha;
       }
-      mecStat.total_produzido += valorTotalLinha;
-      mecStat.total_comissao += comissaoLinha;
+      currentMecStat.total_produzido += valorTotalLinha;
+      currentMecStat.total_comissao += comissaoLinha;
+
+      // Se a OS possui Auxiliar atribuído, contabiliza a participação na OS para ele também
+      if (row.auxiliar_id && Number(row.auxiliar_id) > 0) {
+        const auxId = Number(row.auxiliar_id);
+        const auxStat = mecanicosStats.get(auxId);
+        if (auxStat) {
+          auxStat.qtd_os_set.add(row.order_id);
+        }
+      }
 
       extratoItens.push({
         item_id: row.item_id,
@@ -4453,6 +4479,8 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
         valor_total_linha: valorTotalLinha,
         mecanico_id: mecId > 0 ? mecId : null,
         mecanico_nome: row.mecanico_nome || row.cad_mecanico_nome || (mecId === 0 ? 'Não atribuído' : 'Técnico #' + mecId),
+        auxiliar_id: row.auxiliar_id ? Number(row.auxiliar_id) : null,
+        auxiliar_nome: row.auxiliar_nome || null,
         comissao_pct: pctAplicado,
         comissao_valor: comissaoLinha,
       });
@@ -4479,6 +4507,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
           comissao_servico_pct: m.comissao_servico_pct,
           comissao_peca_pct: m.comissao_peca_pct,
           ativo: m.ativo,
+          is_auxiliar: m.is_auxiliar,
           qtd_os: qtdOs,
           qtd_servicos: m.qtd_servicos,
           qtd_pecas: m.qtd_pecas,

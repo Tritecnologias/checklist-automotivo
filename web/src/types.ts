@@ -429,6 +429,8 @@ export interface Order {
   vendaControle?: string | null
   mecanicoId?: number | null
   mecanicoNome?: string | null
+  auxiliarId?: number | null
+  auxiliarNome?: string | null
   items: OrderItem[]
   laborAmount: number
   totalAmount: number
@@ -696,6 +698,7 @@ export interface Mecanico {
   comissao_servico_pct: number
   comissao_peca_pct: number
   ativo: boolean
+  is_auxiliar?: boolean
   total_os?: number
   total_servicos?: number
   created_at?: string
@@ -721,6 +724,7 @@ export interface MecanicoProdutividade {
   comissao_servico_pct: number
   comissao_peca_pct: number
   ativo: boolean
+  is_auxiliar?: boolean
   qtd_os: number
   qtd_servicos: number
   qtd_pecas: number
@@ -761,6 +765,8 @@ export interface ExtratoItemComissao {
   valor_total_linha: number
   mecanico_id: number | null
   mecanico_nome: string
+  auxiliar_id?: number | null
+  auxiliar_nome?: string | null
   comissao_pct: number
   comissao_valor: number
 }

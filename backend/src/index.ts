@@ -592,6 +592,35 @@ async function runMigrations() {
     console.log('[migration] os_orders colunas de mecânico adicionadas');
   }
 
+  // is_auxiliar em cad_mecanicos (distinção entre mecânico titular e auxiliar)
+  const [[{ cntMecAux }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntMecAux FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_mecanicos' AND COLUMN_NAME = 'is_auxiliar'`
+  );
+  if (Number(cntMecAux) === 0) {
+    await pool.query(`
+      ALTER TABLE cad_mecanicos
+      ADD COLUMN is_auxiliar TINYINT(1) NOT NULL DEFAULT 0,
+      ADD INDEX idx_cad_mecanicos_aux (is_auxiliar)
+    `);
+    console.log('[migration] cad_mecanicos.is_auxiliar adicionada');
+  }
+
+  // auxiliar_id e auxiliar_nome em os_orders (para trabalhar em conjunto na OS)
+  const [[{ cntMecAuxOrders }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntMecAuxOrders FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'auxiliar_id'`
+  );
+  if (Number(cntMecAuxOrders) === 0) {
+    await pool.query(`
+      ALTER TABLE os_orders
+      ADD COLUMN auxiliar_id INT NULL DEFAULT NULL,
+      ADD COLUMN auxiliar_nome VARCHAR(100) NULL DEFAULT NULL,
+      ADD INDEX idx_os_orders_auxiliar (auxiliar_id)
+    `);
+    console.log('[migration] os_orders colunas de auxiliar adicionadas');
+  }
+
   // mecanico_id, mecanico_nome, comissao_pct e comissao_valor em os_order_items
   const [[{ cntMecItems }]] = await pool.query<any>(
     `SELECT COUNT(*) as cntMecItems FROM information_schema.COLUMNS

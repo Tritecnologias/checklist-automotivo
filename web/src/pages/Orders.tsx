@@ -45,6 +45,7 @@ export default function Orders() {
   const [newClientDoc, setNewClientDoc]     = useState('')
   const [newClientId, setNewClientId]       = useState<number | null>(null)
   const [newMecanicoId, setNewMecanicoId]   = useState<number | null>(null)
+  const [newAuxiliarId, setNewAuxiliarId]   = useState<number | null>(null)
   const [newStatus, setNewStatus]           = useState<'quote' | 'open'>('open')
   const [createError, setCreateError]       = useState('')
   const [lookupLoading, setLookupLoading]   = useState(false)
@@ -120,7 +121,8 @@ export default function Orders() {
           phone: clientPhone,
           document: clientDoc || undefined,
         },
-        newMecanicoId || undefined
+        newMecanicoId || undefined,
+        newAuxiliarId || undefined
       )
     },
     onSuccess: (created) => {
@@ -134,6 +136,7 @@ export default function Orders() {
       setNewClientDoc('')
       setNewClientId(null)
       setNewMecanicoId(null)
+      setNewAuxiliarId(null)
       setLookupFeedback(null)
       setCreateError('')
       navigate(`/orders/${created.id}`)
@@ -151,7 +154,7 @@ export default function Orders() {
         if (mecanicoFilter === 'sem_mecanico') {
           if (o.mecanicoId) return false
         } else {
-          if (String(o.mecanicoId) !== mecanicoFilter) return false
+          if (String(o.mecanicoId) !== mecanicoFilter && String(o.auxiliarId) !== mecanicoFilter) return false
         }
       }
       if (q) {
@@ -161,7 +164,8 @@ export default function Orders() {
           o.id.toLowerCase().includes(q) ||
           (o.client?.name && o.client.name.toLowerCase().includes(q)) ||
           (o.client?.phone && o.client.phone.includes(q)) ||
-          (o.mecanicoNome && o.mecanicoNome.toLowerCase().includes(q))
+          (o.mecanicoNome && o.mecanicoNome.toLowerCase().includes(q)) ||
+          (o.auxiliarNome && o.auxiliarNome.toLowerCase().includes(q))
         )
       }
       return true
@@ -323,14 +327,22 @@ export default function Orders() {
                         {o.vehicle.model}
                       </td>
                       <td className="px-5 py-3 whitespace-nowrap">
-                        {o.mecanicoNome ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-200 border border-slate-700/80">
-                            <Wrench className="w-3 h-3 text-blue-400" />
-                            <span>{o.mecanicoNome}</span>
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-500 italic">Não atribuído</span>
-                        )}
+                        <div className="flex flex-col gap-1">
+                          {o.mecanicoNome ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-200 border border-slate-700/80">
+                              <Wrench className="w-3 h-3 text-blue-400" />
+                              <span>{o.mecanicoNome}</span>
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-500 italic">Não atribuído</span>
+                          )}
+                          {o.auxiliarNome && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-amber-300 font-medium">
+                              <span>🤝</span>
+                              <span>Aux: {o.auxiliarNome}</span>
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-3 text-slate-400">
                         {o.vehicle.mileage.toLocaleString('pt-BR')}
@@ -606,7 +618,26 @@ export default function Orders() {
                       <option value="">Atribuir depois / Geral da Oficina</option>
                       {mecanicos.map((m) => (
                         <option key={m.id} value={m.id}>
-                          {m.nome} {m.apelido ? `(${m.apelido})` : ''} — Serv: {m.comissao_servico_pct}% | Peça: {m.comissao_peca_pct}%
+                          {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '• [Auxiliar]' : '• [Titular]'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-amber-300 mb-1 flex items-center gap-1.5">
+                      <span>🤝</span>
+                      <span>Auxiliar de Mecânico (Opcional)</span>
+                    </label>
+                    <select
+                      value={newAuxiliarId ?? ''}
+                      onChange={(e) => setNewAuxiliarId(e.target.value ? Number(e.target.value) : null)}
+                      className="w-full bg-slate-800 border border-slate-700 text-amber-200 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    >
+                      <option value="">Nenhum auxiliar escalado</option>
+                      {mecanicos.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '★ [Auxiliar]' : '• [Mecânico]'}
                         </option>
                       ))}
                     </select>

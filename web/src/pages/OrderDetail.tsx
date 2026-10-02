@@ -132,6 +132,19 @@ export default function OrderDetail() {
     },
   })
 
+  // Atualizar Auxiliar da OS
+  const { mutate: handleUpdateOrderAuxiliar, isPending: updatingOrderAuxiliar } = useMutation({
+    mutationFn: (auxiliarId: number | null) => api.updateOrderAuxiliar(id!, auxiliarId),
+    onSuccess: (updated) => {
+      qc.setQueryData(['order', id], updated)
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['oficina-produtividade'] })
+    },
+    onError: (err: any) => {
+      alert(err.message || 'Erro ao definir auxiliar da OS')
+    },
+  })
+
   // Atualizar Mecânico de um Item
   const { mutate: handleUpdateItemMechanic } = useMutation({
     mutationFn: ({ itemId, mecanicoId }: { itemId: string; mecanicoId: number | null }) =>
@@ -542,6 +555,11 @@ export default function OrderDetail() {
               <span class="info-label">Mecânico Responsável:</span>
               <span class="info-value">${order.mecanicoNome || 'Geral / Oficina'}</span>
             </div>
+            ${order.auxiliarNome ? `
+            <div class="info-row">
+              <span class="info-label">Auxiliar de Mecânico:</span>
+              <span class="info-value">${order.auxiliarNome}</span>
+            </div>` : ''}
           </div>
         </div>
 
@@ -702,39 +720,77 @@ export default function OrderDetail() {
                 </span>
               </div>
 
-              {/* Mecânico Responsável da OS */}
-              <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center flex-wrap gap-2.5">
-                <span className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
-                  <Wrench className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Mecânico / Técnico da OS:</span>
-                </span>
-                {!isClosed ? (
-                  <select
-                    value={order.mecanicoId ?? ''}
-                    disabled={updatingOrderMechanic}
-                    onChange={(e) => {
-                      const val = e.target.value ? Number(e.target.value) : null
-                      handleUpdateOrderMechanic(val)
-                    }}
-                    className="bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-white rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors cursor-pointer"
-                  >
-                    <option value="">Não atribuído (Geral)</option>
-                    {mecanicos.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.nome} {m.apelido ? `(${m.apelido})` : ''} — M.O: {m.comissao_servico_pct}%
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="text-xs font-bold text-white bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg">
-                    {order.mecanicoNome || 'Não atribuído'}
+              {/* Mecânico Responsável & Auxiliar da OS */}
+              <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center gap-x-6 gap-y-2.5">
+                {/* Mecânico Titular */}
+                <div className="flex items-center flex-wrap gap-2.5">
+                  <span className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                    <Wrench className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Mecânico Titular:</span>
                   </span>
-                )}
-                {order.mecanicoNome && (
-                  <span className="text-[11px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-full font-medium">
-                    ✓ Atribuído
+                  {!isClosed ? (
+                    <select
+                      value={order.mecanicoId ?? ''}
+                      disabled={updatingOrderMechanic}
+                      onChange={(e) => {
+                        const val = e.target.value ? Number(e.target.value) : null
+                        handleUpdateOrderMechanic(val)
+                      }}
+                      className="bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-white rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors cursor-pointer"
+                    >
+                      <option value="">Não atribuído (Geral)</option>
+                      {mecanicos.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '• [Auxiliar]' : '• [Titular]'}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-xs font-bold text-white bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg">
+                      {order.mecanicoNome || 'Não atribuído'}
+                    </span>
+                  )}
+                  {order.mecanicoNome && (
+                    <span className="text-[11px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-full font-medium">
+                      ✓ Titular
+                    </span>
+                  )}
+                </div>
+
+                {/* Auxiliar de Mecânico */}
+                <div className="flex items-center flex-wrap gap-2.5">
+                  <span className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                    <span>🤝</span>
+                    <span>Auxiliar de Mecânico:</span>
                   </span>
-                )}
+                  {!isClosed ? (
+                    <select
+                      value={order.auxiliarId ?? ''}
+                      disabled={updatingOrderAuxiliar}
+                      onChange={(e) => {
+                        const val = e.target.value ? Number(e.target.value) : null
+                        handleUpdateOrderAuxiliar(val)
+                      }}
+                      className="bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-amber-200 rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors cursor-pointer"
+                    >
+                      <option value="">Nenhum auxiliar escalado</option>
+                      {mecanicos.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '★ [Auxiliar]' : '• [Mecânico]'}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-xs font-bold text-amber-200 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg">
+                      {order.auxiliarNome || 'Nenhum'}
+                    </span>
+                  )}
+                  {order.auxiliarNome && (
+                    <span className="text-[11px] text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded-full font-medium">
+                      ✓ Auxiliar Atribuído
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 

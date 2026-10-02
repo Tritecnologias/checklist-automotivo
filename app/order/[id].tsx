@@ -239,6 +239,8 @@ export default function OrderScreen() {
       ...(order.client?.name ? [`Cliente: ${order.client.name}${order.client.phone ? ` (${order.client.phone})` : ''}`] : []),
       `Veículo: ${order.vehicle.plate} — ${order.vehicle.model}`,
       `Quilometragem: ${order.vehicle.mileage.toLocaleString('pt-BR')} km`,
+      ...(order.mecanicoNome ? [`Mecânico: ${order.mecanicoNome}`] : []),
+      ...(order.auxiliarNome ? [`Auxiliar: ${order.auxiliarNome}`] : []),
       '',
     ];
 
@@ -522,6 +524,24 @@ export default function OrderScreen() {
             </View>
           )}
         </View>
+
+        {/* Auxiliar de Mecânico (se atribuído) */}
+        {order.auxiliarNome ? (
+          <View className="mt-2 flex-row items-center py-2 px-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40">
+            <View className="flex-row items-center gap-2 flex-1">
+              <Text style={{ fontSize: 14 }}>🤝</Text>
+              <View className="flex-1">
+                <Text className="text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400">
+                  Auxiliar de Mecânico
+                </Text>
+                <Text className="text-xs font-bold text-slate-800 dark:text-white" numberOfLines={1}>
+                  {order.auxiliarNome}
+                  {user?.mecanicoId && order.auxiliarId === user.mecanicoId ? ' (Você)' : ''}
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
 
         {/* Banner de Orçamento */}
         {order.status === 'quote' && (

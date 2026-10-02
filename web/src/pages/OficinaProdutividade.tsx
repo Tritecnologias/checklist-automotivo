@@ -114,6 +114,7 @@ export default function OficinaProdutividade() {
     comissao_servico_pct: number
     comissao_peca_pct: number
     ativo: boolean
+    is_auxiliar: boolean
     user_id: string | number
   }>({
     nome: '',
@@ -124,6 +125,7 @@ export default function OficinaProdutividade() {
     comissao_servico_pct: 10,
     comissao_peca_pct: 2,
     ativo: true,
+    is_auxiliar: false,
     user_id: '',
   })
   const [mecanicoFormError, setMecanicoFormError] = useState('')
@@ -498,6 +500,7 @@ export default function OficinaProdutividade() {
                 comissao_servico_pct: 10,
                 comissao_peca_pct: 2,
                 ativo: true,
+                is_auxiliar: false,
                 user_id: '',
               })
               setMecanicoFormError('')
@@ -914,11 +917,16 @@ export default function OficinaProdutividade() {
 
                         {/* Mecânico */}
                         <td className="px-4 py-3">
-                          <div className="font-bold text-white text-sm">
-                            {m.nome}
+                          <div className="font-bold text-white text-sm flex items-center gap-1.5 flex-wrap">
+                            <span>{m.nome}</span>
                             {m.apelido && (
-                              <span className="text-slate-400 font-normal ml-1.5 text-xs">
+                              <span className="text-slate-400 font-normal text-xs">
                                 ({m.apelido})
+                              </span>
+                            )}
+                            {m.is_auxiliar && (
+                              <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded font-semibold">
+                                Auxiliar
                               </span>
                             )}
                           </div>
@@ -1197,6 +1205,11 @@ export default function OficinaProdutividade() {
                           <span className="font-semibold text-white block">
                             {it.mecanico_nome}
                           </span>
+                          {it.auxiliar_nome && (
+                            <span className="text-[10px] text-amber-400 block font-medium">
+                              Auxiliar: {it.auxiliar_nome}
+                            </span>
+                          )}
                         </td>
 
                         <td className="px-4 py-3">
@@ -1285,6 +1298,7 @@ export default function OficinaProdutividade() {
                   comissao_servico_pct: 10,
                   comissao_peca_pct: 2,
                   ativo: true,
+                  is_auxiliar: false,
                   user_id: '',
                 })
                 setMecanicoFormError('')
@@ -1313,8 +1327,17 @@ export default function OficinaProdutividade() {
                         {m.nome.slice(0, 2).toUpperCase()}
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white leading-tight">
-                          {m.nome}
+                        <h3 className="text-sm font-bold text-white leading-tight flex items-center gap-2 flex-wrap">
+                          <span>{m.nome}</span>
+                          {m.is_auxiliar ? (
+                            <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded font-semibold">
+                              Auxiliar
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded font-semibold">
+                              Titular
+                            </span>
+                          )}
                         </h3>
                         {m.apelido && (
                           <p className="text-xs text-slate-400">Apelido: &ldquo;{m.apelido}&rdquo;</p>
@@ -1438,6 +1461,7 @@ export default function OficinaProdutividade() {
                           comissao_servico_pct: m.comissao_servico_pct,
                           comissao_peca_pct: m.comissao_peca_pct,
                           ativo: m.ativo,
+                          is_auxiliar: Boolean(m.is_auxiliar),
                           user_id: m.user_id || '',
                         })
                         setMecanicoFormError('')
@@ -1665,9 +1689,31 @@ export default function OficinaProdutividade() {
                   onChange={(e) => setMecanicoForm({ ...mecanicoForm, ativo: e.target.checked })}
                   className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500"
                 />
-                <label htmlFor="mecanico-ativo" className="text-xs font-semibold text-slate-300">
+                <label htmlFor="mecanico-ativo" className="text-xs font-semibold text-slate-300 cursor-pointer">
                   Mecânico Ativo na Oficina
                 </label>
+              </div>
+
+              {/* Checkbox Auxiliar de Mecânico */}
+              <div className="flex items-start gap-2 pt-1 pb-1">
+                <input
+                  type="checkbox"
+                  id="mecanico-auxiliar"
+                  checked={mecanicoForm.is_auxiliar}
+                  onChange={(e) => setMecanicoForm({ ...mecanicoForm, is_auxiliar: e.target.checked })}
+                  className="w-4 h-4 mt-0.5 rounded bg-slate-800 border-slate-700 text-amber-500 focus:ring-amber-500 cursor-pointer"
+                />
+                <div>
+                  <label htmlFor="mecanico-auxiliar" className="text-xs font-semibold text-amber-300 cursor-pointer flex items-center gap-1.5">
+                    <span>Auxiliar de Mecânico / Ajudante</span>
+                    <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.2 rounded font-medium">
+                      Equipe
+                    </span>
+                  </label>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Identifica este profissional como auxiliar. Ele poderá ser atribuído na Ordem de Serviço para trabalhar junto com o mecânico titular.
+                  </p>
+                </div>
               </div>
 
               <div className="flex gap-3 pt-3 border-t border-slate-800">

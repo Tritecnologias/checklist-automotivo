@@ -53,7 +53,7 @@ function OrderCard({ order, currentMecanicoId }: { order: Order; currentMecanico
     router.push(`/order/${order.id}`);
   }, [order.id]);
 
-  const isMyOrder = currentMecanicoId && order.mecanicoId === currentMecanicoId;
+  const isMyOrder = currentMecanicoId && (order.mecanicoId === currentMecanicoId || order.auxiliarId === currentMecanicoId);
 
   return (
     <TouchableOpacity
@@ -99,11 +99,11 @@ function OrderCard({ order, currentMecanicoId }: { order: Order; currentMecanico
       </View>
 
       {/* Badge de Mecânico / Responsável */}
-      <View className="mt-2.5 flex-row items-center">
+      <View className="mt-2.5 flex-row items-center flex-wrap gap-2">
         {order.mecanicoNome ? (
           <View
             className={`px-2.5 py-1 rounded-lg flex-row items-center gap-1.5 ${
-              isMyOrder
+              isMyOrder && order.mecanicoId === currentMecanicoId
                 ? 'bg-blue-100 dark:bg-blue-900/50 border border-blue-200 dark:border-blue-800'
                 : 'bg-slate-100 dark:bg-slate-700/60'
             }`}
@@ -111,7 +111,7 @@ function OrderCard({ order, currentMecanicoId }: { order: Order; currentMecanico
             <Text style={{ fontSize: 11 }}>🔧</Text>
             <Text
               className={`text-xs font-medium ${
-                isMyOrder
+                isMyOrder && order.mecanicoId === currentMecanicoId
                   ? 'text-blue-700 dark:text-blue-300 font-semibold'
                   : 'text-slate-700 dark:text-slate-300'
               }`}
@@ -124,6 +124,27 @@ function OrderCard({ order, currentMecanicoId }: { order: Order; currentMecanico
             <Text style={{ fontSize: 11 }}>⏳</Text>
             <Text className="text-xs font-medium text-amber-700 dark:text-amber-400">
               Sem mecânico atribuído
+            </Text>
+          </View>
+        )}
+
+        {order.auxiliarNome && (
+          <View
+            className={`px-2.5 py-1 rounded-lg flex-row items-center gap-1.5 ${
+              isMyOrder && order.auxiliarId === currentMecanicoId
+                ? 'bg-amber-100 dark:bg-amber-900/50 border border-amber-300 dark:border-amber-700'
+                : 'bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-800/50'
+            }`}
+          >
+            <Text style={{ fontSize: 11 }}>🤝</Text>
+            <Text
+              className={`text-xs font-medium ${
+                isMyOrder && order.auxiliarId === currentMecanicoId
+                  ? 'text-amber-800 dark:text-amber-300 font-semibold'
+                  : 'text-amber-700 dark:text-amber-400'
+              }`}
+            >
+              Aux: {order.auxiliarNome}
             </Text>
           </View>
         )}
@@ -176,7 +197,7 @@ export default function OrdersScreen() {
     return orders.filter((o) => {
       if (statusFilter !== 'all' && o.status !== statusFilter) return false;
       if (assignmentFilter === 'mine' && user?.mecanicoId) {
-        return o.mecanicoId === user.mecanicoId;
+        return o.mecanicoId === user.mecanicoId || o.auxiliarId === user.mecanicoId;
       }
       if (assignmentFilter === 'unassigned') {
         return !o.mecanicoId;

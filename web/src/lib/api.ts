@@ -49,15 +49,21 @@ export const api = {
     status: 'quote' | 'open' = 'open',
     client?: OrderClient,
     mecanicoId?: number | null,
+    auxiliarId?: number | null,
   ) =>
     request<Order>('/orders', {
       method: 'POST',
-      body: JSON.stringify({ vehicle, status, client, mecanicoId }),
+      body: JSON.stringify({ vehicle, status, client, mecanicoId, auxiliarId }),
     }),
   updateOrderMechanic: (orderId: string, mecanicoId: number | null, aplicarAosItens = true) =>
     request<Order>(`/orders/${orderId}/mecanico`, {
       method: 'PATCH',
       body: JSON.stringify({ mecanicoId, aplicarAosItens }),
+    }),
+  updateOrderAuxiliar: (orderId: string, auxiliarId: number | null) =>
+    request<Order>(`/orders/${orderId}/auxiliar`, {
+      method: 'PATCH',
+      body: JSON.stringify({ auxiliarId }),
     }),
   updateItemMechanic: (orderId: string, itemId: string, mecanicoId: number | null, comissaoPct?: number) =>
     request<Order>(`/orders/${orderId}/items/${itemId}/mecanico`, {

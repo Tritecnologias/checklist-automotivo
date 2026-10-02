@@ -29,6 +29,8 @@ export interface Order {
   totalAmount: number;
   mecanicoId?: number | null;
   mecanicoNome?: string | null;
+  auxiliarId?: number | null;
+  auxiliarNome?: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
