@@ -122,8 +122,8 @@ export default function OficinaProdutividade() {
     cpf: '',
     telefone: '',
     chave_pix: '',
-    comissao_servico_pct: 10,
-    comissao_peca_pct: 2,
+    comissao_servico_pct: 0,
+    comissao_peca_pct: 0,
     ativo: true,
     is_auxiliar: false,
     user_id: '',
@@ -497,8 +497,8 @@ export default function OficinaProdutividade() {
                 cpf: '',
                 telefone: '',
                 chave_pix: '',
-                comissao_servico_pct: 10,
-                comissao_peca_pct: 2,
+                comissao_servico_pct: 0,
+                comissao_peca_pct: 0,
                 ativo: true,
                 is_auxiliar: false,
                 user_id: '',
@@ -863,7 +863,6 @@ export default function OficinaProdutividade() {
                 <tr className="bg-slate-950/70 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider text-[11px]">
                   <th className="px-4 py-3 text-center w-12">#</th>
                   <th className="px-4 py-3">Mecânico / Técnico</th>
-                  <th className="px-4 py-3 text-center">Taxas Com.</th>
                   <th className="px-4 py-3 text-right">Qtd OS</th>
                   <th className="px-4 py-3 text-right">Mão de Obra</th>
                   <th className="px-4 py-3 text-right">Peças</th>
@@ -879,13 +878,13 @@ export default function OficinaProdutividade() {
               <tbody className="divide-y divide-slate-800">
                 {loadingProdutividade ? (
                   <tr>
-                    <td colSpan={13} className="py-12 text-center text-slate-500">
+                    <td colSpan={12} className="py-12 text-center text-slate-500">
                       Calculando produtividade e apurando comissões…
                     </td>
                   </tr>
                 ) : !dadosProdutividade?.mecanicos.length ? (
                   <tr>
-                    <td colSpan={13} className="py-12 text-center text-slate-500">
+                    <td colSpan={12} className="py-12 text-center text-slate-500">
                       Nenhum mecânico com produção registrada no período selecionado.
                     </td>
                   </tr>
@@ -937,18 +936,6 @@ export default function OficinaProdutividade() {
                                 PIX: {m.chave_pix.slice(0, 14)}…
                               </span>
                             )}
-                          </div>
-                        </td>
-
-                        {/* Taxas */}
-                        <td className="px-4 py-3 text-center">
-                          <div className="inline-flex flex-col gap-0.5 items-center">
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-950/80 text-indigo-300 border border-indigo-800/80">
-                              M.O: {P(m.comissao_servico_pct)}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80">
-                              Peça: {P(m.comissao_peca_pct)}
-                            </span>
                           </div>
                         </td>
 
@@ -1295,8 +1282,8 @@ export default function OficinaProdutividade() {
                   cpf: '',
                   telefone: '',
                   chave_pix: '',
-                  comissao_servico_pct: 10,
-                  comissao_peca_pct: 2,
+                  comissao_servico_pct: 0,
+                  comissao_peca_pct: 0,
                   ativo: true,
                   is_auxiliar: false,
                   user_id: '',
@@ -1423,27 +1410,6 @@ export default function OficinaProdutividade() {
                       </div>
                     )}
                   </div>
-
-                  {/* Regras de Comissão */}
-                  <div className="grid grid-cols-2 gap-2 my-2">
-                    <div className="bg-indigo-950/40 border border-indigo-800/50 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] font-bold text-indigo-300 uppercase block">
-                        Comissão M.O.
-                      </span>
-                      <span className="text-base font-bold text-indigo-200 font-mono">
-                        {P(m.comissao_servico_pct)}
-                      </span>
-                    </div>
-
-                    <div className="bg-amber-950/40 border border-amber-800/50 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] font-bold text-amber-300 uppercase block">
-                        Comissão Peças
-                      </span>
-                      <span className="text-base font-bold text-amber-200 font-mono">
-                        {P(m.comissao_peca_pct)}
-                      </span>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Rodapé do Card */}
@@ -1458,8 +1424,8 @@ export default function OficinaProdutividade() {
                           cpf: m.cpf || '',
                           telefone: m.telefone || '',
                           chave_pix: m.chave_pix || '',
-                          comissao_servico_pct: m.comissao_servico_pct,
-                          comissao_peca_pct: m.comissao_peca_pct,
+                          comissao_servico_pct: 0,
+                          comissao_peca_pct: 0,
                           ativo: m.ativo,
                           is_auxiliar: Boolean(m.is_auxiliar),
                           user_id: m.user_id || '',
@@ -1594,63 +1560,6 @@ export default function OficinaProdutividade() {
                   placeholder="CPF, E-mail, Celular ou Chave Aleatória"
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-              </div>
-
-              <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800 space-y-3">
-                <p className="text-[11px] font-bold uppercase text-slate-400">
-                  Percentuais Padrão de Comissão
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-indigo-300 mb-1">
-                      Mão de Obra / Serviços (%)
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="100"
-                        value={mecanicoForm.comissao_servico_pct}
-                        onChange={(e) =>
-                          setMecanicoForm({
-                            ...mecanicoForm,
-                            comissao_servico_pct: parseFloat(e.target.value) || 0,
-                          })
-                        }
-                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                      <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">
-                        %
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-amber-300 mb-1">
-                      Peças Instaladas (%)
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="100"
-                        value={mecanicoForm.comissao_peca_pct}
-                        onChange={(e) =>
-                          setMecanicoForm({
-                            ...mecanicoForm,
-                            comissao_peca_pct: parseFloat(e.target.value) || 0,
-                          })
-                        }
-                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
-                      <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">
-                        %
-                      </span>
-                    </div>
-                  </div>
-                </div>
               </div>
 
               {/* Vínculo com Usuário do Sistema */}

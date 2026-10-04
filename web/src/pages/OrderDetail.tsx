@@ -1255,7 +1255,7 @@ export default function OrderDetail() {
                   </option>
                   {mecanicos.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.nome} {m.apelido ? `(${m.apelido})` : ''} — Serv: {m.comissao_servico_pct}% | Peça: {m.comissao_peca_pct}%
+                      {m.nome} {m.apelido ? `(${m.apelido})` : ''}
                     </option>
                   ))}
                 </select>
