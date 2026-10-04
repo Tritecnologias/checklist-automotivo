@@ -4,7 +4,7 @@ import type {
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
   ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
-  CurvaAbcResponse,
+  CurvaAbcResponse, ValorizacaoEstoqueResponse,
   Mecanico, MecanicoProdutividade, ExtratoItemComissao, ProdutividadeOficinaResponse, MecanicoPagamento,
   DreResponse, UsuarioSistema,
 } from '../types'
@@ -391,6 +391,14 @@ export const erpApi = {
     if (params?.sort) q.set('sort', params.sort)
     const qs = q.toString() ? `?${q}` : ''
     return adminRequest<CurvaAbcResponse>(`/erp/estoque/curva-abc${qs}`)
+  },
+
+  valorizacaoEstoque: (params?: { apenas_produtos?: string; fresh?: string }) => {
+    const q = new URLSearchParams()
+    if (params?.apenas_produtos) q.set('apenas_produtos', params.apenas_produtos)
+    if (params?.fresh) q.set('fresh', params.fresh)
+    const qs = q.toString() ? `?${q}` : ''
+    return adminRequest<ValorizacaoEstoqueResponse>(`/erp/estoque/valorizacao${qs}`)
   },
 
   clientes: (params: { search?: string; status?: 'ativos' | 'inativos' | 'todos'; page?: number }) => {

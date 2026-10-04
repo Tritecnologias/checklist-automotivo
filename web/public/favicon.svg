@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+    <linearGradient id="wrenchGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#94a3b8" />
+    </linearGradient>
+    <linearGradient id="checkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4ade80" />
+      <stop offset="100%" stop-color="#16a34a" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <!-- Fundo Squircle / App Icon Moderno -->
+  <rect width="64" height="64" rx="15" fill="url(#bgGrad)" />
+  <rect width="62" height="62" x="1" y="1" rx="14" fill="none" stroke="#38bdf8" stroke-width="1" stroke-opacity="0.3" />
+
+  <!-- Chave Automotiva estilizada (Wrench) em diagonal 45° -->
+  <g transform="translate(30, 30) rotate(-45)" filter="url(#glow)">
+    <!-- Haste da chave -->
+    <rect x="-3.5" y="-3" width="7" height="22" rx="3.5" fill="url(#wrenchGrad)" />
+    <!-- Cabeça da chave inglesa -->
+    <path d="M -7.5,-3 C -7.5,-7.5 -4.5,-10.5 0,-10.5 C 4.5,-10.5 7.5,-7.5 7.5,-3 C 7.5,-1.5 6.5,-0.5 5,-0.5 L 3,-4 L -3,-4 L -5,-0.5 C -6.5,-0.5 -7.5,-1.5 -7.5,-3 Z" fill="url(#wrenchGrad)" />
+    <!-- Base redonda -->
+    <circle cx="0" cy="19" r="4.5" fill="url(#wrenchGrad)" />
+    <circle cx="0" cy="19" r="2.2" fill="#0f172a" />
+  </g>
+
+  <!-- Badge de Checklist Aprovado (Círculo Verde com Check) no canto -->
+  <circle cx="46" cy="46" r="13" fill="#0b1329" />
+  <circle cx="46" cy="46" r="11" fill="url(#checkGrad)" filter="url(#glow)" />
+  <path
+    d="M 40.5 46.5 L 44.5 50.5 L 52 42"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

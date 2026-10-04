@@ -3904,6 +3904,203 @@ router.get('/estoque/curva-abc', requireManagerUp, async (req, res) => {
   }
 });
 
+// ── VALORIZAÇÃO FINANCEIRA DO ESTOQUE (INVENTÁRIO FÍSICO & FINANCEIRO) ───────
+router.get('/estoque/valorizacao', requireManagerUp, async (req, res) => {
+  try {
+    const tenantId = getErpWriteTenantId(req);
+    const apenasProdutos = req.query.apenas_produtos !== '0';
+    const serviceFilter = apenasProdutos ? 'AND (COALESCE(t.is_service, 0) = 0)' : '';
+
+    // Consulta todos os produtos ativos e saldos do tenant
+    const [rows] = await pool.query<any>(
+      `SELECT 
+         p.id,
+         p.nome_produto,
+         p.cod_barra,
+         p.unidade,
+         p.id_tipo,
+         COALESCE(t.nome_tipo, 'DIVERSOS') as tipo_nome,
+         COALESCE(t.is_service, 0) as is_service,
+         COALESCE(p.vr_compra, 0) as vr_compra,
+         COALESCE(p.vr_venda, 0) as vr_venda,
+         COALESCE(p.min_estoque, 0) as min_estoque,
+         COALESCE(p.controla_estoque, 1) as controla_estoque,
+         COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) as estoque
+       FROM cad_produtos p
+       LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
+       LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+       WHERE p.inativo = 0
+         ${serviceFilter}
+         AND (? = 1 OR pst.produto_id IS NOT NULL)
+       ORDER BY p.nome_produto ASC`,
+      [tenantId, tenantId, tenantId]
+    );
+
+    let totalProdutosCatalogo = rows.length;
+    let totalItensComSaldo = 0;
+    let totalUnidadesFisicas = 0;
+    let valorTotalCusto = 0;
+    let valorTotalVenda = 0;
+    let qtdZerados = 0;
+    let qtdBaixo = 0;
+    let qtdNormal = 0;
+    let qtdNegativo = 0;
+    let qtdInfinito = 0;
+    let qtdSemCusto = 0;
+
+    // Agrupamento por Categoria/Tipo
+    const categoriasMap = new Map<number, {
+      id_tipo: number;
+      nome_tipo: string;
+      total_produtos: number;
+      total_unidades: number;
+      valor_custo: number;
+      valor_venda: number;
+    }>();
+
+    const produtos = rows.map((r: any) => {
+      const id = Number(r.id);
+      const vrCusto = Number(r.vr_compra || 0);
+      const vrVenda = Number(r.vr_venda || 0);
+      const estoque = Number(r.estoque || 0);
+      const minEstoque = Number(r.min_estoque || 0);
+      const controlaEstoque = Boolean(Number(r.controla_estoque ?? 1));
+      const idTipo = r.id_tipo ? Number(r.id_tipo) : 0;
+      const tipoNome = r.tipo_nome || 'DIVERSOS';
+
+      // Classificação de status
+      let statusEstoque: 'zerado' | 'baixo' | 'normal' | 'negativo' | 'infinito' = 'normal';
+      if (!controlaEstoque) {
+        statusEstoque = 'infinito';
+        qtdInfinito++;
+      } else if (estoque < 0) {
+        statusEstoque = 'negativo';
+        qtdNegativo++;
+      } else if (estoque === 0) {
+        statusEstoque = 'zerado';
+        qtdZerados++;
+      } else if (estoque <= minEstoque) {
+        statusEstoque = 'baixo';
+        qtdBaixo++;
+      } else {
+        statusEstoque = 'normal';
+        qtdNormal++;
+      }
+
+      // Se possui estoque físico positivo, computa financeiro
+      const unidadesValidas = estoque > 0 ? estoque : 0;
+      const custoTotal = unidadesValidas * vrCusto;
+      const vendaTotal = unidadesValidas * vrVenda;
+      const lucroTotal = vendaTotal - custoTotal;
+
+      if (estoque > 0) {
+        totalItensComSaldo++;
+        totalUnidadesFisicas += estoque;
+        valorTotalCusto += custoTotal;
+        valorTotalVenda += vendaTotal;
+
+        if (vrCusto <= 0) {
+          qtdSemCusto++;
+        }
+      }
+
+      // Agrupamento da categoria
+      let cat = categoriasMap.get(idTipo);
+      if (!cat) {
+        cat = {
+          id_tipo: idTipo,
+          nome_tipo: tipoNome,
+          total_produtos: 0,
+          total_unidades: 0,
+          valor_custo: 0,
+          valor_venda: 0,
+        };
+        categoriasMap.set(idTipo, cat);
+      }
+      cat.total_produtos++;
+      if (estoque > 0) {
+        cat.total_unidades += estoque;
+        cat.valor_custo += custoTotal;
+        cat.valor_venda += vendaTotal;
+      }
+
+      const margemPct = vrVenda > 0 ? ((vrVenda - vrCusto) / vrVenda) * 100 : 0;
+      const markupPct = vrCusto > 0 ? ((vrVenda - vrCusto) / vrCusto) * 100 : 0;
+
+      return {
+        id,
+        nome_produto: r.nome_produto,
+        cod_barra: r.cod_barra ? String(r.cod_barra).trim() : null,
+        unidade: r.unidade || 'UN',
+        id_tipo: r.id_tipo,
+        tipo_nome: tipoNome,
+        is_service: Boolean(r.is_service),
+        estoque,
+        min_estoque: minEstoque,
+        controla_estoque: controlaEstoque,
+        vr_custo: vrCusto,
+        vr_venda: vrVenda,
+        valor_custo_total: Number(custoTotal.toFixed(2)),
+        valor_venda_total: Number(vendaTotal.toFixed(2)),
+        lucro_projetado: Number(lucroTotal.toFixed(2)),
+        margem_pct: Number(margemPct.toFixed(1)),
+        markup_pct: Number(markupPct.toFixed(1)),
+        status_estoque: statusEstoque,
+        alerta_sem_custo: estoque > 0 && vrCusto <= 0,
+      };
+    });
+
+    const lucroBrutoTotal = valorTotalVenda - valorTotalCusto;
+    const margemGeralPct = valorTotalVenda > 0 ? (lucroBrutoTotal / valorTotalVenda) * 100 : 0;
+    const markupGeralPct = valorTotalCusto > 0 ? (lucroBrutoTotal / valorTotalCusto) * 100 : 0;
+
+    // Lista de categorias ordenadas por maior valor de custo imobilizado
+    const categorias = Array.from(categoriasMap.values())
+      .map(c => {
+        const lucro = c.valor_venda - c.valor_custo;
+        const margem = c.valor_venda > 0 ? (lucro / c.valor_venda) * 100 : 0;
+        const shareCusto = valorTotalCusto > 0 ? (c.valor_custo / valorTotalCusto) * 100 : 0;
+        return {
+          id_tipo: c.id_tipo,
+          nome_tipo: c.nome_tipo,
+          total_produtos: c.total_produtos,
+          total_unidades: Number(c.total_unidades.toFixed(2)),
+          valor_custo: Number(c.valor_custo.toFixed(2)),
+          valor_venda: Number(c.valor_venda.toFixed(2)),
+          lucro_projetado: Number(lucro.toFixed(2)),
+          margem_pct: Number(margem.toFixed(1)),
+          share_custo_pct: Number(shareCusto.toFixed(1)),
+        };
+      })
+      .sort((a, b) => b.valor_custo - a.valor_custo);
+
+    res.json({
+      tenant_id: tenantId,
+      resumo: {
+        total_produtos_catalogo: totalProdutosCatalogo,
+        total_itens_com_saldo: totalItensComSaldo,
+        total_unidades_fisicas: Number(totalUnidadesFisicas.toFixed(2)),
+        valor_total_custo: Number(valorTotalCusto.toFixed(2)),
+        valor_total_venda: Number(valorTotalVenda.toFixed(2)),
+        lucro_bruto_projetado: Number(lucroBrutoTotal.toFixed(2)),
+        margem_lucro_pct: Number(margemGeralPct.toFixed(1)),
+        markup_medio_pct: Number(markupGeralPct.toFixed(1)),
+        qtd_zerados: qtdZerados,
+        qtd_baixo: qtdBaixo,
+        qtd_normal: qtdNormal,
+        qtd_negativo: qtdNegativo,
+        qtd_infinito: qtdInfinito,
+        qtd_sem_custo: qtdSemCusto,
+      },
+      categorias,
+      produtos,
+    });
+  } catch (err: any) {
+    console.error('[valorizacao-estoque] Erro:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao calcular valorização do estoque' });
+  }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ── OFICINA & PRODUTIVIDADE: MECÂNICOS E COMISSÕES ───────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════

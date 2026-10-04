@@ -681,6 +681,66 @@ export interface CurvaAbcResponse {
   produtos: ProdutoCurvaAbc[]
 }
 
+// ── Valorização Financeira de Estoque ─────────────────────────────────────────
+
+export interface ValorizacaoResumo {
+  total_produtos_catalogo: number
+  total_itens_com_saldo: number
+  total_unidades_fisicas: number
+  valor_total_custo: number
+  valor_total_venda: number
+  lucro_bruto_projetado: number
+  margem_lucro_pct: number
+  markup_medio_pct: number
+  qtd_zerados: number
+  qtd_baixo: number
+  qtd_normal: number
+  qtd_negativo: number
+  qtd_infinito: number
+  qtd_sem_custo: number
+}
+
+export interface ValorizacaoCategoria {
+  id_tipo: number
+  nome_tipo: string
+  total_produtos: number
+  total_unidades: number
+  valor_custo: number
+  valor_venda: number
+  lucro_projetado: number
+  margem_pct: number
+  share_custo_pct: number
+}
+
+export interface ValorizacaoProduto {
+  id: number
+  nome_produto: string
+  cod_barra: string | null
+  unidade: string
+  id_tipo: number | null
+  tipo_nome: string
+  is_service: boolean
+  estoque: number
+  min_estoque: number
+  controla_estoque: boolean
+  vr_custo: number
+  vr_venda: number
+  valor_custo_total: number
+  valor_venda_total: number
+  lucro_projetado: number
+  margem_pct: number
+  markup_pct: number
+  status_estoque: 'zerado' | 'baixo' | 'normal' | 'negativo' | 'infinito'
+  alerta_sem_custo: boolean
+}
+
+export interface ValorizacaoEstoqueResponse {
+  tenant_id: number
+  resumo: ValorizacaoResumo
+  categorias: ValorizacaoCategoria[]
+  produtos: ValorizacaoProduto[]
+}
+
 // ── Oficina & Produtividade (Mecânicos e Comissões) ─────────────────────────
 
 export interface Mecanico {

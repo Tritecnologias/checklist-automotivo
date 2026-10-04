@@ -30,6 +30,7 @@ import {
   HeartHandshake,
   BarChart3,
   PieChart,
+  DollarSign,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -47,6 +48,7 @@ const nav: NavItem[] = [
   { to: '/erp/caixa',        label: 'Caixa',            icon: Wallet },
   { to: '/erp/produtos',     label: 'Produtos',         icon: Tag,             roles: ['owner', 'manager'] },
   { to: '/erp/estoque',      label: 'Estoque',          icon: Boxes,           roles: ['owner', 'manager'] },
+  { to: '/erp/estoque/valorizacao', label: 'Valorização', icon: DollarSign,    roles: ['owner', 'manager'] },
   { to: '/erp/estoque/curva-abc', label: 'Curva ABC',   icon: BarChart3,       roles: ['owner', 'manager'] },
   { to: '/erp/oficina',      label: 'Oficina & Comissões', icon: Wrench,       roles: ['owner', 'manager'] },
   { to: '/erp/vendas',       label: 'Vendas',           icon: Receipt,         roles: ['owner', 'manager'] },
