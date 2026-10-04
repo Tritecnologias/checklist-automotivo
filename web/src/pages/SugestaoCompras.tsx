@@ -34,6 +34,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   HelpCircle,
+  History,
 } from 'lucide-react'
 
 const R = (v: number) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -353,6 +354,22 @@ export default function SugestaoCompras() {
           >
             <BarChart3 className="w-4 h-4 text-amber-400" />
             <span>Curva ABC</span>
+          </Link>
+
+          <Link
+            to="/erp/estoque/kardex"
+            className="px-3.5 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <History className="w-4 h-4 text-indigo-400" />
+            <span>Kardex</span>
+          </Link>
+
+          <Link
+            to="/erp/estoque"
+            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <Boxes className="w-4 h-4" />
+            <span>Estoque</span>
           </Link>
         </div>
       </div>

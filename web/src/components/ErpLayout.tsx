@@ -32,6 +32,7 @@ import {
   PieChart,
   DollarSign,
   ShoppingBag,
+  History,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -52,6 +53,7 @@ const nav: NavItem[] = [
   { to: '/erp/estoque/valorizacao', label: 'Valorização', icon: DollarSign,    roles: ['owner', 'manager'] },
   { to: '/erp/estoque/curva-abc', label: 'Curva ABC',   icon: BarChart3,       roles: ['owner', 'manager'] },
   { to: '/erp/estoque/sugestao-compras', label: 'Sugestão Compras', icon: ShoppingBag, roles: ['owner', 'manager'] },
+  { to: '/erp/estoque/kardex', label: 'Kardex Estoque', icon: History,         roles: ['owner', 'manager'] },
   { to: '/erp/oficina',      label: 'Oficina & Comissões', icon: Wrench,       roles: ['owner', 'manager'] },
   { to: '/erp/vendas',       label: 'Vendas',           icon: Receipt,         roles: ['owner', 'manager'] },
   { to: '/erp/contas',       label: 'Contas a Receber', icon: CircleDollarSign,roles: ['owner', 'manager'] },

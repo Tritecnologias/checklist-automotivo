@@ -2768,9 +2768,15 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
 router.patch('/estoque/:id/ajustar', requireManagerUp, async (req, res) => {
   const tenantId = getErpWriteTenantId(req);
   const prodId   = Number(req.params.id);
-  const { tipo, quantidade } = req.body as {
+  const user     = req.user as JwtPayload | undefined;
+  const userId   = user?.userId ?? null;
+  const userNome = user?.email ?? 'Usuário';
+
+  const { tipo, quantidade, motivo, documento_ref } = req.body as {
     tipo: 'entrada' | 'saida' | 'ajuste';
     quantidade: number;
+    motivo?: string;
+    documento_ref?: string;
   };
 
   if (!['entrada', 'saida', 'ajuste'].includes(tipo) || isNaN(quantidade) || quantidade < 0) {
@@ -2779,7 +2785,7 @@ router.patch('/estoque/:id/ajustar', requireManagerUp, async (req, res) => {
   }
 
   const [[row]] = await pool.query<any>(
-    `SELECT COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS saldo
+    `SELECT COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS saldo, p.nome_produto
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
      WHERE p.id = ?`,
@@ -2801,6 +2807,20 @@ router.patch('/estoque/:id/ajustar', requireManagerUp, async (req, res) => {
 
   if (tenantId === 1) {
     await pool.query('UPDATE cad_produtos SET estoque = ? WHERE id = ?', [novoSaldo, prodId]);
+  }
+
+  const deltaQtd = tipo === 'entrada' ? quantidade : (tipo === 'saida' ? -quantidade : (novoSaldo - atual));
+  const descMotivo = motivo?.trim() || (tipo === 'ajuste' ? 'Ajuste de inventário físico' : (tipo === 'entrada' ? 'Entrada manual no estoque' : 'Saída manual / baixa de estoque'));
+
+  try {
+    await pool.query(
+      `INSERT INTO estoque_movimentacoes 
+       (tenant_id, produto_id, tipo, origem, quantidade, saldo_anterior, saldo_posterior, documento_ref, motivo, user_id, user_nome)
+       VALUES (?, ?, ?, 'ajuste_manual', ?, ?, ?, ?, ?, ?, ?)`,
+      [tenantId, prodId, tipo, deltaQtd, atual, novoSaldo, documento_ref?.trim() || null, descMotivo, userId, userNome]
+    );
+  } catch (errMov) {
+    console.warn('[estoque_movimentacoes] Erro ao gravar histórico de ajuste:', errMov);
   }
 
   res.json({ estoque: novoSaldo });
@@ -4388,6 +4408,347 @@ router.get('/estoque/sugestao-compras', requireManagerUp, async (req, res) => {
   } catch (err: any) {
     console.error('[sugestao-compras] Erro:', err);
     res.status(500).json({ message: err?.message || 'Erro ao gerar sugestão de compras' });
+  }
+});
+
+// ── KARDEX DE ESTOQUE & EXTRATO DE MOVIMENTAÇÕES (RASTREAMENTO COMPLETO) ──────
+router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
+  try {
+    const tenantId = getErpWriteTenantId(req);
+    const produtoId = req.query.produto_id ? Number(req.query.produto_id) : null;
+    const tipoFiltro = String(req.query.tipo || 'todos'); // 'todos', 'entrada', 'saida', 'ajuste'
+    const origemFiltro = String(req.query.origem || 'todos'); // 'todos', 'ajuste_manual', 'ordem_servico', 'pdv_venda'
+    const search = String(req.query.search || '').trim().toLowerCase();
+    const page = Math.max(1, Number(req.query.page || 1));
+    const limit = Math.max(10, Math.min(200, Number(req.query.limit || 50)));
+    const offset = (page - 1) * limit;
+
+    // Definição do período de datas
+    let dataInicioIso = '';
+    let dataFimIso = '';
+
+    if (req.query.data_inicio && req.query.data_fim) {
+      dataInicioIso = String(req.query.data_inicio).slice(0, 10);
+      dataFimIso = String(req.query.data_fim).slice(0, 10);
+    } else {
+      const dias = Math.max(1, Math.min(730, Number(req.query.dias || 30)));
+      const agora = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const toIso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+      const inicio = new Date(agora);
+      inicio.setDate(inicio.getDate() - dias);
+      dataInicioIso = toIso(inicio);
+      dataFimIso = toIso(agora);
+    }
+
+    const dataInicioCompleta = `${dataInicioIso} 00:00:00`;
+    const dataFimCompleta = `${dataFimIso} 23:59:59`;
+
+    // 1. Dados do produto (se filtrado individualmente)
+    let produtoInfo: any = null;
+    if (produtoId) {
+      const [[pRow]] = await pool.query<any>(
+        `SELECT 
+           p.id,
+           p.nome_produto,
+           p.cod_barra,
+           p.unidade,
+           COALESCE(t.nome_tipo, 'DIVERSOS') as tipo_nome,
+           COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) as saldo_atual,
+           COALESCE(p.min_estoque, 0) as min_estoque,
+           COALESCE(p.vr_compra, 0) as vr_compra,
+           COALESCE(p.vr_venda, 0) as vr_venda,
+           COALESCE(p.controla_estoque, 1) as controla_estoque
+         FROM cad_produtos p
+         LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
+         LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+         WHERE p.id = ?`,
+        [tenantId, tenantId, produtoId]
+      );
+      if (pRow) {
+        produtoInfo = {
+          id: pRow.id,
+          nome_produto: pRow.nome_produto,
+          cod_barra: pRow.cod_barra,
+          unidade: pRow.unidade,
+          tipo_nome: pRow.tipo_nome,
+          saldo_atual: Number(pRow.saldo_atual || 0),
+          min_estoque: Number(pRow.min_estoque || 0),
+          vr_compra: Number(pRow.vr_compra || 0),
+          vr_venda: Number(pRow.vr_venda || 0),
+          controla_estoque: Boolean(pRow.controla_estoque),
+        };
+      }
+    }
+
+    // 2. Consulta unificada de movimentações:
+    // A) estoque_movimentacoes (Ajustes manuais e inventários)
+    // B) os_order_items + os_orders (Peças aplicadas em Ordens de Serviço)
+    // C) mv_vendas_movimento + mv_vendas (Vendas diretas de balcão / PDV)
+
+    const prodFilterEm = produtoId ? 'AND em.produto_id = ?' : '';
+    const prodFilterOi = produtoId ? 'AND oi.product_id = ?' : '';
+    const prodFilterM  = produtoId ? 'AND m.id_produto = ?' : '';
+
+    const paramsEm = [tenantId, dataInicioCompleta, dataFimCompleta];
+    if (produtoId) paramsEm.push(produtoId);
+
+    const paramsOi = [tenantId, dataInicioCompleta, dataFimCompleta];
+    if (produtoId) paramsOi.push(produtoId);
+
+    const paramsM = [tenantId, dataInicioIso, dataFimIso, tenantId];
+    if (produtoId) paramsM.push(produtoId);
+
+    const unionSql = `
+      SELECT 
+        CONCAT('EM-', em.id) as id,
+        em.created_at as data_hora,
+        em.produto_id,
+        p.nome_produto,
+        p.cod_barra,
+        COALESCE(p.unidade, 'UN') as unidade,
+        em.tipo,
+        em.origem,
+        em.quantidade,
+        em.saldo_anterior,
+        em.saldo_posterior,
+        em.documento_ref,
+        em.motivo,
+        em.user_nome as responsavel,
+        COALESCE(p.vr_compra, 0) as vr_unitario,
+        (ABS(em.quantidade) * COALESCE(p.vr_compra, 0)) as vr_total
+      FROM estoque_movimentacoes em
+      JOIN cad_produtos p ON p.id = em.produto_id
+      WHERE em.tenant_id = ?
+        AND em.created_at >= ? AND em.created_at <= ?
+        ${prodFilterEm}
+
+      UNION ALL
+
+      SELECT 
+        CONCAT('OS-', o.id, '-', oi.id) as id,
+        o.created_at as data_hora,
+        oi.product_id as produto_id,
+        p.nome_produto,
+        p.cod_barra,
+        COALESCE(p.unidade, 'UN') as unidade,
+        'saida' as tipo,
+        'ordem_servico' as origem,
+        (-1 * ABS(oi.quantity)) as quantidade,
+        0 as saldo_anterior,
+        0 as saldo_posterior,
+        CONCAT('OS #', o.id, IF(o.plate IS NOT NULL AND o.plate != '', CONCAT(' • Placa ', o.plate), ''), IF(o.model IS NOT NULL AND o.model != '', CONCAT(' (', o.model, ')'), '')) as documento_ref,
+        CONCAT('Aplicação em OS • Cliente: ', COALESCE(o.client_name, 'Consumidor')) as motivo,
+        COALESCE(o.client_name, 'Oficina') as responsavel,
+        COALESCE(oi.unit_price, p.vr_venda, 0) as vr_unitario,
+        (ABS(oi.quantity) * COALESCE(oi.unit_price, p.vr_venda, 0)) as vr_total
+      FROM os_order_items oi
+      JOIN os_orders o ON o.id = oi.order_id
+      JOIN cad_produtos p ON p.id = oi.product_id
+      WHERE o.tenant_id = ?
+        AND o.created_at >= ? AND o.created_at <= ?
+        AND oi.product_id IS NOT NULL
+        AND (oi.type = 'part' OR oi.type IS NULL)
+        ${prodFilterOi}
+
+      UNION ALL
+
+      SELECT 
+        CONCAT('PDV-', v.controle, '-', m.id) as id,
+        CONCAT(v.data_venda, ' 12:00:00') as data_hora,
+        m.id_produto as produto_id,
+        p.nome_produto,
+        p.cod_barra,
+        COALESCE(p.unidade, 'UN') as unidade,
+        'saida' as tipo,
+        'pdv_venda' as origem,
+        (-1 * ABS(m.quant)) as quantidade,
+        0 as saldo_anterior,
+        0 as saldo_posterior,
+        CONCAT('Venda PDV #', v.controle) as documento_ref,
+        CONCAT('Venda Balcão • Cliente: ', COALESCE(c.nome_cliente, 'Consumidor')) as motivo,
+        COALESCE(c.nome_cliente, 'Vendedor') as responsavel,
+        COALESCE(m.valor, p.vr_venda, 0) as vr_unitario,
+        (ABS(m.quant) * COALESCE(m.valor, p.vr_venda, 0)) as vr_total
+      FROM mv_vendas_movimento m
+      JOIN mv_vendas v ON v.controle = m.controle
+      LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+      JOIN cad_produtos p ON p.id = m.id_produto
+      WHERE v.tenant_id = ?
+        AND v.data_venda >= ? AND v.data_venda <= ?
+        AND NOT EXISTS (SELECT 1 FROM os_orders o WHERE o.venda_controle = v.controle AND o.tenant_id = ?)
+        ${prodFilterM}
+
+      ORDER BY data_hora DESC
+    `;
+
+    const allParams = [...paramsEm, ...paramsOi, ...paramsM];
+    const [allRows] = await pool.query<any>(unionSql, allParams);
+
+    // Formata e aplica filtros rápidos
+    let filtered = (allRows || []).map((r: any) => ({
+      id: String(r.id),
+      data_hora: r.data_hora instanceof Date ? r.data_hora.toISOString() : String(r.data_hora),
+      produto_id: Number(r.produto_id),
+      nome_produto: String(r.nome_produto || ''),
+      cod_barra: r.cod_barra ? String(r.cod_barra) : null,
+      unidade: String(r.unidade || 'UN'),
+      tipo: r.tipo as 'entrada' | 'saida' | 'ajuste',
+      origem: r.origem as 'ajuste_manual' | 'ordem_servico' | 'pdv_venda' | 'inventario',
+      quantidade: Number(r.quantidade),
+      saldo_anterior: Number(r.saldo_anterior || 0),
+      saldo_posterior: Number(r.saldo_posterior || 0),
+      documento_ref: r.documento_ref ? String(r.documento_ref) : null,
+      motivo: r.motivo ? String(r.motivo) : null,
+      responsavel: r.responsavel ? String(r.responsavel) : null,
+      vr_unitario: Number(r.vr_unitario || 0),
+      vr_total: Number(r.vr_total || 0),
+    }));
+
+    if (tipoFiltro !== 'todos') {
+      filtered = filtered.filter((item: any) => item.tipo === tipoFiltro);
+    }
+
+    if (origemFiltro !== 'todos') {
+      filtered = filtered.filter((item: any) => item.origem === origemFiltro);
+    }
+
+    if (search) {
+      filtered = filtered.filter((item: any) =>
+        item.nome_produto.toLowerCase().includes(search) ||
+        (item.cod_barra && item.cod_barra.toLowerCase().includes(search)) ||
+        (item.documento_ref && item.documento_ref.toLowerCase().includes(search)) ||
+        (item.motivo && item.motivo.toLowerCase().includes(search)) ||
+        (item.responsavel && item.responsavel.toLowerCase().includes(search))
+      );
+    }
+
+    // Totais e KPIs do período
+    let totalEntradasQtd = 0;
+    let totalSaidasQtd = 0;
+    let totalAjustesQtd = 0;
+    let valorTotalSaidas = 0;
+    const prodsDistintos = new Set<number>();
+
+    for (const item of filtered) {
+      prodsDistintos.add(item.produto_id);
+      if (item.tipo === 'entrada') {
+        totalEntradasQtd += Math.abs(item.quantidade);
+      } else if (item.tipo === 'saida') {
+        totalSaidasQtd += Math.abs(item.quantidade);
+        valorTotalSaidas += item.vr_total;
+      } else if (item.tipo === 'ajuste') {
+        totalAjustesQtd += 1;
+      }
+    }
+
+    const saldoLiquidoPeriodo = totalEntradasQtd - totalSaidasQtd;
+    const totalRegistros = filtered.length;
+
+    // Paginação
+    const paginados = filtered.slice(offset, offset + limit);
+
+    res.json({
+      tenant_id: tenantId,
+      periodo: {
+        data_inicio: dataInicioIso,
+        data_fim: dataFimIso,
+      },
+      resumo: {
+        total_movimentacoes: totalRegistros,
+        total_entradas_qtd: Number(totalEntradasQtd.toFixed(2)),
+        total_saidas_qtd: Number(totalSaidasQtd.toFixed(2)),
+        total_ajustes_qtd: totalAjustesQtd,
+        saldo_liquido_periodo: Number(saldoLiquidoPeriodo.toFixed(2)),
+        valor_total_saidas: Number(valorTotalSaidas.toFixed(2)),
+        produtos_distintos_movimentados: prodsDistintos.size,
+      },
+      produto: produtoInfo,
+      movimentacoes: paginados,
+      total_registros: totalRegistros,
+      pagina: page,
+      limite: limit,
+      total_paginas: Math.ceil(totalRegistros / limit) || 1,
+    });
+  } catch (err: any) {
+    console.error('[kardex] Erro:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao consultar Kardex de estoque' });
+  }
+});
+
+// ── REGISTRO RÁPIDO DE MOVIMENTAÇÃO (ENTRADA, SAÍDA OU AJUSTE DE INVENTÁRIO) ──
+router.post('/estoque/movimentacao', requireManagerUp, async (req, res) => {
+  try {
+    const tenantId = getErpWriteTenantId(req);
+    const user     = req.user as JwtPayload | undefined;
+    const userId   = user?.userId ?? null;
+    const userNome = user?.email ?? 'Usuário';
+
+    const { produto_id, tipo, quantidade, motivo, documento_ref } = req.body as {
+      produto_id: number;
+      tipo: 'entrada' | 'saida' | 'ajuste';
+      quantidade: number;
+      motivo?: string;
+      documento_ref?: string;
+    };
+
+    const prodId = Number(produto_id);
+    const qtdNum = Number(quantidade);
+
+    if (!prodId || !['entrada', 'saida', 'ajuste'].includes(tipo) || isNaN(qtdNum) || qtdNum <= 0) {
+      res.status(400).json({ message: 'Dados inválidos para registrar movimentação.' });
+      return;
+    }
+
+    const [[pRow]] = await pool.query<any>(
+      `SELECT COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS saldo, p.nome_produto
+       FROM cad_produtos p
+       LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+       WHERE p.id = ?`,
+      [tenantId, tenantId, prodId]
+    );
+    if (!pRow) {
+      res.status(404).json({ message: 'Produto não encontrado.' });
+      return;
+    }
+
+    const atual = Number(pRow.saldo || 0);
+    const novoSaldo =
+      tipo === 'ajuste'  ? qtdNum :
+      tipo === 'entrada' ? atual + qtdNum :
+      Math.max(0, atual - qtdNum);
+
+    await pool.query(
+      `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)`,
+      [prodId, tenantId, novoSaldo]
+    );
+
+    if (tenantId === 1) {
+      await pool.query('UPDATE cad_produtos SET estoque = ? WHERE id = ?', [novoSaldo, prodId]);
+    }
+
+    const deltaQtd = tipo === 'entrada' ? qtdNum : (tipo === 'saida' ? -qtdNum : (novoSaldo - atual));
+    const descMotivo = motivo?.trim() || (tipo === 'ajuste' ? 'Ajuste de inventário físico' : (tipo === 'entrada' ? 'Entrada avulsa / compra' : 'Saída avulsa / baixa'));
+
+    await pool.query(
+      `INSERT INTO estoque_movimentacoes 
+       (tenant_id, produto_id, tipo, origem, quantidade, saldo_anterior, saldo_posterior, documento_ref, motivo, user_id, user_nome)
+       VALUES (?, ?, ?, 'ajuste_manual', ?, ?, ?, ?, ?, ?, ?)`,
+      [tenantId, prodId, tipo, deltaQtd, atual, novoSaldo, documento_ref?.trim() || null, descMotivo, userId, userNome]
+    );
+
+    res.json({
+      success: true,
+      produto_id: prodId,
+      saldo_anterior: atual,
+      novo_saldo: novoSaldo,
+      mensagem: 'Movimentação gravada com sucesso.',
+    });
+  } catch (err: any) {
+    console.error('[movimentacao] Erro:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao registrar movimentação de estoque' });
   }
 });
 

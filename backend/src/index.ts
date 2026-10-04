@@ -360,6 +360,27 @@ async function runMigrations() {
     `);
   }
 
+  // Tabela de histórico e auditoria de movimentações de estoque (Kardex)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`estoque_movimentacoes\` (
+      \`id\`               INT AUTO_INCREMENT PRIMARY KEY,
+      \`tenant_id\`        INT NOT NULL,
+      \`produto_id\`       INT NOT NULL,
+      \`tipo\`             ENUM('entrada', 'saida', 'ajuste') NOT NULL,
+      \`origem\`           VARCHAR(50) NOT NULL DEFAULT 'ajuste_manual',
+      \`quantidade\`       DECIMAL(10,2) NOT NULL,
+      \`saldo_anterior\`   DECIMAL(10,2) NOT NULL DEFAULT 0,
+      \`saldo_posterior\`  DECIMAL(10,2) NOT NULL DEFAULT 0,
+      \`documento_ref\`    VARCHAR(100) NULL,
+      \`motivo\`           VARCHAR(255) NULL,
+      \`user_id\`          INT NULL,
+      \`user_nome\`        VARCHAR(100) NULL,
+      \`created_at\`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX \`idx_est_mov_tenant_prod\` (\`tenant_id\`, \`produto_id\`, \`created_at\`),
+      INDEX \`idx_est_mov_tenant_data\` (\`tenant_id\`, \`created_at\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
   // controla_estoque em cad_produtos (1 = controla, 0 = não controla / estoque infinito)
   const [[{ cntControlaEstoque }]] = await pool.query<any>(
     `SELECT COUNT(*) as cntControlaEstoque FROM information_schema.COLUMNS

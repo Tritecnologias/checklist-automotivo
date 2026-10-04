@@ -1030,5 +1030,65 @@ export interface DreResponse {
   detalhes_categorias: Record<string, DreCategoriaDetalhes>
 }
 
+// ── Kardex de Estoque e Rastreabilidade ──────────────────────────────────────
 
+export type KardexTipo = 'entrada' | 'saida' | 'ajuste'
+export type KardexOrigem = 'ajuste_manual' | 'ordem_servico' | 'pdv_venda' | 'inventario' | 'entrada_nota' | 'outros'
 
+export interface KardexMovimentacao {
+  id: string
+  data_hora: string
+  produto_id: number
+  nome_produto: string
+  cod_barra: string | null
+  unidade: string
+  tipo: KardexTipo
+  origem: KardexOrigem
+  quantidade: number
+  saldo_anterior: number
+  saldo_posterior: number
+  documento_ref: string | null
+  motivo: string | null
+  responsavel: string | null
+  vr_unitario: number
+  vr_total: number
+}
+
+export interface KardexResumo {
+  total_movimentacoes: number
+  total_entradas_qtd: number
+  total_saidas_qtd: number
+  total_ajustes_qtd: number
+  saldo_liquido_periodo: number
+  valor_total_saidas: number
+  produtos_distintos_movimentados: number
+}
+
+export interface KardexProdutoInfo {
+  id: number
+  nome_produto: string
+  cod_barra: string | null
+  unidade: string
+  tipo_nome: string
+  saldo_atual: number
+  min_estoque: number
+  vr_compra: number
+  vr_venda: number
+  controla_estoque: boolean
+}
+
+export interface KardexResponse {
+  tenant_id: number
+  periodo: {
+    data_inicio: string
+    data_fim: string
+    dias?: number
+  }
+  resumo: KardexResumo
+  produto?: KardexProdutoInfo | null
+  movimentacoes: KardexMovimentacao[]
+  total_registros: number
+  pagina: number
+  limite: number
+  total_paginas: number
+}

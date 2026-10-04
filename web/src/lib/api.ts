@@ -4,7 +4,7 @@ import type {
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
   ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
-  CurvaAbcResponse, ValorizacaoEstoqueResponse, SugestaoComprasResponse,
+  CurvaAbcResponse, ValorizacaoEstoqueResponse, SugestaoComprasResponse, KardexResponse,
   Mecanico, MecanicoProdutividade, ExtratoItemComissao, ProdutividadeOficinaResponse, MecanicoPagamento,
   DreResponse, UsuarioSistema,
 } from '../types'
@@ -420,6 +420,46 @@ export const erpApi = {
     return adminRequest<SugestaoComprasResponse>(`/erp/estoque/sugestao-compras${qs}`)
   },
 
+  kardexEstoque: (params?: {
+    produto_id?: number
+    tipo?: string
+    origem?: string
+    dias?: number
+    data_inicio?: string
+    data_fim?: string
+    search?: string
+    page?: number
+    limit?: number
+  }) => {
+    const q = new URLSearchParams()
+    if (params?.produto_id) q.set('produto_id', String(params.produto_id))
+    if (params?.tipo) q.set('tipo', params.tipo)
+    if (params?.origem) q.set('origem', params.origem)
+    if (params?.dias) q.set('dias', String(params.dias))
+    if (params?.data_inicio) q.set('data_inicio', params.data_inicio)
+    if (params?.data_fim) q.set('data_fim', params.data_fim)
+    if (params?.search) q.set('search', params.search)
+    if (params?.page) q.set('page', String(params.page))
+    if (params?.limit) q.set('limit', String(params.limit))
+    const qs = q.toString() ? `?${q}` : ''
+    return adminRequest<KardexResponse>(`/erp/estoque/kardex${qs}`)
+  },
+
+  registrarMovimentacaoEstoque: (data: {
+    produto_id: number
+    tipo: 'entrada' | 'saida' | 'ajuste'
+    quantidade: number
+    motivo?: string
+    documento_ref?: string
+  }) =>
+    adminRequest<{ success: boolean; novo_saldo: number; mensagem: string }>(
+      '/erp/estoque/movimentacao',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    ),
+
   clientes: (params: { search?: string; status?: 'ativos' | 'inativos' | 'todos'; page?: number }) => {
     const q = new URLSearchParams()
     if (params.search) q.set('search', params.search)
@@ -489,10 +529,16 @@ export const erpApi = {
     if (params.page)   q.set('page',   String(params.page))
     return adminRequest<{ data: ProdutoEstoque[]; total: number; pages: number }>(`/erp/estoque?${q}`)
   },
-  ajustarEstoque: (id: number, tipo: 'entrada' | 'saida' | 'ajuste', quantidade: number) =>
+  ajustarEstoque: (
+    id: number,
+    tipo: 'entrada' | 'saida' | 'ajuste',
+    quantidade: number,
+    motivo?: string,
+    documento_ref?: string
+  ) =>
     adminRequest<{ estoque: number }>(`/erp/estoque/${id}/ajustar`, {
       method: 'PATCH',
-      body: JSON.stringify({ tipo, quantidade }),
+      body: JSON.stringify({ tipo, quantidade, motivo, documento_ref }),
     }),
   getDre: (params?: {
     data_inicio?: string
@@ -549,10 +595,16 @@ export const adminApi = {
     adminRequest(`/admin/products/${id}/toggle`, { method: 'PATCH' }),
   deleteProduct: (id: number) =>
     adminRequest(`/admin/products/${id}`, { method: 'DELETE' }),
-  ajustarEstoque: (id: number, tipo: 'entrada' | 'saida' | 'ajuste', quantidade: number) =>
+  ajustarEstoque: (
+    id: number,
+    tipo: 'entrada' | 'saida' | 'ajuste',
+    quantidade: number,
+    motivo?: string,
+    documento_ref?: string
+  ) =>
     adminRequest<{ estoque: number }>(`/admin/products/${id}/estoque`, {
       method: 'PATCH',
-      body: JSON.stringify({ tipo, quantidade }),
+      body: JSON.stringify({ tipo, quantidade, motivo, documento_ref }),
     }),
 
   listClients: (search: string, page: number) =>

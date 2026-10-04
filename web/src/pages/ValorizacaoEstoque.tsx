@@ -29,6 +29,7 @@ import {
   Tag,
   Info,
   ShoppingBag,
+  History,
 } from 'lucide-react'
 
 const R = (v: number) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -288,6 +289,14 @@ export default function ValorizacaoEstoque() {
           >
             <BarChart3 className="w-4 h-4 text-amber-400" />
             <span>Curva ABC & Giro</span>
+          </Link>
+
+          <Link
+            to="/erp/estoque/kardex"
+            className="px-3.5 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <History className="w-4 h-4 text-indigo-400" />
+            <span>Kardex</span>
           </Link>
 
           <Link

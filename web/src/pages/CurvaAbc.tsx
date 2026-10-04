@@ -25,6 +25,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ShoppingBag,
+  History,
 } from 'lucide-react'
 
 const R = (v: number) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -191,6 +192,13 @@ export default function CurvaAbc() {
           >
             <ShoppingBag className="w-4 h-4 text-blue-400" />
             <span>Sugestão de Compras</span>
+          </Link>
+          <Link
+            to="/erp/estoque/kardex"
+            className="px-3 py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-medium flex items-center gap-1.5 transition-colors shadow-sm"
+          >
+            <History className="w-4 h-4 text-indigo-400" />
+            <span>Kardex</span>
           </Link>
           <Link
             to="/erp/estoque"
