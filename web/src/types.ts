@@ -741,6 +741,73 @@ export interface ValorizacaoEstoqueResponse {
   produtos: ValorizacaoProduto[]
 }
 
+// ── Sugestão de Compras e Ponto de Reposição ──────────────────────────────────
+
+export interface SugestaoComprasParametros {
+  periodo_dias: number
+  dias_cobertura: number
+  data_inicio: string
+  data_fim: string
+}
+
+export interface SugestaoComprasResumo {
+  total_itens_comprar: number
+  total_unidades_comprar: number
+  investimento_total_estimado: number
+  itens_criticos_urgentes: number
+  itens_sem_fornecedor: number
+  total_fornecedores_acionar: number
+}
+
+export interface SugestaoComprasFornecedor {
+  id_fornecedor: number
+  nome_fornecedor: string
+  telefone: string | null
+  email: string | null
+  contato: string | null
+  total_itens: number
+  total_unidades: number
+  valor_total: number
+}
+
+export interface SugestaoComprasProduto {
+  id: number
+  nome_produto: string
+  cod_barra: string | null
+  unidade: string
+  id_tipo: number | null
+  tipo_nome: string
+  is_service: boolean
+  estoque: number
+  min_estoque: number
+  controla_estoque: boolean
+  vr_custo: number
+  vr_venda: number
+  qtd_consumo_periodo: number
+  qtd_vendas_periodo: number
+  qtd_os_periodo: number
+  consumo_diario: number
+  dias_duracao_estoque: number
+  ponto_reposicao: number
+  sugestao_qtd: number
+  custo_estimado_total: number
+  precisa_comprar: boolean
+  status_reposicao: 'urgente' | 'critico' | 'atencao' | 'planejado' | 'seguro'
+  id_fornecedor: number | null
+  nome_fornecedor: string
+  fornecedor_telefone: string | null
+  fornecedor_email: string | null
+  fornecedor_contato: string | null
+}
+
+export interface SugestaoComprasResponse {
+  tenant_id: number
+  parametros: SugestaoComprasParametros
+  resumo: SugestaoComprasResumo
+  fornecedores: SugestaoComprasFornecedor[]
+  produtos: SugestaoComprasProduto[]
+}
+
 // ── Oficina & Produtividade (Mecânicos e Comissões) ─────────────────────────
 
 export interface Mecanico {

@@ -5,7 +5,7 @@ import { erpApi } from '../lib/api'
 import type { ProdutoEstoque } from '../types'
 import Modal from '../components/Modal'
 import { useAuth } from '../contexts/AuthContext'
-import { Boxes, Tag, BarChart3, DollarSign } from 'lucide-react'
+import { Boxes, Tag, BarChart3, DollarSign, ShoppingBag } from 'lucide-react'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -207,6 +207,13 @@ export default function Estoque() {
           >
             <BarChart3 className="w-4 h-4 shrink-0 text-amber-400" />
             <span>Curva ABC & Giro</span>
+          </Link>
+          <Link
+            to="/erp/estoque/sugestao-compras"
+            className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <ShoppingBag className="w-4 h-4 shrink-0 text-blue-400" />
+            <span>Sugestão de Compras</span>
           </Link>
           <Link
             to="/erp/produtos"

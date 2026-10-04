@@ -32,6 +32,7 @@ import RelatorioMultiLojas from './pages/RelatorioMultiLojas'
 import CrmManutencoes from './pages/CrmManutencoes'
 import CurvaAbc from './pages/CurvaAbc'
 import ValorizacaoEstoque from './pages/ValorizacaoEstoque'
+import SugestaoCompras from './pages/SugestaoCompras'
 import OficinaProdutividade from './pages/OficinaProdutividade'
 import DreGerencial from './pages/DreGerencial'
 
@@ -61,6 +62,8 @@ export default function App() {
               <Route path="/erp/estoque"      element={<Estoque />} />
               <Route path="/erp/estoque/valorizacao" element={<ValorizacaoEstoque />} />
               <Route path="/erp/valorizacao"  element={<Navigate to="/erp/estoque/valorizacao" replace />} />
+              <Route path="/erp/estoque/sugestao-compras" element={<SugestaoCompras />} />
+              <Route path="/erp/compras"      element={<Navigate to="/erp/estoque/sugestao-compras" replace />} />
               <Route path="/erp/estoque/curva-abc" element={<CurvaAbc />} />
               <Route path="/erp/curva-abc"    element={<Navigate to="/erp/estoque/curva-abc" replace />} />
               <Route path="/erp/oficina"      element={<OficinaProdutividade />} />

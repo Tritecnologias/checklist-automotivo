@@ -4101,6 +4101,296 @@ router.get('/estoque/valorizacao', requireManagerUp, async (req, res) => {
   }
 });
 
+// ── SUGESTÃO DE COMPRAS E PONTO DE REPOSIÇÃO POR FORNECEDOR ─────────────────
+router.get('/estoque/sugestao-compras', requireManagerUp, async (req, res) => {
+  try {
+    const tenantId = getErpWriteTenantId(req);
+
+    // Parâmetros de análise
+    const periodoDias = Math.max(7, Math.min(180, Number(req.query.periodo_dias) || 30));
+    const diasCobertura = Math.max(7, Math.min(180, Number(req.query.dias_cobertura) || 30));
+    const apenasProdutos = req.query.apenas_produtos !== '0';
+
+    const agora = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const toIso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    const inicioDate = new Date(agora);
+    inicioDate.setDate(inicioDate.getDate() - periodoDias);
+    const dataInicioIso = toIso(inicioDate);
+    const dataFimIso = toIso(agora);
+
+    // 1. Consulta consumo em Vendas (PDV / Balcão) no período
+    const [vendasRows] = await pool.query<any>(
+      `SELECT 
+         m.id_produto,
+         SUM(m.quant) as qtd_vendida
+       FROM mv_vendas v
+       JOIN mv_vendas_movimento m ON m.controle = v.controle
+       WHERE v.tenant_id = ?
+         AND v.data_venda >= ? AND v.data_venda <= ?
+       GROUP BY m.id_produto`,
+      [tenantId, dataInicioIso, dataFimIso]
+    );
+
+    // 2. Consulta consumo em Ordens de Serviço (peças aplicadas nas OSs) no período
+    let osRows: any[] = [];
+    try {
+      const [rows] = await pool.query<any>(
+        `SELECT 
+           oi.product_id as id_produto,
+           SUM(oi.quantity) as qtd_aplicada
+         FROM os_orders o
+         JOIN os_order_items oi ON oi.order_id = o.id
+         WHERE o.tenant_id = ?
+           AND o.created_at >= ?
+           AND o.status IN ('in_progress', 'closed')
+         GROUP BY oi.product_id`,
+        [tenantId, `${dataInicioIso} 00:00:00`]
+      );
+      osRows = rows;
+    } catch {
+      osRows = [];
+    }
+
+    // Mapa consolidado de consumo
+    const consumoMap = new Map<number, { qtdVendas: number; qtdOs: number; qtdTotal: number }>();
+
+    for (const r of vendasRows) {
+      const id = Number(r.id_produto);
+      const q = Number(r.qtd_vendida || 0);
+      consumoMap.set(id, { qtdVendas: q, qtdOs: 0, qtdTotal: q });
+    }
+
+    for (const r of osRows) {
+      const id = Number(r.id_produto);
+      const q = Number(r.qtd_aplicada || 0);
+      const prev = consumoMap.get(id);
+      if (prev) {
+        prev.qtdOs += q;
+        prev.qtdTotal += q;
+      } else {
+        consumoMap.set(id, { qtdVendas: 0, qtdOs: q, qtdTotal: q });
+      }
+    }
+
+    // 3. Consulta produtos, saldo do tenant, categorias e fornecedores preferenciais
+    const serviceFilter = apenasProdutos ? 'AND (COALESCE(t.is_service, 0) = 0)' : '';
+
+    const [produtosRows] = await pool.query<any>(
+      `SELECT 
+         p.id,
+         p.nome_produto,
+         p.cod_barra,
+         p.unidade,
+         p.id_tipo,
+         COALESCE(t.nome_tipo, 'DIVERSOS') as tipo_nome,
+         COALESCE(t.is_service, 0) as is_service,
+         COALESCE(p.vr_compra, 0) as vr_compra,
+         COALESCE(p.vr_venda, 0) as vr_venda,
+         COALESCE(p.min_estoque, 0) as min_estoque,
+         COALESCE(p.controla_estoque, 1) as controla_estoque,
+         COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) as estoque,
+         forn.id_fornecedor,
+         COALESCE(forn.nome_fornecedor, 'SEM FORNECEDOR VINCULADO') as nome_fornecedor,
+         forn.telefone as fornecedor_telefone,
+         forn.email as fornecedor_email,
+         forn.contato as fornecedor_contato
+       FROM cad_produtos p
+       LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
+       LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+       LEFT JOIN (
+         SELECT 
+           pf.id_produto,
+           f.id as id_fornecedor,
+           f.nome_fornecedor,
+           f.telefone,
+           f.email,
+           f.contato
+         FROM cad_produtos_fornecedores pf
+         JOIN cad_fornecedores f ON f.id = pf.id_fornecedor
+         WHERE COALESCE(f.inativo, 0) = 0
+       ) forn ON forn.id_produto = p.id
+       WHERE p.inativo = 0
+         ${serviceFilter}
+         AND (? = 1 OR pst.produto_id IS NOT NULL)`,
+      [tenantId, tenantId, tenantId]
+    );
+
+    // 4. Processamento dos Itens e Cálculo de Sugestão
+    let totalItensComprar = 0;
+    let totalUnidadesComprar = 0;
+    let investimentoTotalEstimado = 0;
+    let itensCriticosUrgentes = 0;
+    let itensSemFornecedor = 0;
+
+    const fornecedoresMap = new Map<number, {
+      id_fornecedor: number;
+      nome_fornecedor: string;
+      telefone: string | null;
+      email: string | null;
+      contato: string | null;
+      total_itens: number;
+      total_unidades: number;
+      valor_total: number;
+    }>();
+
+    const produtosCalculados = produtosRows.map((p: any) => {
+      const id = Number(p.id);
+      const vrCompra = Number(p.vr_compra || 0);
+      const vrVenda = Number(p.vr_venda || 0);
+      const estoque = Number(p.estoque || 0);
+      const minEstoque = Number(p.min_estoque || 0);
+      const controlaEstoque = Boolean(Number(p.controla_estoque ?? 1));
+
+      const consumo = consumoMap.get(id) || { qtdVendas: 0, qtdOs: 0, qtdTotal: 0 };
+      const consumoDiario = consumo.qtdTotal / periodoDias;
+      const demandaCobertura = consumoDiario * diasCobertura;
+
+      // Ponto de reposição
+      const pontoReposicao = minEstoque > 0 ? minEstoque : Math.ceil(consumoDiario * 7);
+
+      // Quantidade sugerida para atingir a cobertura + estoque de segurança
+      let sugestaoQtd = 0;
+      if (controlaEstoque) {
+        if (estoque <= 0) {
+          const deficit = Math.abs(Math.min(0, estoque));
+          const alvo = demandaCobertura > 0 ? Math.ceil(demandaCobertura + pontoReposicao) : (minEstoque > 0 ? minEstoque : 1);
+          sugestaoQtd = alvo + deficit;
+        } else if (estoque <= pontoReposicao || estoque < demandaCobertura) {
+          const alvo = Math.ceil(demandaCobertura + (minEstoque > 0 ? minEstoque : 0));
+          if (alvo > estoque) {
+            sugestaoQtd = alvo - estoque;
+          }
+        }
+      }
+
+      // Previsão de dias de duração do estoque atual
+      let diasDuracaoEstoque = 999;
+      if (estoque <= 0) {
+        diasDuracaoEstoque = 0;
+      } else if (consumoDiario > 0) {
+        diasDuracaoEstoque = Math.floor(estoque / consumoDiario);
+      }
+
+      // Classificação do status de reposição
+      let statusReposicao: 'urgente' | 'critico' | 'atencao' | 'planejado' | 'seguro' = 'seguro';
+      if (!controlaEstoque) {
+        statusReposicao = 'seguro';
+        sugestaoQtd = 0;
+      } else if (estoque <= 0 && consumo.qtdTotal > 0) {
+        statusReposicao = 'urgente'; // Vendeu recentemente e está zerado!
+      } else if (estoque <= 0) {
+        statusReposicao = 'critico'; // Zerado
+      } else if (estoque <= minEstoque) {
+        statusReposicao = 'atencao'; // Abaixo do mínimo
+      } else if (diasDuracaoEstoque <= diasCobertura) {
+        statusReposicao = 'planejado'; // Vai acabar antes do fim da cobertura
+      } else {
+        statusReposicao = 'seguro';
+      }
+
+      const precisaComprar = sugestaoQtd > 0;
+      const custoEstimadoTotal = Number((sugestaoQtd * vrCompra).toFixed(2));
+
+      const idForn = p.id_fornecedor ? Number(p.id_fornecedor) : 0;
+      const nomeForn = p.nome_fornecedor || 'SEM FORNECEDOR VINCULADO';
+
+      if (precisaComprar) {
+        totalItensComprar++;
+        totalUnidadesComprar += sugestaoQtd;
+        investimentoTotalEstimado += custoEstimadoTotal;
+
+        if (statusReposicao === 'urgente' || statusReposicao === 'critico') {
+          itensCriticosUrgentes++;
+        }
+        if (!p.id_fornecedor) {
+          itensSemFornecedor++;
+        }
+
+        // Agrupamento no mapa de fornecedores
+        let f = fornecedoresMap.get(idForn);
+        if (!f) {
+          f = {
+            id_fornecedor: idForn,
+            nome_fornecedor: nomeForn,
+            telefone: p.fornecedor_telefone || null,
+            email: p.fornecedor_email || null,
+            contato: p.fornecedor_contato || null,
+            total_itens: 0,
+            total_unidades: 0,
+            valor_total: 0,
+          };
+          fornecedoresMap.set(idForn, f);
+        }
+        f.total_itens++;
+        f.total_unidades += sugestaoQtd;
+        f.valor_total += custoEstimadoTotal;
+      }
+
+      return {
+        id,
+        nome_produto: p.nome_produto,
+        cod_barra: p.cod_barra ? String(p.cod_barra).trim() : null,
+        unidade: p.unidade || 'UN',
+        id_tipo: p.id_tipo ? Number(p.id_tipo) : null,
+        tipo_nome: p.tipo_nome,
+        is_service: Boolean(p.is_service),
+        estoque,
+        min_estoque: minEstoque,
+        controla_estoque: controlaEstoque,
+        vr_custo: vrCompra,
+        vr_venda: vrVenda,
+        qtd_consumo_periodo: Number(consumo.qtdTotal.toFixed(2)),
+        qtd_vendas_periodo: Number(consumo.qtdVendas.toFixed(2)),
+        qtd_os_periodo: Number(consumo.qtdOs.toFixed(2)),
+        consumo_diario: Number(consumoDiario.toFixed(2)),
+        dias_duracao_estoque: diasDuracaoEstoque,
+        ponto_reposicao: pontoReposicao,
+        sugestao_qtd: sugestaoQtd,
+        custo_estimado_total: custoEstimadoTotal,
+        precisa_comprar: precisaComprar,
+        status_reposicao: statusReposicao,
+        id_fornecedor: p.id_fornecedor ? Number(p.id_fornecedor) : null,
+        nome_fornecedor: nomeForn,
+        fornecedor_telefone: p.fornecedor_telefone || null,
+        fornecedor_email: p.fornecedor_email || null,
+        fornecedor_contato: p.fornecedor_contato || null,
+      };
+    });
+
+    const fornecedores = Array.from(fornecedoresMap.values())
+      .map(f => ({
+        ...f,
+        valor_total: Number(f.valor_total.toFixed(2)),
+      }))
+      .sort((a, b) => b.valor_total - a.valor_total);
+
+    res.json({
+      tenant_id: tenantId,
+      parametros: {
+        periodo_dias: periodoDias,
+        dias_cobertura: diasCobertura,
+        data_inicio: dataInicioIso,
+        data_fim: dataFimIso,
+      },
+      resumo: {
+        total_itens_comprar: totalItensComprar,
+        total_unidades_comprar: Number(totalUnidadesComprar.toFixed(2)),
+        investimento_total_estimado: Number(investimentoTotalEstimado.toFixed(2)),
+        itens_criticos_urgentes: itensCriticosUrgentes,
+        itens_sem_fornecedor: itensSemFornecedor,
+        total_fornecedores_acionar: fornecedores.length,
+      },
+      fornecedores,
+      produtos: produtosCalculados,
+    });
+  } catch (err: any) {
+    console.error('[sugestao-compras] Erro:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao gerar sugestão de compras' });
+  }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ── OFICINA & PRODUTIVIDADE: MECÂNICOS E COMISSÕES ───────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════

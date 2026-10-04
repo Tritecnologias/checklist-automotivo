@@ -4,7 +4,7 @@ import type {
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
   ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
-  CurvaAbcResponse, ValorizacaoEstoqueResponse,
+  CurvaAbcResponse, ValorizacaoEstoqueResponse, SugestaoComprasResponse,
   Mecanico, MecanicoProdutividade, ExtratoItemComissao, ProdutividadeOficinaResponse, MecanicoPagamento,
   DreResponse, UsuarioSistema,
 } from '../types'
@@ -399,6 +399,25 @@ export const erpApi = {
     if (params?.fresh) q.set('fresh', params.fresh)
     const qs = q.toString() ? `?${q}` : ''
     return adminRequest<ValorizacaoEstoqueResponse>(`/erp/estoque/valorizacao${qs}`)
+  },
+
+  sugestaoCompras: (params?: {
+    periodo_dias?: number
+    dias_cobertura?: number
+    apenas_produtos?: string
+    id_fornecedor?: string
+    id_tipo?: number
+    search?: string
+  }) => {
+    const q = new URLSearchParams()
+    if (params?.periodo_dias) q.set('periodo_dias', String(params.periodo_dias))
+    if (params?.dias_cobertura) q.set('dias_cobertura', String(params.dias_cobertura))
+    if (params?.apenas_produtos) q.set('apenas_produtos', params.apenas_produtos)
+    if (params?.id_fornecedor) q.set('id_fornecedor', params.id_fornecedor)
+    if (params?.id_tipo) q.set('id_tipo', String(params.id_tipo))
+    if (params?.search) q.set('search', params.search)
+    const qs = q.toString() ? `?${q}` : ''
+    return adminRequest<SugestaoComprasResponse>(`/erp/estoque/sugestao-compras${qs}`)
   },
 
   clientes: (params: { search?: string; status?: 'ativos' | 'inativos' | 'todos'; page?: number }) => {
