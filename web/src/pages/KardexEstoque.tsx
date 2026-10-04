@@ -753,8 +753,15 @@ export default function KardexEstoque() {
                         </div>
                         {m.responsavel && (
                           <div className="flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
-                            <User className="w-2.5 h-2.5 text-slate-500" />
-                            <span>{m.responsavel}</span>
+                            <User className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+                            <span>
+                              <strong className="text-slate-300 font-medium">
+                                {m.origem === 'ordem_servico' && 'Técnico: '}
+                                {m.origem === 'pdv_venda' && 'Vendedor: '}
+                                {m.origem === 'ajuste_manual' && 'Usuário: '}
+                              </strong>
+                              {m.responsavel}
+                            </span>
                           </div>
                         )}
                       </td>

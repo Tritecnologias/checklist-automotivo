@@ -1249,6 +1249,8 @@ router.post('/vendas', async (req, res) => {
     const id_caixa = caixaAberto?.id ?? null;
     const finalTurno = caixaAberto?.turno ?? turno;
     const finalTerminal = caixaAberto?.terminal ?? terminal;
+    const userAuth = req.user as any;
+    const finalLogin = userAuth?.userId ?? userAuth?.id ?? (id_login ? Number(id_login) : 1);
 
     const [vendaResult] = await pool.query<any>(
       `INSERT INTO mv_vendas
@@ -1257,7 +1259,7 @@ router.post('/vendas', async (req, res) => {
           vr_dinheiro, vr_cheque, vr_cartao, vr_carne, vr_ticket, vr_pix, vr_nota,
           em_aberto, vr_pagto_parcial, cod_lancamento, tenant_id, id_caixa)
        VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
-      [controle, data_venda, parcelas, finalClienteId, id_login, finalTerminal, finalTurno,
+      [controle, data_venda, parcelas, finalClienteId, finalLogin, finalTerminal, finalTurno,
        vr_total, vr_adicional, vr_dinheiro, vr_cheque, vr_cartao, vr_carne, finalVrTicket, vr_pix, vr_nota,
        em_aberto, codLancamento, tenantId, id_caixa]
     );
@@ -1272,7 +1274,7 @@ router.post('/vendas', async (req, res) => {
               id_cliente, id_cliente_convenio, id_produto, id_grade,
               modo_lancamento, terminal, turno, valor, quant, vr_total, vr_cotacao, desconto_total_venda)
            VALUES (?,?,1,?,?,?,0,?,0,0,?,?,?,?,?,1,'N')`,
-          [data_venda, controle, codLancamento, id_login, finalClienteId,
+          [data_venda, controle, codLancamento, finalLogin, finalClienteId,
            item.id_produto, terminal, turno, item.valor, item.quant, item_total]
         );
         await pool.query(
@@ -4539,8 +4541,14 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
         0 as saldo_anterior,
         0 as saldo_posterior,
         CONCAT('OS #', o.id, IF(o.plate IS NOT NULL AND o.plate != '', CONCAT(' • Placa ', o.plate), ''), IF(o.model IS NOT NULL AND o.model != '', CONCAT(' (', o.model, ')'), '')) as documento_ref,
-        CONCAT('Aplicação em OS • Cliente: ', COALESCE(o.client_name, 'Consumidor')) as motivo,
-        COALESCE(o.client_name, 'Oficina') as responsavel,
+        CONCAT('Aplicação em OS • Cliente: ', COALESCE(o.client_name, 'Consumidor'), IF(o.model IS NOT NULL AND TRIM(o.model) != '', CONCAT(' (', TRIM(o.model), ')'), '')) as motivo,
+        CASE 
+          WHEN oi.mecanico_nome IS NOT NULL AND TRIM(oi.mecanico_nome) != '' THEN TRIM(oi.mecanico_nome)
+          WHEN o.mecanico_nome IS NOT NULL AND TRIM(o.mecanico_nome) != '' AND o.auxiliar_nome IS NOT NULL AND TRIM(o.auxiliar_nome) != '' 
+            THEN CONCAT(TRIM(o.mecanico_nome), ' (Aux: ', TRIM(o.auxiliar_nome), ')')
+          WHEN o.mecanico_nome IS NOT NULL AND TRIM(o.mecanico_nome) != '' THEN TRIM(o.mecanico_nome)
+          ELSE 'Mecânico / Técnico'
+        END as responsavel,
         COALESCE(oi.unit_price, p.vr_venda, 0) as vr_unitario,
         (ABS(oi.quantity) * COALESCE(oi.unit_price, p.vr_venda, 0)) as vr_total
       FROM os_order_items oi
@@ -4568,11 +4576,12 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
         0 as saldo_posterior,
         CONCAT('Venda PDV #', v.controle) as documento_ref,
         CONCAT('Venda Balcão • Cliente: ', COALESCE(c.nome_cliente, 'Consumidor')) as motivo,
-        COALESCE(c.nome_cliente, 'Vendedor') as responsavel,
+        COALESCE(u.nome, u.email, 'Operador de Caixa / Vendedor') as responsavel,
         COALESCE(m.valor, p.vr_venda, 0) as vr_unitario,
         (ABS(m.quant) * COALESCE(m.valor, p.vr_venda, 0)) as vr_total
       FROM mv_vendas_movimento m
       JOIN mv_vendas v ON v.controle = m.controle
+      LEFT JOIN users u ON u.id = COALESCE(m.id_login, v.id_login)
       LEFT JOIN cad_clientes c ON c.id = v.id_cliente
       JOIN cad_produtos p ON p.id = m.id_produto
       WHERE v.tenant_id = ?
