@@ -127,7 +127,6 @@ export default function DreGerencial() {
         regime,
         aliquota_imposto: aliquotaImposto,
       }),
-    staleTime: 60_000,
   })
 
   // Manipulação de presets de data

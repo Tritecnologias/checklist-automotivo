@@ -75,7 +75,7 @@ export default function Orders() {
   const { data: orders = [], isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['orders', tid],
     queryFn: () => api.listOrders(),
-    staleTime: 30_000,
+    refetchInterval: 15_000,
   })
 
   const { data: mecanicos = [] } = useQuery<Mecanico[]>({

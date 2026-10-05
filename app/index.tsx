@@ -14,6 +14,7 @@ import { useMutation } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useColorScheme } from 'nativewind';
 import { api } from '@/lib/api';
+import { lookupCep } from '@/lib/cep';
 import { formatPlate, cleanPlate } from '@/hooks/usePlateMask';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -44,6 +45,12 @@ function formatDoc(val: string) {
   }
 }
 
+function formatCep(val: string) {
+  const digits = val.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 5) return digits;
+  return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+}
+
 // ─── Identificação do Veículo ─────────────────────────────────────────────────
 
 export default function IdentificationScreen() {
@@ -57,6 +64,9 @@ export default function IdentificationScreen() {
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientDoc, setClientDoc] = useState('');
+  const [clientCep, setClientCep] = useState('');
+  const [clientAddress, setClientAddress] = useState('');
+  const [cepLoading, setCepLoading] = useState(false);
   const [clientId, setClientId] = useState<number | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupFeedback, setLookupFeedback] = useState<string | null>(null);
@@ -74,9 +84,32 @@ export default function IdentificationScreen() {
     setClientName('');
     setClientPhone('');
     setClientDoc('');
+    setClientCep('');
+    setClientAddress('');
     setClientId(null);
     setLookupFeedback(null);
     setErrors({});
+  }
+
+  async function handleCepChange(text: string) {
+    const formatted = formatCep(text);
+    setClientCep(formatted);
+    setErrors((prev) => ({ ...prev, clientCep: '' }));
+    const clean = formatted.replace(/\D/g, '');
+    if (clean.length === 8) {
+      setCepLoading(true);
+      try {
+        const res = await lookupCep(clean);
+        if (res && res.formattedAddress) {
+          setClientAddress(res.formattedAddress);
+          setErrors((prev) => ({ ...prev, clientAddress: '' }));
+        }
+      } catch {
+        // silencioso
+      } finally {
+        setCepLoading(false);
+      }
+    }
   }
 
   async function triggerLookup(plateText: string) {
@@ -94,6 +127,8 @@ export default function IdentificationScreen() {
           if (res.client.name) setClientName(res.client.name);
           if (res.client.phone) setClientPhone(res.client.phone);
           if (res.client.document) setClientDoc(res.client.document);
+          if (res.client.cep) setClientCep(formatCep(res.client.cep));
+          if (res.client.address) setClientAddress(res.client.address);
         }
         setLookupFeedback('✨ Cadastro localizado! Valide os dados abaixo.');
       } else {
@@ -101,6 +136,8 @@ export default function IdentificationScreen() {
         setClientName('');
         setClientPhone('');
         setClientDoc('');
+        setClientCep('');
+        setClientAddress('');
         setModel('');
         setMileage('');
         setLookupFeedback('🆕 Novo cadastro! Informe o contato do cliente.');
@@ -115,7 +152,7 @@ export default function IdentificationScreen() {
   const { mutate: createOrder, isPending } = useMutation({
     mutationFn: (vars: {
       vehicle: { plate: string; model: string; mileage: number };
-      client: { id?: number | null; name: string; phone: string; document?: string };
+      client: { id?: number | null; name: string; phone: string; document?: string; cep?: string; address?: string };
       status: 'quote' | 'open';
       mecanicoId?: number | null;
     }) => api.createOrder(vars.vehicle, vars.status, vars.client, vars.mecanicoId),
@@ -144,6 +181,8 @@ export default function IdentificationScreen() {
       setClientName('');
       setClientPhone('');
       setClientDoc('');
+      setClientCep('');
+      setClientAddress('');
       setModel('');
       setMileage('');
       setLookupFeedback(null);
@@ -158,6 +197,15 @@ export default function IdentificationScreen() {
     if (!clientName.trim()) next.clientName = 'Informe o nome completo do cliente.';
     if (!clientPhone.trim() || clientPhone.replace(/\D/g, '').length < 8) {
       next.clientPhone = 'Informe o telefone/WhatsApp do cliente.';
+    }
+    if (orderType === 'quote') {
+      const cleanC = clientCep.replace(/\D/g, '');
+      if (!cleanC || cleanC.length !== 8) {
+        next.clientCep = 'CEP obrigatório para orçamento (8 dígitos).';
+      }
+      if (!clientAddress.trim() || clientAddress.trim().length < 3) {
+        next.clientAddress = 'Endereço obrigatório para orçamento.';
+      }
     }
     if (!model.trim()) next.model = 'Informe o modelo do veículo.';
     const km = parseInt(mileage.replace(/\D/g, ''), 10);
@@ -183,6 +231,8 @@ export default function IdentificationScreen() {
         name: clientName.trim(),
         phone: clientPhone.trim(),
         document: clientDoc.trim() || undefined,
+        cep: clientCep.trim() || undefined,
+        address: clientAddress.trim() || undefined,
       },
       status: orderType,
       mecanicoId: user?.mecanicoId || undefined,
@@ -441,7 +491,7 @@ export default function IdentificationScreen() {
             </View>
 
             {/* CPF / CNPJ (Opcional) */}
-            <View>
+            <View className="mb-3.5">
               <Text className={labelStyle}>CPF / CNPJ (opcional)</Text>
               <TextInput
                 className={inputStyle}
@@ -452,6 +502,51 @@ export default function IdentificationScreen() {
                 keyboardType="numeric"
                 returnKeyType="next"
               />
+            </View>
+
+            {/* CEP */}
+            <View className="mb-3.5">
+              <Text className={labelStyle}>
+                CEP {orderType === 'quote' && <Text className="text-red-500">*</Text>}
+              </Text>
+              <View className="relative justify-center">
+                <TextInput
+                  className={errors.clientCep ? inputErrorStyle : inputStyle}
+                  value={clientCep}
+                  onChangeText={handleCepChange}
+                  placeholder="00000-000"
+                  placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
+                  keyboardType="numeric"
+                  maxLength={9}
+                  returnKeyType="next"
+                />
+                {cepLoading && (
+                  <View className="absolute right-4">
+                    <ActivityIndicator size="small" color="#3b82f6" />
+                  </View>
+                )}
+              </View>
+              {errors.clientCep ? <Text className={errorStyle}>⚠ {errors.clientCep}</Text> : null}
+            </View>
+
+            {/* Endereço */}
+            <View>
+              <Text className={labelStyle}>
+                Endereço completo {orderType === 'quote' && <Text className="text-red-500">*</Text>}
+              </Text>
+              <TextInput
+                className={errors.clientAddress ? inputErrorStyle : inputStyle}
+                value={clientAddress}
+                onChangeText={(t) => {
+                  setErrors((prev) => ({ ...prev, clientAddress: '' }));
+                  setClientAddress(t);
+                }}
+                placeholder="Rua, número, bairro, cidade - UF"
+                placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
+                autoCapitalize="words"
+                returnKeyType="next"
+              />
+              {errors.clientAddress ? <Text className={errorStyle}>⚠ {errors.clientAddress}</Text> : null}
             </View>
           </View>
 

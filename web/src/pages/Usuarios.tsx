@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { RotateCw } from 'lucide-react'
 import { tenantsApi, usersApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import type { UserAdmin } from '../types'
@@ -31,7 +32,10 @@ export default function Usuarios() {
   const { isOwner } = useAuth()
   const qc = useQueryClient()
 
-  const { data: users = [], isLoading } = useQuery({ queryKey: ['users'], queryFn: usersApi.list })
+  const { data: users = [], isLoading, isFetching, refetch } = useQuery({
+    queryKey: ['users'],
+    queryFn: usersApi.list,
+  })
   const { data: lojas = [] } = useQuery({ queryKey: ['tenants'], queryFn: tenantsApi.list, enabled: isOwner })
 
   const [showNew, setShowNew] = useState(false)
@@ -118,12 +122,23 @@ export default function Usuarios() {
           <h1 className="text-2xl font-bold text-white">Usuários</h1>
           <p className="text-sm text-slate-400 mt-1">Gerencie os acessos ao sistema</p>
         </div>
-        <button
-          onClick={() => { setShowNew(v => !v); setFormError('') }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors"
-        >
-          <span>＋</span> Novo usuário
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 transition-colors disabled:opacity-50"
+            title="Atualizar lista de usuários via AJAX"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin text-blue-400' : ''}`} />
+            <span>{isFetching ? 'Atualizando…' : 'Atualizar'}</span>
+          </button>
+          <button
+            onClick={() => { setShowNew(v => !v); setFormError('') }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors"
+          >
+            <span>＋</span> Novo usuário
+          </button>
+        </div>
       </div>
 
       {/* Formulário novo usuário */}

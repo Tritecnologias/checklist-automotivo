@@ -71,7 +71,7 @@ export default function Quotes() {
   const { data: orders = [], isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['orders', tid],
     queryFn: () => api.listOrders(),
-    staleTime: 30_000,
+    refetchInterval: 15_000,
   })
 
   // Mutação para aprovar orçamento direto da lista

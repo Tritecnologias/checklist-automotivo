@@ -166,6 +166,7 @@ export default function ContasPagar() {
       page,
     }),
     placeholderData: keepPreviousData,
+    refetchInterval: 15_000,
   })
 
   const { data: categorias = [] } = useQuery({

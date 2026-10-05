@@ -179,6 +179,8 @@ export interface ClientePdv {
   cpf_cnpj: string
   telefone: string
   celular: string
+  cep?: string
+  endereco?: string
 }
 
 export interface Lancamento {

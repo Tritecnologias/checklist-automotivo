@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { RotateCw } from 'lucide-react'
 import { api } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import type { Order } from '../types'
@@ -34,11 +35,13 @@ function StatCard({
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const { currentTenant } = useAuth()
   const tid = currentTenant?.id ?? null
-  const { data: orders = [], isLoading, isError, refetch } = useQuery({
+  const { data: orders = [], isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['orders', tid],
     queryFn: () => api.listOrders(),
+    refetchInterval: 10_000,
   })
 
   const quotes      = orders.filter((o) => o.status === 'quote').length
@@ -72,9 +75,20 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="text-slate-400 text-sm mt-1">{orders.length} atendimentos registrados</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+          <p className="text-slate-400 text-sm mt-1">{orders.length} atendimentos registrados</p>
+        </div>
+        <button
+          onClick={() => refetch()}
+          disabled={isFetching}
+          className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 transition-colors"
+          title="Atualizar dados em tempo real via AJAX"
+        >
+          <RotateCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin text-blue-400' : ''}`} />
+          <span>{isFetching ? 'Atualizando…' : 'Atualizar'}</span>
+        </button>
       </div>
 
       {/* Stat cards */}
@@ -116,7 +130,7 @@ export default function Dashboard() {
                   <tr
                     key={o.id}
                     className="hover:bg-slate-800/50 transition-colors cursor-pointer"
-                    onClick={() => window.location.href = `/orders/${o.id}`}
+                    onClick={() => navigate(`/orders/${o.id}`)}
                   >
                     <td className="px-5 py-3 font-mono text-slate-400 text-xs">
                       #{o.id.split('-')[0].toUpperCase()}

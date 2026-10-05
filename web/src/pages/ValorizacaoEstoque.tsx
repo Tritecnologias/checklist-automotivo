@@ -67,7 +67,6 @@ export default function ValorizacaoEstoque() {
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['valorizacao-estoque', tid, apenasProdutos],
     queryFn: () => erpApi.valorizacaoEstoque({ apenas_produtos: apenasProdutos ? '1' : '0' }),
-    staleTime: 60_000,
   })
 
   const resumo = data?.resumo

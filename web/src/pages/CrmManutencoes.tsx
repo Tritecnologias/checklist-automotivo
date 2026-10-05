@@ -47,7 +47,6 @@ export default function CrmManutencoes() {
         search: busca,
         sort,
       }),
-    staleTime: 60_000,
   })
 
   const resumo = data?.resumo

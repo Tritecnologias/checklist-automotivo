@@ -9,7 +9,7 @@ import type {
   Vehicle,
 } from '@/types';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://4rodas.tritecnologias.com.br/api';
 
 export const AUTH_TOKEN_KEY = '@auth_token';
 
@@ -102,7 +102,7 @@ export const api = {
       body: JSON.stringify({ vehicle, status, client, mecanicoId }),
     }),
 
-  updateOrderClient: (id: string, client: { name: string; phone: string; document?: string }) =>
+  updateOrderClient: (id: string, client: { name: string; phone: string; document?: string; cep?: string; address?: string }) =>
     request<Order>(`/orders/${id}/client`, {
       method: 'PATCH',
       body: JSON.stringify(client),

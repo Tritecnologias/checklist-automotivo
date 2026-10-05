@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { queryClient } from '../lib/queryClient'
 
 export interface Tenant {
   id: number
@@ -56,6 +57,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(STORAGE_TENANTS, JSON.stringify(tenants))
     localStorage.setItem(STORAGE_TENANT,  JSON.stringify(defaultTenant))
     setState({ token, user, tenants, currentTenant: defaultTenant })
+    queryClient.clear()
+    queryClient.invalidateQueries()
   }, [])
 
   const logout = useCallback(() => {
@@ -66,11 +69,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // também limpa o antigo token de admin para forçar re-login
     localStorage.removeItem('admin_token')
     setState({ token: null, user: null, tenants: [], currentTenant: null })
+    queryClient.clear()
   }, [])
 
   const switchTenant = useCallback((tenant: Tenant) => {
     localStorage.setItem(STORAGE_TENANT, JSON.stringify(tenant))
     setState(s => ({ ...s, currentTenant: tenant }))
+    // Força refetch imediato de todas as consultas ativas para a nova loja via AJAX
+    queryClient.clear()
+    queryClient.invalidateQueries()
   }, [])
 
   return (

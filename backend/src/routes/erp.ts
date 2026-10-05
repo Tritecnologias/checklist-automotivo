@@ -2110,7 +2110,7 @@ router.get('/pdv/os-encerradas', async (req, res) => {
              o.discount_amount,
              o.labor_amount, o.created_at, o.updated_at, o.closed_at,
              o.venda_controle,
-             o.client_id, o.client_name, o.client_phone, o.client_document,
+             o.client_id, o.client_name, o.client_phone, o.client_document, o.client_cep, o.client_address,
              (SELECT COUNT(*) FROM os_order_items oi WHERE oi.order_id = o.id) AS total_itens
       FROM os_orders o
       ${whereStr}
@@ -2139,6 +2139,8 @@ router.get('/pdv/os-encerradas', async (req, res) => {
         name: r.client_name || '',
         phone: r.client_phone || '',
         document: r.client_document || null,
+        cep: r.client_cep || null,
+        address: r.client_address || null,
       },
     })));
   } catch (err) {
@@ -2202,27 +2204,31 @@ router.get('/pdv/os/:id', async (req, res) => {
 
     if (order.client_id) {
       const [[cRow]] = await pool.query<any>(
-        'SELECT id, nome_cliente, cpf_cnpj, telefone, celular FROM cad_clientes WHERE id = ?',
+        'SELECT id, nome_cliente, cpf_cnpj, telefone, celular, cep, endereco FROM cad_clientes WHERE id = ?',
         [order.client_id]
       );
       if (cRow) {
         cliente = {
           id: Number(cRow.id),
           nome_cliente: order.client_name || stripPlate(cRow.nome_cliente) || cRow.nome_cliente,
-          cpf_cnpj: cRow.cpf_cnpj || order.client_document || '',
-          telefone: cRow.telefone || order.client_phone || '',
-          celular: cRow.celular || order.client_phone || '',
+          cpf_cnpj: order.client_document || cRow.cpf_cnpj || '',
+          telefone: order.client_phone || cRow.telefone || cRow.celular || '',
+          celular: order.client_phone || cRow.celular || cRow.telefone || '',
+          cep: order.client_cep || cRow.cep || '',
+          endereco: order.client_address || cRow.endereco || '',
         };
       }
     }
 
-    if (!cliente && (order.client_name || order.client_phone)) {
+    if (!cliente && (order.client_name || order.client_phone || order.client_document || order.client_cep || order.client_address)) {
       cliente = {
         id: 0,
         nome_cliente: order.client_name || 'Cliente',
         cpf_cnpj: order.client_document || '',
         telefone: order.client_phone || '',
         celular: order.client_phone || '',
+        cep: order.client_cep || '',
+        endereco: order.client_address || '',
       };
     }
 
@@ -2231,7 +2237,7 @@ router.get('/pdv/os/:id', async (req, res) => {
       const cleanPlate = order.plate.replace(/[-\s]/g, '').toUpperCase();
       if (cleanPlate.length === 7 && /^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(cleanPlate)) {
         const [[cRow]] = await pool.query<any>(
-          `SELECT id, nome_cliente, cpf_cnpj, telefone, celular
+          `SELECT id, nome_cliente, cpf_cnpj, telefone, celular, cep, endereco
            FROM cad_clientes
            WHERE inativo = 0 AND (
              REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
@@ -2246,6 +2252,8 @@ router.get('/pdv/os/:id', async (req, res) => {
             cpf_cnpj: cRow.cpf_cnpj ?? '',
             telefone: cRow.telefone ?? '',
             celular: cRow.celular ?? '',
+            cep: cRow.cep ?? '',
+            endereco: cRow.endereco ?? '',
           };
         }
       }

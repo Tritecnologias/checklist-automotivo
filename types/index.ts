@@ -11,6 +11,8 @@ export interface OrderClient {
   name: string;
   phone: string;
   document?: string | null;
+  cep?: string | null;
+  address?: string | null;
 }
 
 // ─── Ordem de Serviço ────────────────────────────────────────────────────────

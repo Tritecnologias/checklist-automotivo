@@ -22,7 +22,7 @@ import { api, oficinaApi } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import type { OrderItem, CatalogItem, Mecanico, OrderAdminUser } from '../types'
 import { useAuth } from '../contexts/AuthContext'
-import { lookupCep, formatCep } from '../lib/cep'
+import { lookupCep, formatCep, formatCpfCnpj, formatPhone } from '../lib/cep'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -47,6 +47,33 @@ export default function OrderDetail() {
   const [adminPasswordVisible, setAdminPasswordVisible] = useState(false)
   const [selectedAdminId, setSelectedAdminId]           = useState<number | null>(null)
   const [closeError, setCloseError]                     = useState('')
+  const [sendToPdvOnClose, setSendToPdvOnClose]         = useState(false)
+
+  // Confirmação de dados do cliente ao finalizar OS
+  const [confirmClientName, setConfirmClientName]       = useState('')
+  const [confirmClientDoc, setConfirmClientDoc]         = useState('')
+  const [confirmClientPhone, setConfirmClientPhone]     = useState('')
+  const [confirmClientCep, setConfirmClientCep]         = useState('')
+  const [confirmClientAddress, setConfirmClientAddress] = useState('')
+  const [loadingConfirmCep, setLoadingConfirmCep]       = useState(false)
+
+  const handleConfirmCepSearch = async (cepInput: string) => {
+    const clean = cepInput.replace(/\D/g, '')
+    if (clean.length === 8) {
+      setLoadingConfirmCep(true)
+      try {
+        const res = await lookupCep(clean)
+        if (res && res.formattedAddress) {
+          setConfirmClientAddress(res.formattedAddress)
+        }
+      } catch (err) {
+        console.error('Erro ao buscar CEP na confirmação da OS:', err)
+      } finally {
+        setLoadingConfirmCep(false)
+      }
+    }
+  }
+
   const [showReopenPin, setShowReopenPin]   = useState(false)
   const [pin, setPin]                       = useState('')
   const [pinError, setPinError]             = useState('')
@@ -126,10 +153,15 @@ export default function OrderDetail() {
   const isAdmin = currentUser?.role === 'owner' || currentUser?.role === 'manager'
 
   // ── Queries ───────────────────────────────────────────────────────────────
-  const { data: order, isLoading, isError } = useQuery({
+  const { data: order, isLoading, isError, refetch } = useQuery({
     queryKey: ['order', id, tid],
     queryFn: () => api.getOrder(id!),
     enabled: !!id,
+    refetchInterval: (query) => {
+      const ord = query.state.data
+      if (ord?.status === 'closed' || ord?.vendaControle) return false
+      return 10_000
+    },
   })
 
   const isClosed = order?.status === 'closed' || !!order?.vendaControle
@@ -244,11 +276,36 @@ export default function OrderDetail() {
     },
   })
 
-  // Finalizar OS (exige senha de administrador)
+  // Finalizar OS (exige confirmação dos dados do cliente e senha de administrador)
   const { mutate: closeOrder, isPending: closing } = useMutation({
-    mutationFn: () => {
+    mutationFn: async (sendToPdv: boolean = false) => {
+      const name = confirmClientName.trim()
+      const doc = confirmClientDoc.trim()
+      const phone = confirmClientPhone.trim()
+      const cep = confirmClientCep.trim()
+      const address = confirmClientAddress.trim()
+
+      if (!name || name.length < 2) {
+        throw new Error('Informe o nome completo do cliente.')
+      }
+      const cleanDoc = doc.replace(/\D/g, '')
+      if (cleanDoc.length !== 11 && cleanDoc.length !== 14) {
+        throw new Error('O CPF deve conter 11 dígitos ou CNPJ 14 dígitos.')
+      }
+      const cleanPhone = phone.replace(/\D/g, '')
+      if (cleanPhone.length < 8) {
+        throw new Error('Informe um telefone ou WhatsApp válido com DDD.')
+      }
+      const cleanCep = cep.replace(/\D/g, '')
+      if (cleanCep.length !== 8) {
+        throw new Error('Informe um CEP válido com 8 dígitos.')
+      }
+      if (!address || address.length < 3) {
+        throw new Error('Informe o endereço completo do cliente.')
+      }
+
       if (!adminPassword.trim()) {
-        throw new Error('Informe a senha do administrador para finalizar a OS.')
+        throw new Error('Informe a senha do administrador para autorizar a finalização.')
       }
       const adminIdToUse = isAdmin
         ? (selectedAdminId ?? currentUser?.id ?? null)
@@ -258,17 +315,30 @@ export default function OrderDetail() {
         throw new Error('Selecione o administrador responsável para autorizar a finalização.')
       }
 
-      return api.finalizarOrder(id!, {
+      const updated = await api.finalizarOrder(id!, {
         adminPassword: adminPassword.trim(),
         adminUserId: adminIdToUse,
+        client: {
+          name,
+          document: doc,
+          phone,
+          cep,
+          address,
+        },
       })
+
+      return { updated, sendToPdv }
     },
-    onSuccess: (updated) => {
+    onSuccess: ({ updated, sendToPdv }) => {
       qc.setQueryData(['order', id], updated)
       qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['pdv-os-encerradas'] })
       setConfirmClose(false)
       setAdminPassword('')
       setCloseError('')
+      if (sendToPdv) {
+        navigate(`/erp/pdv?osId=${id}`)
+      }
     },
     onError: (err: any) => {
       setCloseError(err.message || 'Erro ao finalizar Ordem de Serviço')
@@ -917,15 +987,21 @@ export default function OrderDetail() {
                     setCloseError('')
                     setAdminPassword('')
                     setAdminPasswordVisible(false)
+                    setSendToPdvOnClose(false)
                     if (isAdmin && currentUser?.id) {
                       setSelectedAdminId(currentUser.id)
                     } else if (administradores.length > 0) {
                       setSelectedAdminId(administradores[0].id)
                     }
+                    setConfirmClientName(order.client?.name || '')
+                    setConfirmClientDoc(order.client?.document ? formatCpfCnpj(order.client.document) : '')
+                    setConfirmClientPhone(order.client?.phone ? formatPhone(order.client.phone) : '')
+                    setConfirmClientCep(formatCep(order.client?.cep || order.cep || ''))
+                    setConfirmClientAddress(order.client?.address || order.endereco || '')
                     setConfirmClose(true)
                   }}
                   className="px-4 py-2.5 bg-red-900/40 hover:bg-red-900/60 text-red-300 rounded-xl text-sm font-bold border border-red-800/60 shadow-lg shadow-red-950/40 transition-all flex items-center gap-2"
-                  title="Finalizar Ordem de Serviço (Exige confirmação com Senha de Administrador)"
+                  title="Finalizar Ordem de Serviço (Confirmação dos dados do cliente e Senha de Administrador)"
                 >
                   <span>🔒</span>
                   <span>Finalizar OS</span>
@@ -1574,11 +1650,12 @@ export default function OrderDetail() {
       )}
 
       {/* ── MODAIS EXISTENTES (ENCERRAMENTO, REABERTURA E CLIENTE) ────────────── */}
-      {/* Modal — Finalizar OS com Senha de Administrador */}
+      {/* Modal — Finalizar OS com Confirmação dos Dados do Cliente e Senha de Administrador */}
       {confirmClose && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-md shadow-2xl">
-            <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-6 overflow-y-auto">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+            {/* Cabeçalho */}
+            <div className="flex items-start justify-between gap-3 p-5 border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 text-xl font-bold">
                   🔒
@@ -1586,7 +1663,7 @@ export default function OrderDetail() {
                 <div>
                   <h2 className="text-lg font-bold text-white leading-tight">Finalizar Ordem de Serviço</h2>
                   <p className="text-xs text-slate-400 font-mono mt-0.5">
-                    OS #{order.id.split('-')[0].toUpperCase()} • {order.vehicle.plate}
+                    OS #{order.id.split('-')[0].toUpperCase()} • {order.vehicle.plate} ({order.vehicle.model})
                   </p>
                 </div>
               </div>
@@ -1597,122 +1674,233 @@ export default function OrderDetail() {
                   setAdminPassword('')
                   setCloseError('')
                 }}
-                className="text-slate-500 hover:text-slate-300 p-1 rounded-lg"
+                className="text-slate-500 hover:text-slate-300 p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5 text-xs text-slate-300 mb-4 space-y-1">
-              <p>
-                A finalização encerra esta OS. Após finalizada, nenhuma alteração poderá ser feita sem reabertura autorizada.
-              </p>
-              <p className="font-semibold text-amber-300 flex items-center gap-1.5 pt-1">
-                <span>🛡️</span>
-                <span>Exclusivo para Administradores com validação por Senha.</span>
-              </p>
-            </div>
-
-            {closeError && (
-              <div className="bg-red-950/60 border border-red-800 rounded-xl px-4 py-3 text-red-300 text-xs mb-4 flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                <span className="leading-relaxed">{closeError}</span>
+            {/* Conteúdo com rolagem */}
+            <div className="p-6 overflow-y-auto space-y-5">
+              <div className="bg-amber-950/40 border border-amber-800/60 rounded-xl p-3.5 text-xs text-amber-200/90 space-y-1">
+                <p className="font-semibold text-amber-300 flex items-center gap-1.5">
+                  <span>⚠️</span>
+                  <span>Confirmação Cadastral e Autorização Administrativa</span>
+                </p>
+                <p className="text-slate-300">
+                  Ao finalizar a OS, os dados do cliente (CPF/CNPJ, Telefone e Endereço) são confirmados para emissão e cobrança no PDV. A finalização exige autenticação por senha de administrador.
+                </p>
               </div>
-            )}
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                closeOrder()
-              }}
-              className="space-y-4"
-            >
-              {isAdmin ? (
-                <div className="bg-slate-800 border border-slate-700 rounded-xl p-3">
-                  <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Administrador Responsável
-                  </span>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-bold text-white">{currentUser?.nome}</p>
-                      <p className="text-xs text-slate-400">{currentUser?.email}</p>
-                    </div>
-                    <span className="px-2 py-0.5 text-[11px] font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      {currentUser?.role === 'owner' ? 'Proprietário' : 'Gerente'}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Selecione o Administrador Responsável *
-                  </label>
-                  <select
-                    value={selectedAdminId ?? ''}
-                    onChange={(e) => setSelectedAdminId(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
-                    required
-                  >
-                    <option value="">Selecione um administrador...</option>
-                    {administradores.map((adm) => (
-                      <option key={adm.id} value={adm.id}>
-                        {adm.nome} ({adm.email}) — [{adm.roleLabel}]
-                      </option>
-                    ))}
-                  </select>
+              {closeError && (
+                <div className="bg-red-950/60 border border-red-800 rounded-xl px-4 py-3 text-red-300 text-xs flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{closeError}</span>
                 </div>
               )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  {isAdmin ? 'Sua Senha de Administrador *' : 'Senha do Administrador *'}
-                </label>
-                <div className="relative">
-                  <input
-                    type={adminPasswordVisible ? 'text' : 'password'}
-                    value={adminPassword}
-                    onChange={(e) => {
-                      setAdminPassword(e.target.value)
-                      setCloseError('')
-                    }}
-                    placeholder="Digite a sua senha de acesso..."
-                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 placeholder-slate-500"
-                    autoFocus
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setAdminPasswordVisible(!adminPasswordVisible)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1"
-                    tabIndex={-1}
-                    title={adminPasswordVisible ? 'Ocultar senha' : 'Exibir senha'}
-                  >
-                    {adminPasswordVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+              {/* Seção 1: Dados do Cliente */}
+              <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-4 space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                    <span>👤</span>
+                    <span>1. Confirmação dos Dados do Cliente (PDV)</span>
+                  </h3>
+                  <span className="text-[11px] text-amber-400 font-semibold">* Campos Obrigatórios</span>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Nome Completo do Cliente *
+                    </label>
+                    <input
+                      type="text"
+                      value={confirmClientName}
+                      onChange={(e) => setConfirmClientName(e.target.value)}
+                      placeholder="Ex: João da Silva"
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        CPF ou CNPJ *
+                      </label>
+                      <input
+                        type="text"
+                        value={confirmClientDoc}
+                        onChange={(e) => setConfirmClientDoc(formatCpfCnpj(e.target.value))}
+                        placeholder="000.000.000-00"
+                        maxLength={18}
+                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Telefone / WhatsApp *
+                      </label>
+                      <input
+                        type="text"
+                        value={confirmClientPhone}
+                        onChange={(e) => setConfirmClientPhone(formatPhone(e.target.value))}
+                        placeholder="(00) 00000-0000"
+                        maxLength={15}
+                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-1">
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        CEP *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={confirmClientCep}
+                          onChange={(e) => {
+                            const val = formatCep(e.target.value)
+                            setConfirmClientCep(val)
+                            const clean = val.replace(/\D/g, '')
+                            if (clean.length === 8) {
+                              handleConfirmCepSearch(clean)
+                            }
+                          }}
+                          onBlur={(e) => handleConfirmCepSearch(e.target.value)}
+                          placeholder="00000-000"
+                          maxLength={9}
+                          className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500 pr-8"
+                        />
+                        {loadingConfirmCep && (
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-blue-400 animate-spin">
+                            ↻
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Endereço Completo (Rua, Número, Bairro, Cidade - UF) *
+                      </label>
+                      <input
+                        type="text"
+                        value={confirmClientAddress}
+                        onChange={(e) => setConfirmClientAddress(e.target.value)}
+                        placeholder="Rua, Número, Bairro, Cidade - UF"
+                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex gap-3 pt-2">
+              {/* Seção 2: Autorização do Administrador */}
+              <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-4 space-y-3.5">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                  <span>🛡️</span>
+                  <span>2. Autorização do Administrador</span>
+                </h3>
+
+                {isAdmin ? (
+                  <div className="bg-slate-800 border border-slate-700 rounded-xl p-3">
+                    <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                      Administrador Responsável
+                    </span>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-white">{currentUser?.nome}</p>
+                        <p className="text-xs text-slate-400">{currentUser?.email}</p>
+                      </div>
+                      <span className="px-2 py-0.5 text-[11px] font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        {currentUser?.role === 'owner' ? 'Proprietário' : 'Gerente'}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Selecione o Administrador Responsável *
+                    </label>
+                    <select
+                      value={selectedAdminId ?? ''}
+                      onChange={(e) => setSelectedAdminId(Number(e.target.value))}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
+                      required
+                    >
+                      <option value="">Selecione um administrador...</option>
+                      {administradores.map((adm) => (
+                        <option key={adm.id} value={adm.id}>
+                          {adm.nome} ({adm.email}) — [{adm.roleLabel}]
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    {isAdmin ? 'Sua Senha de Administrador *' : 'Senha do Administrador *'}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={adminPasswordVisible ? 'text' : 'password'}
+                      value={adminPassword}
+                      onChange={(e) => {
+                        setAdminPassword(e.target.value)
+                        setCloseError('')
+                      }}
+                      placeholder="Digite a sua senha de acesso..."
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 placeholder-slate-500"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAdminPasswordVisible(!adminPasswordVisible)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1"
+                      tabIndex={-1}
+                      title={adminPasswordVisible ? 'Ocultar senha' : 'Exibir senha'}
+                    >
+                      {adminPasswordVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Rodapé com botões de ação */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex flex-col sm:flex-row items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmClose(false)
+                  setAdminPassword('')
+                  setCloseError('')
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors"
+              >
+                Cancelar
+              </button>
+
+              <div className="flex-1 w-full flex flex-col sm:flex-row gap-2.5 justify-end">
                 <button
                   type="button"
-                  onClick={() => {
-                    setConfirmClose(false)
-                    setAdminPassword('')
-                    setCloseError('')
-                  }}
-                  className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
                   disabled={closing || !adminPassword.trim() || (!isAdmin && !selectedAdminId)}
-                  className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold shadow-lg shadow-red-900/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => {
+                    setSendToPdvOnClose(false)
+                    closeOrder(false)
+                  }}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-sm font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Finaliza a OS e mantém nesta tela"
                 >
-                  {closing ? (
+                  {closing && !sendToPdvOnClose ? (
                     <>
                       <span className="animate-spin text-sm">↻</span>
-                      <span>Validando…</span>
+                      <span>Finalizando…</span>
                     </>
                   ) : (
                     <>
@@ -1721,8 +1909,31 @@ export default function OrderDetail() {
                     </>
                   )}
                 </button>
+
+                <button
+                  type="button"
+                  disabled={closing || !adminPassword.trim() || (!isAdmin && !selectedAdminId)}
+                  onClick={() => {
+                    setSendToPdvOnClose(true)
+                    closeOrder(true)
+                  }}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-bold shadow-lg shadow-emerald-950/50 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Finaliza a OS e redireciona direto para o PDV com a OS pronta para faturamento"
+                >
+                  {closing && sendToPdvOnClose ? (
+                    <>
+                      <span className="animate-spin text-sm">↻</span>
+                      <span>Enviando ao PDV…</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShoppingCart className="w-4 h-4" />
+                      <span>Finalizar e Enviar para o PDV →</span>
+                    </>
+                  )}
+                </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

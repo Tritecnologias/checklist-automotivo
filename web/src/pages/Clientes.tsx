@@ -75,7 +75,6 @@ export default function Clientes() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['erp-clientes', tid, search, status, page],
     queryFn: () => erpApi.clientes({ search: search || undefined, status, page }),
-    staleTime: 30_000,
   })
 
   function handleSearch(e: React.FormEvent) {

@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { SlidersHorizontal, Lock, Wallet, ArrowRight } from 'lucide-react'
 import { api, erpApi } from '../lib/api'
@@ -34,6 +34,7 @@ interface Pagamento {
 const PAG_VAZIO: Pagamento = { dinheiro: '', cartao: '', pix: '', nota: '', outros: '' }
 
 export default function Pdv() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const { currentTenant, user } = useAuth()
   const tid = currentTenant?.id ?? null
   const qc = useQueryClient()
@@ -150,6 +151,17 @@ export default function Pdv() {
       setImportandoOsId(null)
     }
   }
+
+  // Auto-importar OS quando redirecionado da Finalização da OS (?osId=...)
+  useEffect(() => {
+    const osIdParam = searchParams.get('osId')
+    if (osIdParam && isCaixaAberto && !importandoOsId && cart.length === 0) {
+      handleImportarOs(osIdParam)
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.delete('osId')
+      setSearchParams(nextParams, { replace: true })
+    }
+  }, [searchParams, isCaixaAberto])
 
   const { mutate: finalizar, isPending: finalizando } = useMutation({
     mutationFn: () => {
@@ -662,14 +674,54 @@ export default function Pdv() {
 
         {/* Cliente */}
         <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Cliente</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Cliente</p>
+            {cliente && osImportada && (
+              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span>✓</span>
+                <span>Dados Conferidos</span>
+              </span>
+            )}
+          </div>
           {cliente ? (
-            <div className="flex items-center justify-between bg-slate-800 rounded-xl px-3 py-2">
-              <div>
-                <p className="text-sm font-semibold text-white">{cliente.nome_cliente}</p>
-                <p className="text-xs text-slate-400">{cliente.cpf_cnpj || cliente.telefone || cliente.celular || 'Sem documento'}</p>
+            <div className="bg-slate-800 rounded-xl p-3 border border-slate-700/80 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="space-y-0.5 flex-1 min-w-0">
+                  <p className="text-sm font-bold text-white truncate" title={cliente.nome_cliente}>
+                    {cliente.nome_cliente}
+                  </p>
+                  <p className="text-xs text-slate-300 font-mono">
+                    {cliente.cpf_cnpj ? `CPF/CNPJ: ${cliente.cpf_cnpj}` : 'Sem documento'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setCliente(null)}
+                  className="text-slate-400 hover:text-red-400 text-xs p-1 rounded hover:bg-slate-700 transition-colors"
+                  title="Remover cliente da venda"
+                >
+                  ✕
+                </button>
               </div>
-              <button onClick={() => setCliente(null)} className="text-slate-500 hover:text-red-400 text-xs ml-2">✕</button>
+
+              {(cliente.telefone || cliente.celular) && (
+                <p className="text-xs text-slate-300 flex items-center gap-1.5 font-mono">
+                  <span className="text-slate-400">📞</span>
+                  <span>{cliente.celular || cliente.telefone}</span>
+                </p>
+              )}
+
+              {(cliente.endereco || cliente.cep) && (
+                <div className="text-xs text-slate-400 pt-1.5 border-t border-slate-700/60 space-y-0.5">
+                  {cliente.endereco && (
+                    <p className="line-clamp-2 text-slate-300">
+                      <span className="text-slate-400">📍</span> {cliente.endereco}
+                    </p>
+                  )}
+                  {cliente.cep && (
+                    <p className="font-mono text-[11px] text-slate-400">CEP: {cliente.cep}</p>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="relative">
@@ -972,10 +1024,25 @@ export default function Pdv() {
                         </p>
 
                         {os.client?.name && (
-                          <p className="text-xs text-indigo-300 font-medium flex items-center gap-1.5">
-                            <span>👤</span> {os.client.name}
-                            {os.client.phone && <span className="text-slate-400 font-mono">({os.client.phone})</span>}
-                          </p>
+                          <div className="text-xs text-slate-300 space-y-0.5">
+                            <p className="font-medium text-indigo-300 flex items-center gap-1.5">
+                              <span>👤</span> {os.client.name}
+                              {os.client.phone && <span className="text-slate-400 font-mono">({os.client.phone})</span>}
+                            </p>
+                            {(os.client.document || os.client.address || os.client.cep) && (
+                              <p className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2">
+                                {os.client.document && (
+                                  <span className="font-mono text-slate-300">Doc: {os.client.document}</span>
+                                )}
+                                {os.client.address && (
+                                  <span>&bull; {os.client.address}</span>
+                                )}
+                                {os.client.cep && (
+                                  <span className="font-mono text-slate-400">({os.client.cep})</span>
+                                )}
+                              </p>
+                            )}
+                          </div>
                         )}
 
                         <p className="text-xs text-slate-500">

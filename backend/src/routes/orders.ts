@@ -1135,8 +1135,8 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
 
   try {
     // Verificar acesso ao tenant
-    const [rows] = await pool.execute('SELECT tenant_id, venda_controle FROM os_orders WHERE id = ?', [req.params.id]);
-    const order = (rows as { tenant_id: number; venda_controle?: string | null }[])[0];
+    const [rows] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (rows as Record<string, any>[])[0];
     if (!order) { res.status(404).json({ message: 'OS não encontrada' }); return; }
     const allowedT = allowedTenants(req.user!);
     if (allowedT !== null && !allowedT.includes(order.tenant_id)) {
@@ -1172,10 +1172,18 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
     }
 
     if (status === 'closed') {
-      const { adminPassword, adminUserId, adminEmail } = req.body as {
+      const { adminPassword, adminUserId, adminEmail, client } = req.body as {
         adminPassword?: string;
         adminUserId?: number;
         adminEmail?: string;
+        client?: {
+          name?: string;
+          document?: string;
+          phone?: string;
+          cep?: string;
+          address?: string;
+          endereco?: string;
+        };
       };
 
       const authResult = await verifyAdminPassword({
@@ -1196,10 +1204,74 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
 
       const adminUser = authResult.adminUser;
 
+      // Validação obrigatória dos dados do cliente (CPF, Telefone, CEP e Endereço) para envio ao PDV
+      const finalClientName = client?.name !== undefined ? String(client.name).trim() : (order.client_name ? String(order.client_name).trim() : '');
+      const finalClientDoc = client?.document !== undefined ? String(client.document).trim() : (order.client_document ? String(order.client_document).trim() : '');
+      const finalClientPhone = client?.phone !== undefined ? String(client.phone).trim() : (order.client_phone ? String(order.client_phone).trim() : '');
+      const finalClientCep = client?.cep !== undefined ? String(client.cep).trim() : (order.client_cep ? String(order.client_cep).trim() : '');
+      const finalClientAddress = client?.address !== undefined
+        ? String(client.address).trim()
+        : (client?.endereco !== undefined ? String(client.endereco).trim() : (order.client_address ? String(order.client_address).trim() : ''));
+
+      if (!finalClientName) {
+        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, o nome do cliente é obrigatório.' });
+        return;
+      }
+
+      const cleanDoc = finalClientDoc.replace(/\D/g, '');
+      if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CPF (11 dígitos) ou CNPJ (14 dígitos) válido do cliente.' });
+        return;
+      }
+
+      const cleanPhone = finalClientPhone.replace(/\D/g, '');
+      if (!cleanPhone || cleanPhone.length < 8) {
+        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório informar um telefone / WhatsApp válido do cliente.' });
+        return;
+      }
+
+      const cleanCep = finalClientCep.replace(/\D/g, '');
+      if (!cleanCep || cleanCep.length !== 8) {
+        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CEP válido (8 dígitos) do cliente.' });
+        return;
+      }
+
+      if (!finalClientAddress || finalClientAddress.length < 3) {
+        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher o endereço completo do cliente.' });
+        return;
+      }
+
       await pool.execute(
-        'UPDATE os_orders SET status = ?, updated_at = NOW(), closed_at = NOW(), finalizado_por_id = ?, finalizado_por_nome = ? WHERE id = ?',
-        [status, adminUser.id, adminUser.nome, req.params.id],
+        `UPDATE os_orders
+         SET status = 'closed',
+             updated_at = NOW(),
+             closed_at = NOW(),
+             client_name = ?,
+             client_document = ?,
+             client_phone = ?,
+             client_cep = ?,
+             client_address = ?,
+             finalizado_por_id = ?,
+             finalizado_por_nome = ?
+         WHERE id = ?`,
+        [finalClientName, finalClientDoc, finalClientPhone, finalClientCep, finalClientAddress, adminUser.id, adminUser.nome, req.params.id],
       );
+
+      // Sincroniza dados confirmados em cad_clientes
+      const clientId = order.client_id ? Number(order.client_id) : null;
+      if (clientId) {
+        await pool.execute(
+          `UPDATE cad_clientes
+           SET telefone = COALESCE(NULLIF(?, ''), telefone),
+               celular  = COALESCE(NULLIF(?, ''), celular),
+               cpf_cnpj = COALESCE(NULLIF(?, ''), cpf_cnpj),
+               cep      = COALESCE(NULLIF(?, ''), cep),
+               endereco = COALESCE(NULLIF(?, ''), endereco),
+               data_ultima_alteracao = CURDATE()
+           WHERE id = ?`,
+          [finalClientPhone, finalClientPhone, finalClientDoc, finalClientCep, finalClientAddress, clientId]
+        ).catch((e) => console.error('Erro ao atualizar cad_clientes no finalizar status:', e));
+      }
     } else {
       await pool.execute(
         'UPDATE os_orders SET status = ?, updated_at = NOW(), closed_at = NULL WHERE id = ?',
@@ -1221,12 +1293,20 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
 });
 
 // ── POST /orders/:id/finalizar ──────────────────────────────────────────────
-// Finaliza a Ordem de Serviço com validação estrita de senha de administrador
+// Finaliza a Ordem de Serviço com validação estrita de senha de administrador e confirmação dos dados do cliente
 router.post('/:id/finalizar', async (req: Request, res: Response) => {
-  const { adminPassword, adminUserId, adminEmail } = req.body as {
+  const { adminPassword, adminUserId, adminEmail, client } = req.body as {
     adminPassword?: string;
     adminUserId?: number;
     adminEmail?: string;
+    client?: {
+      name?: string;
+      document?: string;
+      phone?: string;
+      cep?: string;
+      address?: string;
+      endereco?: string;
+    };
   };
 
   try {
@@ -1273,16 +1353,74 @@ router.post('/:id/finalizar', async (req: Request, res: Response) => {
 
     const adminUser = authResult.adminUser;
 
+    // Validação obrigatória dos dados do cliente (CPF, Telefone, CEP e Endereço) para envio ao PDV
+    const finalClientName = client?.name !== undefined ? String(client.name).trim() : (order.client_name ? String(order.client_name).trim() : '');
+    const finalClientDoc = client?.document !== undefined ? String(client.document).trim() : (order.client_document ? String(order.client_document).trim() : '');
+    const finalClientPhone = client?.phone !== undefined ? String(client.phone).trim() : (order.client_phone ? String(order.client_phone).trim() : '');
+    const finalClientCep = client?.cep !== undefined ? String(client.cep).trim() : (order.client_cep ? String(order.client_cep).trim() : '');
+    const finalClientAddress = client?.address !== undefined
+      ? String(client.address).trim()
+      : (client?.endereco !== undefined ? String(client.endereco).trim() : (order.client_address ? String(order.client_address).trim() : ''));
+
+    if (!finalClientName) {
+      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, o nome do cliente é obrigatório.' });
+      return;
+    }
+
+    const cleanDoc = finalClientDoc.replace(/\D/g, '');
+    if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CPF (11 dígitos) ou CNPJ (14 dígitos) válido do cliente.' });
+      return;
+    }
+
+    const cleanPhone = finalClientPhone.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 8) {
+      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório informar um telefone / WhatsApp válido do cliente.' });
+      return;
+    }
+
+    const cleanCep = finalClientCep.replace(/\D/g, '');
+    if (!cleanCep || cleanCep.length !== 8) {
+      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CEP válido (8 dígitos) do cliente.' });
+      return;
+    }
+
+    if (!finalClientAddress || finalClientAddress.length < 3) {
+      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher o endereço completo do cliente.' });
+      return;
+    }
+
     await pool.execute(
       `UPDATE os_orders
        SET status = 'closed',
            closed_at = NOW(),
+           client_name = ?,
+           client_document = ?,
+           client_phone = ?,
+           client_cep = ?,
+           client_address = ?,
            finalizado_por_id = ?,
            finalizado_por_nome = ?,
            updated_at = NOW()
        WHERE id = ?`,
-      [adminUser.id, adminUser.nome, req.params.id]
+      [finalClientName, finalClientDoc, finalClientPhone, finalClientCep, finalClientAddress, adminUser.id, adminUser.nome, req.params.id]
     );
+
+    // Sincroniza dados confirmados em cad_clientes
+    const clientId = order.client_id ? Number(order.client_id) : null;
+    if (clientId) {
+      await pool.execute(
+        `UPDATE cad_clientes
+         SET telefone = COALESCE(NULLIF(?, ''), telefone),
+             celular  = COALESCE(NULLIF(?, ''), celular),
+             cpf_cnpj = COALESCE(NULLIF(?, ''), cpf_cnpj),
+             cep      = COALESCE(NULLIF(?, ''), cep),
+             endereco = COALESCE(NULLIF(?, ''), endereco),
+             data_ultima_alteracao = CURDATE()
+         WHERE id = ?`,
+        [finalClientPhone, finalClientPhone, finalClientDoc, finalClientCep, finalClientAddress, clientId]
+      ).catch((e) => console.error('Erro ao atualizar cad_clientes no finalizar:', e));
+    }
 
     const [updRows] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
     const updated = (updRows as Record<string, unknown>[])[0];

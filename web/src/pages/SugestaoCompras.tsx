@@ -89,7 +89,6 @@ export default function SugestaoCompras() {
         dias_cobertura: diasCobertura,
         apenas_produtos: apenasProdutos ? '1' : '0',
       }),
-    staleTime: 60_000,
   })
 
   const resumo = data?.resumo

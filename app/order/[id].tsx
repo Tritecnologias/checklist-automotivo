@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Keyboard,
   Share,
@@ -97,8 +98,9 @@ export default function OrderScreen() {
       qc.invalidateQueries({ queryKey: ['orders'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    onError: () => {
+    onError: (err: any) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Atenção', err?.message || 'Não foi possível alterar o status da OS.');
     },
   });
 
@@ -109,8 +111,12 @@ export default function OrderScreen() {
       qc.invalidateQueries({ queryKey: ['orders'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
-    onError: () => {
+    onError: (err: any) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert(
+        'Atenção ao Aprovar Orçamento',
+        err?.message || 'Não foi possível aprovar o orçamento. Verifique se o endereço e CEP do cliente foram informados.'
+      );
     },
   });
 
@@ -216,11 +222,11 @@ export default function OrderScreen() {
 
   const handleCloseRequest = useCallback(() => {
     if (!order) return;
-    setPendingAction({
-      type: 'close',
-      itemId: order.id,
-      itemDescription: `Encerrar OS: ${order.vehicle.plate}`,
-    });
+    Alert.alert(
+      'Finalizar Ordem de Serviço',
+      'Por segurança e integração direta com o PDV, o encerramento da OS deve ser realizado pelo Painel Web por um Administrador (com conferência obrigatória dos dados do cliente e senha administrativa).',
+      [{ text: 'Entendido', style: 'default' }]
+    );
   }, [order]);
 
   const handleReopenRequest = useCallback(() => {

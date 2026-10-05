@@ -65,7 +65,6 @@ export default function CurvaAbc() {
   const { data: tiposProdutos } = useQuery<ProdutoTipo[]>({
     queryKey: ['admin-product-types'],
     queryFn: () => adminApi.getProductTypes(),
-    staleTime: 5 * 60_000,
   })
 
   // Query Curva ABC (recarrega no servidor apenas quando o período ou flag de peças muda)
@@ -82,7 +81,6 @@ export default function CurvaAbc() {
         data_fim: isCustomDate ? dataFim : undefined,
         apenas_produtos: apenasProdutos ? '1' : '0',
       }),
-    staleTime: 60_000,
   })
 
   const resumo = data?.resumo

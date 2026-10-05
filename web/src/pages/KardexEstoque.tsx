@@ -84,7 +84,6 @@ export default function KardexEstoque() {
   const { data: produtosEstoqueRes } = useQuery({
     queryKey: ['estoque-produtos-select', tid],
     queryFn: () => erpApi.estoque({ search: '', filtro: '', page: 1 }),
-    staleTime: 5 * 60_000,
   })
   const produtosLista: ProdutoEstoque[] = produtosEstoqueRes?.data || []
 
@@ -113,7 +112,6 @@ export default function KardexEstoque() {
         page: pagina,
         limit: itensPorPagina,
       }),
-    staleTime: 30_000,
   })
 
   const resumo = data?.resumo

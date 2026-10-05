@@ -130,6 +130,7 @@ export default function Contas() {
       page,
     }),
     placeholderData: keepPreviousData,
+    refetchInterval: 15_000,
   })
 
   const { mutate: receber, isPending: recebendo } = useMutation({

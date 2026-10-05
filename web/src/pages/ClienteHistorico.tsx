@@ -241,7 +241,6 @@ function VendaRow({
     queryKey: ['venda-detail', v.controle],
     queryFn: () => erpApi.venda(v.controle),
     enabled: isOpen,
-    staleTime: Infinity,
   })
 
   const itens = (detail as Venda | undefined)?.itens ?? []
@@ -351,7 +350,6 @@ export default function ClienteHistorico() {
         qc.fetchQuery<Venda>({
           queryKey: ['venda-detail', v.controle],
           queryFn: () => erpApi.venda(v.controle),
-          staleTime: Infinity,
         })
       )
     )

@@ -191,6 +191,7 @@ export default function OficinaProdutividade() {
         status: statusFiltro,
         mecanico_id: mecanicoFiltro !== 'todos' ? Number(mecanicoFiltro) : undefined,
       }),
+    refetchInterval: 20_000,
   })
 
   // Query histórico de pagamentos para o modal de histórico
@@ -1590,38 +1591,74 @@ export default function OficinaProdutividade() {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="mecanico-ativo"
-                  checked={mecanicoForm.ativo}
-                  onChange={(e) => setMecanicoForm({ ...mecanicoForm, ativo: e.target.checked })}
-                  className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500"
-                />
-                <label htmlFor="mecanico-ativo" className="text-xs font-semibold text-slate-300 cursor-pointer">
-                  Mecânico Ativo na Oficina
+              {/* Função na Oficina: Mecânico Titular vs Auxiliar (Mutuamente exclusivos) */}
+              <div className="space-y-2 pt-1 border-t border-slate-800/80">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Função / Papel na Oficina
                 </label>
-              </div>
 
-              {/* Checkbox Auxiliar de Mecânico */}
-              <div className="flex items-start gap-2 pt-1 pb-1">
-                <input
-                  type="checkbox"
-                  id="mecanico-auxiliar"
-                  checked={mecanicoForm.is_auxiliar}
-                  onChange={(e) => setMecanicoForm({ ...mecanicoForm, is_auxiliar: e.target.checked })}
-                  className="w-4 h-4 mt-0.5 rounded bg-slate-800 border-slate-700 text-amber-500 focus:ring-amber-500 cursor-pointer"
-                />
-                <div>
-                  <label htmlFor="mecanico-auxiliar" className="text-xs font-semibold text-amber-300 cursor-pointer flex items-center gap-1.5">
-                    <span>Auxiliar de Mecânico / Ajudante</span>
-                    <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.2 rounded font-medium">
-                      Equipe
-                    </span>
-                  </label>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Identifica este profissional como auxiliar. Ele poderá ser atribuído na Ordem de Serviço para trabalhar junto com o mecânico titular.
-                  </p>
+                {/* Checkbox Mecânico Ativo na Oficina */}
+                <div className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-all ${
+                  mecanicoForm.ativo && !mecanicoForm.is_auxiliar
+                    ? 'bg-blue-950/30 border-blue-800/60'
+                    : 'bg-slate-950/40 border-slate-800 hover:border-slate-700'
+                }`}>
+                  <input
+                    type="checkbox"
+                    id="mecanico-ativo"
+                    checked={mecanicoForm.ativo && !mecanicoForm.is_auxiliar}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setMecanicoForm({ ...mecanicoForm, ativo: true, is_auxiliar: false });
+                      } else {
+                        setMecanicoForm({ ...mecanicoForm, ativo: false, is_auxiliar: false });
+                      }
+                    }}
+                    className="w-4 h-4 mt-0.5 rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="mecanico-ativo" className="text-xs font-semibold text-slate-200 cursor-pointer flex items-center gap-1.5">
+                      <span>Mecânico Ativo na Oficina</span>
+                      <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1.5 py-0.2 rounded font-medium">
+                        Titular
+                      </span>
+                    </label>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Profissional atua como mecânico titular responsável por serviços e peças na oficina.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Checkbox Auxiliar de Mecânico */}
+                <div className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-all ${
+                  mecanicoForm.ativo && mecanicoForm.is_auxiliar
+                    ? 'bg-amber-950/30 border-amber-800/60'
+                    : 'bg-slate-950/40 border-slate-800 hover:border-slate-700'
+                }`}>
+                  <input
+                    type="checkbox"
+                    id="mecanico-auxiliar"
+                    checked={mecanicoForm.ativo && mecanicoForm.is_auxiliar}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setMecanicoForm({ ...mecanicoForm, ativo: true, is_auxiliar: true });
+                      } else {
+                        setMecanicoForm({ ...mecanicoForm, ativo: false, is_auxiliar: false });
+                      }
+                    }}
+                    className="w-4 h-4 mt-0.5 rounded bg-slate-800 border-slate-700 text-amber-500 focus:ring-amber-500 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="mecanico-auxiliar" className="text-xs font-semibold text-amber-300 cursor-pointer flex items-center gap-1.5">
+                      <span>Auxiliar de Mecânico / Ajudante</span>
+                      <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.2 rounded font-medium">
+                        Equipe
+                      </span>
+                    </label>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Identifica este profissional como auxiliar. Ele poderá ser atribuído na Ordem de Serviço para trabalhar junto com o mecânico titular.
+                    </p>
+                  </div>
                 </div>
               </div>
 

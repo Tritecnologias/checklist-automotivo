@@ -86,7 +86,18 @@ export const api = {
     request<OrderAdminUser[]>(`/orders/administradores${tenantId ? `?tenantId=${tenantId}` : ''}`),
   finalizarOrder: (
     id: string,
-    auth: { adminPassword: string; adminUserId?: number; adminEmail?: string },
+    auth: {
+      adminPassword: string
+      adminUserId?: number
+      adminEmail?: string
+      client?: {
+        name?: string
+        document?: string
+        phone?: string
+        cep?: string
+        address?: string
+      }
+    },
   ) =>
     request<Order>(`/orders/${id}/finalizar`, {
       method: 'POST',
@@ -95,7 +106,18 @@ export const api = {
   updateOrderStatus: (
     id: string,
     status: string,
-    auth?: { adminPassword?: string; adminUserId?: number; adminEmail?: string },
+    auth?: {
+      adminPassword?: string
+      adminUserId?: number
+      adminEmail?: string
+      client?: {
+        name?: string
+        document?: string
+        phone?: string
+        cep?: string
+        address?: string
+      }
+    },
   ) =>
     request<Order>(`/orders/${id}/status`, {
       method: 'PATCH',

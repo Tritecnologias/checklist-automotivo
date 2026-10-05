@@ -65,7 +65,6 @@ export default function RelatorioMultiLojas() {
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['relatorio-multi-lojas', dataInicio, dataFim],
     queryFn: () => erpApi.relatorioMultiLojas({ data_inicio: dataInicio, data_fim: dataFim }),
-    staleTime: 60_000,
   })
 
   const handlePresetClick = (key: keyof typeof presets) => {
