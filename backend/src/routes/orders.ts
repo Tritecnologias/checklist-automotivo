@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { pool } from '../db';
 import { requireAuth, allowedTenants, type JwtPayload } from '../middleware/auth';
 
@@ -7,6 +8,94 @@ const router = Router();
 
 // Todos os endpoints de OS exigem autenticação JWT
 router.use(requireAuth);
+
+/**
+ * Valida se a senha pertence a um usuário com perfil de Administrador ('owner' ou 'manager')
+ * e se este administrador tem permissão para a unidade (tenantId) da OS.
+ */
+async function verifyAdminPassword(params: {
+  password?: string;
+  adminUserId?: number;
+  adminEmail?: string;
+  currentUserId: number;
+  orderTenantId: number;
+}): Promise<{ ok: boolean; message?: string; adminUser?: any }> {
+  const { password, adminUserId, adminEmail, currentUserId, orderTenantId } = params;
+
+  if (!password || !password.trim()) {
+    return {
+      ok: false,
+      message: 'A senha do administrador é obrigatória para finalizar a Ordem de Serviço.',
+    };
+  }
+
+  let adminUser: any = null;
+
+  if (adminUserId && Number(adminUserId) > 0) {
+    const [rows] = await pool.query<any>(
+      'SELECT id, nome, email, senha_hash, role, tenant_id, ativo FROM users WHERE id = ?',
+      [Number(adminUserId)]
+    );
+    adminUser = rows[0];
+  } else if (adminEmail && adminEmail.trim()) {
+    const [rows] = await pool.query<any>(
+      'SELECT id, nome, email, senha_hash, role, tenant_id, ativo FROM users WHERE LOWER(email) = LOWER(?)',
+      [adminEmail.trim()]
+    );
+    adminUser = rows[0];
+  } else {
+    // Tenta validar com o usuário logado
+    const [rows] = await pool.query<any>(
+      'SELECT id, nome, email, senha_hash, role, tenant_id, ativo FROM users WHERE id = ?',
+      [currentUserId]
+    );
+    adminUser = rows[0];
+  }
+
+  if (!adminUser || !adminUser.ativo) {
+    return {
+      ok: false,
+      message: 'Usuário administrador não encontrado ou está inativo no sistema.',
+    };
+  }
+
+  // Verifica se o papel é realmente de Administrador (Proprietário ou Gerente)
+  if (!['owner', 'manager'].includes(adminUser.role)) {
+    return {
+      ok: false,
+      message: 'Apenas usuários Administradores (Proprietário ou Gerente) possuem permissão para finalizar a Ordem de Serviço.',
+    };
+  }
+
+  // Se for manager, verifica se tem acesso à loja da OS
+  if (adminUser.role === 'manager') {
+    const [tRows] = await pool.query<any>(
+      'SELECT tenant_id FROM user_tenants WHERE user_id = ?',
+      [adminUser.id]
+    );
+    const tenantIds: number[] = tRows.map((r: any) => Number(r.tenant_id));
+    if (adminUser.tenant_id) {
+      tenantIds.push(Number(adminUser.tenant_id));
+    }
+    if (tenantIds.length > 0 && !tenantIds.includes(orderTenantId)) {
+      return {
+        ok: false,
+        message: 'O administrador informado não tem permissão para gerenciar a loja desta Ordem de Serviço.',
+      };
+    }
+  }
+
+  // Valida a senha usando bcrypt
+  const passwordOk = await bcrypt.compare(password.trim(), adminUser.senha_hash);
+  if (!passwordOk) {
+    return {
+      ok: false,
+      message: 'Senha de administrador incorreta. Finalização de OS não autorizada.',
+    };
+  }
+
+  return { ok: true, adminUser };
+}
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -184,6 +273,8 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
     laborAmount: Number(order.labor_amount ?? 0),
     totalAmount: Number(order.total_amount),
     discountAmount: Number(order.discount_amount ?? 0),
+    finalizadoPorId: order.finalizado_por_id ? Number(order.finalizado_por_id) : null,
+    finalizadoPorNome: (order.finalizado_por_nome as string | null) ?? null,
     createdAt: order.created_at,
     updatedAt: order.updated_at,
     closedAt: order.closed_at ?? null,
@@ -366,6 +457,36 @@ router.get('/lookup-plate/:plate', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('GET /orders/lookup-plate error:', err);
     res.status(500).json({ message: 'Erro ao consultar placa' });
+  }
+});
+
+// ── GET /orders/administradores ─────────────────────────────────────────────
+// Lista os administradores ativos (owner e manager) para autorização de finalização
+router.get('/administradores', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.query.tenantId ? Number(req.query.tenantId) : null;
+    let query = `
+      SELECT u.id, u.nome, u.email, u.role, u.tenant_id
+      FROM users u
+      WHERE u.ativo = 1 AND u.role IN ('owner', 'manager')
+    `;
+    const params: any[] = [];
+    if (tenantId && tenantId > 0) {
+      query += ` AND (u.role = 'owner' OR u.tenant_id = ? OR u.id IN (SELECT user_id FROM user_tenants WHERE tenant_id = ?))`;
+      params.push(tenantId, tenantId);
+    }
+    query += ` ORDER BY FIELD(u.role, 'owner', 'manager'), u.nome ASC`;
+    const [rows] = await pool.query<any>(query, params);
+    res.json(rows.map((u: any) => ({
+      id: u.id,
+      nome: u.nome,
+      email: u.email,
+      role: u.role,
+      roleLabel: u.role === 'owner' ? 'Proprietário / Super Admin' : 'Gerente / Administrador',
+    })));
+  } catch (err) {
+    console.error('GET /orders/administradores error:', err);
+    res.status(500).json({ message: 'Erro ao buscar administradores' });
   }
 });
 
@@ -1051,9 +1172,33 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
     }
 
     if (status === 'closed') {
+      const { adminPassword, adminUserId, adminEmail } = req.body as {
+        adminPassword?: string;
+        adminUserId?: number;
+        adminEmail?: string;
+      };
+
+      const authResult = await verifyAdminPassword({
+        password: adminPassword,
+        adminUserId,
+        adminEmail,
+        currentUserId: req.user!.userId,
+        orderTenantId: Number(order.tenant_id),
+      });
+
+      if (!authResult.ok) {
+        const code = authResult.message?.includes('obrigatória') ? 400
+          : authResult.message?.includes('incorreta') ? 401
+          : 403;
+        res.status(code).json({ message: authResult.message });
+        return;
+      }
+
+      const adminUser = authResult.adminUser;
+
       await pool.execute(
-        'UPDATE os_orders SET status = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?',
-        [status, req.params.id],
+        'UPDATE os_orders SET status = ?, updated_at = NOW(), closed_at = NOW(), finalizado_por_id = ?, finalizado_por_nome = ? WHERE id = ?',
+        [status, adminUser.id, adminUser.nome, req.params.id],
       );
     } else {
       await pool.execute(
@@ -1072,6 +1217,81 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('PATCH /orders/:id/status error:', err);
     res.status(500).json({ message: 'Erro ao atualizar status da OS' });
+  }
+});
+
+// ── POST /orders/:id/finalizar ──────────────────────────────────────────────
+// Finaliza a Ordem de Serviço com validação estrita de senha de administrador
+router.post('/:id/finalizar', async (req: Request, res: Response) => {
+  const { adminPassword, adminUserId, adminEmail } = req.body as {
+    adminPassword?: string;
+    adminUserId?: number;
+    adminEmail?: string;
+  };
+
+  try {
+    const [rows] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (rows as Record<string, unknown>[])[0];
+    if (!order) {
+      res.status(404).json({ message: 'OS não encontrada' });
+      return;
+    }
+
+    const allowedT = allowedTenants(req.user!);
+    if (allowedT !== null && !allowedT.includes(Number(order.tenant_id))) {
+      res.status(403).json({ message: 'Sem acesso a esta OS' });
+      return;
+    }
+
+    if (order.venda_controle) {
+      res.status(422).json({
+        message: `Esta OS já foi finalizada no PDV (Venda #${order.venda_controle}) e não pode ter seu status alterado.`
+      });
+      return;
+    }
+
+    if (order.status === 'closed') {
+      res.status(400).json({ message: 'Esta Ordem de Serviço já está finalizada.' });
+      return;
+    }
+
+    const authResult = await verifyAdminPassword({
+      password: adminPassword,
+      adminUserId,
+      adminEmail,
+      currentUserId: req.user!.userId,
+      orderTenantId: Number(order.tenant_id),
+    });
+
+    if (!authResult.ok) {
+      const code = authResult.message?.includes('obrigatória') ? 400
+        : authResult.message?.includes('incorreta') ? 401
+        : 403;
+      res.status(code).json({ message: authResult.message });
+      return;
+    }
+
+    const adminUser = authResult.adminUser;
+
+    await pool.execute(
+      `UPDATE os_orders
+       SET status = 'closed',
+           closed_at = NOW(),
+           finalizado_por_id = ?,
+           finalizado_por_nome = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [adminUser.id, adminUser.nome, req.params.id]
+    );
+
+    const [updRows] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const updated = (updRows as Record<string, unknown>[])[0];
+    const items = await fetchItems(req.params.id);
+
+    res.json(formatOrder(updated, items));
+  } catch (err) {
+    console.error('POST /orders/:id/finalizar error:', err);
+    res.status(500).json({ message: 'Erro ao finalizar Ordem de Serviço' });
   }
 });
 

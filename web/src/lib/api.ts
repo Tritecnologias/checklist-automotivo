@@ -1,5 +1,5 @@
 import type {
-  Order, OrderItem, CatalogItem, Vehicle, OrderClient, ErpDashboard, CaixaSession, CaixaStatusResponse, CaixaTotaisPeriodo, Venda, ProdutoPdv,
+  Order, OrderItem, CatalogItem, Vehicle, OrderClient, OrderAdminUser, ErpDashboard, CaixaSession, CaixaStatusResponse, CaixaTotaisPeriodo, Venda, ProdutoPdv,
   ClientePdv, Lancamento, ProdutoEstoque, ClienteErp, ClienteHistorico,
   TenantAdmin, UserAdmin, Instalacao, OsEncerradaPdv, ImportarOsPdvResponse, TotaisContas,
   ContaPagar, TotaisContasPagar, CategoriaContaPagar, Fornecedor,
@@ -82,10 +82,24 @@ export const api = {
     request<Order>(`/orders/${id}/approve`, {
       method: 'POST',
     }),
-  updateOrderStatus: (id: string, status: string) =>
+  getAdministradores: (tenantId?: number | null) =>
+    request<OrderAdminUser[]>(`/orders/administradores${tenantId ? `?tenantId=${tenantId}` : ''}`),
+  finalizarOrder: (
+    id: string,
+    auth: { adminPassword: string; adminUserId?: number; adminEmail?: string },
+  ) =>
+    request<Order>(`/orders/${id}/finalizar`, {
+      method: 'POST',
+      body: JSON.stringify(auth),
+    }),
+  updateOrderStatus: (
+    id: string,
+    status: string,
+    auth?: { adminPassword?: string; adminUserId?: number; adminEmail?: string },
+  ) =>
     request<Order>(`/orders/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, ...auth }),
     }),
   reopenOrder: (id: string) =>
     request<Order>(`/orders/${id}/status`, {

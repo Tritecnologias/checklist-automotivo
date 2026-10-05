@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS `os_orders` (
   `client_document` VARCHAR(30)   NULL,
   `client_cep`      VARCHAR(15)   NULL,
   `client_address`  VARCHAR(255)  NULL,
+  `finalizado_por_id` INT         NULL DEFAULT NULL,
+  `finalizado_por_nome` VARCHAR(100) NULL DEFAULT NULL,
   `created_at`   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `closed_at`    DATETIME      NULL DEFAULT NULL,

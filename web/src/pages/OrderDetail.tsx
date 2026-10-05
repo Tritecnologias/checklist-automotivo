@@ -14,10 +14,13 @@ import {
   Check,
   AlertCircle,
   ShoppingCart,
+  ShieldCheck,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import { api, oficinaApi } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
-import type { OrderItem, CatalogItem, Mecanico } from '../types'
+import type { OrderItem, CatalogItem, Mecanico, OrderAdminUser } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import { lookupCep, formatCep } from '../lib/cep'
 
@@ -39,7 +42,11 @@ export default function OrderDetail() {
   const qc = useQueryClient()
 
   // ── estado de modais de OS ────────────────────────────────────────────────
-  const [confirmClose, setConfirmClose]     = useState(false)
+  const [confirmClose, setConfirmClose]                 = useState(false)
+  const [adminPassword, setAdminPassword]               = useState('')
+  const [adminPasswordVisible, setAdminPasswordVisible] = useState(false)
+  const [selectedAdminId, setSelectedAdminId]           = useState<number | null>(null)
+  const [closeError, setCloseError]                     = useState('')
   const [showReopenPin, setShowReopenPin]   = useState(false)
   const [pin, setPin]                       = useState('')
   const [pinError, setPinError]             = useState('')
@@ -114,8 +121,9 @@ export default function OrderDetail() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const { currentTenant } = useAuth()
+  const { currentTenant, user: currentUser } = useAuth()
   const tid = currentTenant?.id ?? null
+  const isAdmin = currentUser?.role === 'owner' || currentUser?.role === 'manager'
 
   // ── Queries ───────────────────────────────────────────────────────────────
   const { data: order, isLoading, isError } = useQuery({
@@ -125,6 +133,13 @@ export default function OrderDetail() {
   })
 
   const isClosed = order?.status === 'closed' || !!order?.vendaControle
+
+  // Lista de Administradores para autorização de finalização
+  const { data: administradores = [] } = useQuery<OrderAdminUser[]>({
+    queryKey: ['administradores', order?.tenantId],
+    queryFn: () => api.getAdministradores(order?.tenantId),
+    enabled: confirmClose,
+  })
 
   const { data: searchResults, isFetching: searchingCatalog } = useQuery({
     queryKey: ['catalog-search', debouncedQuery],
@@ -229,13 +244,34 @@ export default function OrderDetail() {
     },
   })
 
-  // Encerrar OS
+  // Finalizar OS (exige senha de administrador)
   const { mutate: closeOrder, isPending: closing } = useMutation({
-    mutationFn: () => api.updateOrderStatus(id!, 'closed'),
+    mutationFn: () => {
+      if (!adminPassword.trim()) {
+        throw new Error('Informe a senha do administrador para finalizar a OS.')
+      }
+      const adminIdToUse = isAdmin
+        ? (selectedAdminId ?? currentUser?.id ?? null)
+        : selectedAdminId
+
+      if (!adminIdToUse) {
+        throw new Error('Selecione o administrador responsável para autorizar a finalização.')
+      }
+
+      return api.finalizarOrder(id!, {
+        adminPassword: adminPassword.trim(),
+        adminUserId: adminIdToUse,
+      })
+    },
     onSuccess: (updated) => {
       qc.setQueryData(['order', id], updated)
       qc.invalidateQueries({ queryKey: ['orders'] })
       setConfirmClose(false)
+      setAdminPassword('')
+      setCloseError('')
+    },
+    onError: (err: any) => {
+      setCloseError(err.message || 'Erro ao finalizar Ordem de Serviço')
     },
   })
 
@@ -737,14 +773,24 @@ export default function OrderDetail() {
 
       {/* Banner somente-leitura */}
       {isClosed && (
-        <div className="flex items-center gap-3 bg-slate-800/60 border border-slate-700 rounded-xl px-5 py-3">
-          <span className="text-slate-400 text-lg">🔒</span>
-          <div>
-            <p className="text-sm font-semibold text-slate-300">OS Encerrada — Somente leitura</p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Nenhuma alteração pode ser feita. Solicite a reabertura a um administrador para editar itens.
-            </p>
+        <div className="flex items-center justify-between flex-wrap gap-3 bg-slate-800/60 border border-slate-700 rounded-xl px-5 py-3">
+          <div className="flex items-center gap-3">
+            <span className="text-slate-400 text-lg">🔒</span>
+            <div>
+              <p className="text-sm font-semibold text-slate-300">
+                OS Finalizada {order.finalizadoPorNome ? `por ${order.finalizadoPorNome}` : ''} — Somente leitura
+              </p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {order.closedAt ? `Finalizada em ${fmtDate(order.closedAt)}. ` : ''}
+                Nenhuma alteração pode ser feita. Solicite a reabertura a um administrador para editar itens.
+              </p>
+            </div>
           </div>
+          {order.finalizadoPorNome && (
+            <span className="text-xs font-mono px-3 py-1 bg-slate-900 border border-slate-700 text-slate-300 rounded-lg">
+              Autorizado por: <strong className="text-white">{order.finalizadoPorNome}</strong>
+            </span>
+          )}
         </div>
       )}
 
@@ -867,10 +913,22 @@ export default function OrderDetail() {
                 </button>
               ) : !isClosed ? (
                 <button
-                  onClick={() => setConfirmClose(true)}
-                  className="px-4 py-2 bg-red-900/40 hover:bg-red-900/60 text-red-400 rounded-xl text-sm font-semibold border border-red-800/50 transition-colors"
+                  onClick={() => {
+                    setCloseError('')
+                    setAdminPassword('')
+                    setAdminPasswordVisible(false)
+                    if (isAdmin && currentUser?.id) {
+                      setSelectedAdminId(currentUser.id)
+                    } else if (administradores.length > 0) {
+                      setSelectedAdminId(administradores[0].id)
+                    }
+                    setConfirmClose(true)
+                  }}
+                  className="px-4 py-2.5 bg-red-900/40 hover:bg-red-900/60 text-red-300 rounded-xl text-sm font-bold border border-red-800/60 shadow-lg shadow-red-950/40 transition-all flex items-center gap-2"
+                  title="Finalizar Ordem de Serviço (Exige confirmação com Senha de Administrador)"
                 >
-                  🔒 Encerrar OS
+                  <span>🔒</span>
+                  <span>Finalizar OS</span>
                 </button>
               ) : order.vendaControle ? (
                 <div
@@ -1516,30 +1574,155 @@ export default function OrderDetail() {
       )}
 
       {/* ── MODAIS EXISTENTES (ENCERRAMENTO, REABERTURA E CLIENTE) ────────────── */}
-      {/* Modal — Confirmar Encerramento */}
+      {/* Modal — Finalizar OS com Senha de Administrador */}
       {confirmClose && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
-          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-sm">
-            <h2 className="text-lg font-bold text-white mb-2">Encerrar OS?</h2>
-            <p className="text-slate-400 text-sm mb-6">
-              A OS <strong className="text-white">{order.vehicle.plate}</strong> será marcada como encerrada.
-              Para editar novamente, um administrador precisará reabri-la.
-            </p>
-            <div className="flex gap-3">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 text-xl font-bold">
+                  🔒
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white leading-tight">Finalizar Ordem de Serviço</h2>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    OS #{order.id.split('-')[0].toUpperCase()} • {order.vehicle.plate}
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={() => setConfirmClose(false)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800"
+                type="button"
+                onClick={() => {
+                  setConfirmClose(false)
+                  setAdminPassword('')
+                  setCloseError('')
+                }}
+                className="text-slate-500 hover:text-slate-300 p-1 rounded-lg"
               >
-                Cancelar
-              </button>
-              <button
-                onClick={() => closeOrder()}
-                disabled={closing}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-semibold disabled:opacity-50"
-              >
-                {closing ? 'Encerrando…' : 'Confirmar'}
+                <X className="w-5 h-5" />
               </button>
             </div>
+
+            <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5 text-xs text-slate-300 mb-4 space-y-1">
+              <p>
+                A finalização encerra esta OS. Após finalizada, nenhuma alteração poderá ser feita sem reabertura autorizada.
+              </p>
+              <p className="font-semibold text-amber-300 flex items-center gap-1.5 pt-1">
+                <span>🛡️</span>
+                <span>Exclusivo para Administradores com validação por Senha.</span>
+              </p>
+            </div>
+
+            {closeError && (
+              <div className="bg-red-950/60 border border-red-800 rounded-xl px-4 py-3 text-red-300 text-xs mb-4 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{closeError}</span>
+              </div>
+            )}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                closeOrder()
+              }}
+              className="space-y-4"
+            >
+              {isAdmin ? (
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-3">
+                  <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Administrador Responsável
+                  </span>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-white">{currentUser?.nome}</p>
+                      <p className="text-xs text-slate-400">{currentUser?.email}</p>
+                    </div>
+                    <span className="px-2 py-0.5 text-[11px] font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      {currentUser?.role === 'owner' ? 'Proprietário' : 'Gerente'}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Selecione o Administrador Responsável *
+                  </label>
+                  <select
+                    value={selectedAdminId ?? ''}
+                    onChange={(e) => setSelectedAdminId(Number(e.target.value))}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
+                    required
+                  >
+                    <option value="">Selecione um administrador...</option>
+                    {administradores.map((adm) => (
+                      <option key={adm.id} value={adm.id}>
+                        {adm.nome} ({adm.email}) — [{adm.roleLabel}]
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  {isAdmin ? 'Sua Senha de Administrador *' : 'Senha do Administrador *'}
+                </label>
+                <div className="relative">
+                  <input
+                    type={adminPasswordVisible ? 'text' : 'password'}
+                    value={adminPassword}
+                    onChange={(e) => {
+                      setAdminPassword(e.target.value)
+                      setCloseError('')
+                    }}
+                    placeholder="Digite a sua senha de acesso..."
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 placeholder-slate-500"
+                    autoFocus
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAdminPasswordVisible(!adminPasswordVisible)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1"
+                    tabIndex={-1}
+                    title={adminPasswordVisible ? 'Ocultar senha' : 'Exibir senha'}
+                  >
+                    {adminPasswordVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmClose(false)
+                    setAdminPassword('')
+                    setCloseError('')
+                  }}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={closing || !adminPassword.trim() || (!isAdmin && !selectedAdminId)}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold shadow-lg shadow-red-900/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {closing ? (
+                    <>
+                      <span className="animate-spin text-sm">↻</span>
+                      <span>Validando…</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🔒</span>
+                      <span>Finalizar OS</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

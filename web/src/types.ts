@@ -439,9 +439,19 @@ export interface Order {
   laborAmount: number
   totalAmount: number
   discountAmount?: number
+  finalizadoPorId?: number | null
+  finalizadoPorNome?: string | null
   createdAt: string
   updatedAt: string
   closedAt: string | null
+}
+
+export interface OrderAdminUser {
+  id: number
+  nome: string
+  email: string
+  role: string
+  roleLabel: string
 }
 
 // ── Tipos para Integração OS no PDV ──────────────────────────────────────────

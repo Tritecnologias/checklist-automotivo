@@ -114,6 +114,20 @@ async function runMigrations() {
     `);
   } catch {}
 
+  // finalizado_por em os_orders (registro do administrador que encerrou/finalizou a OS com senha)
+  const [[{ cntFinalizadoCol }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntFinalizadoCol FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'finalizado_por_nome'`
+  );
+  if (Number(cntFinalizadoCol) === 0) {
+    await pool.query(`
+      ALTER TABLE os_orders
+      ADD COLUMN finalizado_por_id INT NULL,
+      ADD COLUMN finalizado_por_nome VARCHAR(100) NULL
+    `);
+    console.log('[migration] os_orders colunas finalizado_por adicionadas');
+  }
+
   // tenant_id em os_orders
   const [[{ cnt3 }]] = await pool.query<any>(
     `SELECT COUNT(*) as cnt3 FROM information_schema.COLUMNS
