@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { SlidersHorizontal } from 'lucide-react'
+import { SlidersHorizontal, Lock, Wallet, ArrowRight } from 'lucide-react'
 import { api, erpApi } from '../lib/api'
 import type { ProdutoPdv, ClientePdv, OsEncerradaPdv } from '../types'
 import { useAuth } from '../contexts/AuthContext'
@@ -68,10 +68,13 @@ export default function Pdv() {
   const [importandoOsId, setImportandoOsId]         = useState<string | null>(null)
   const [osFeedback, setOsFeedback]                 = useState<string | null>(null)
 
-  const { data: statusCaixa } = useQuery({
+  const { data: statusCaixa, isLoading: carregandoCaixa } = useQuery({
     queryKey: ['caixa-status', tid],
     queryFn: erpApi.caixaStatus,
+    refetchInterval: 15_000,
   })
+
+  const isCaixaAberto = Boolean(statusCaixa && statusCaixa.aberto && statusCaixa.id)
 
   const { data: parametros } = useQuery({
     queryKey: ['pdv-parametros', tid],
@@ -82,14 +85,14 @@ export default function Pdv() {
   const { data: produtos, isFetching: buscando } = useQuery({
     queryKey: ['pdv-produtos', tid, busca],
     queryFn: () => erpApi.buscaProdutos(busca),
-    enabled: busca.length >= 2,
+    enabled: isCaixaAberto && busca.length >= 2,
     placeholderData: [],
   })
 
   const { data: clientes } = useQuery({
     queryKey: ['pdv-clientes', tid, buscaCliente],
     queryFn: () => erpApi.buscaClientes(buscaCliente),
-    enabled: buscaCliente.length >= 2,
+    enabled: isCaixaAberto && buscaCliente.length >= 2,
     placeholderData: [],
   })
 
@@ -97,10 +100,14 @@ export default function Pdv() {
   const { data: ordensEncerradas = [], isFetching: buscandoOs, refetch: refetchOs } = useQuery({
     queryKey: ['pdv-os-encerradas', tid, buscaOs, apenasPendentesOs],
     queryFn: () => erpApi.listarOsEncerradas({ search: buscaOs, apenasPendentes: apenasPendentesOs }),
-    enabled: showOsModal,
+    enabled: isCaixaAberto && showOsModal,
   })
 
   const handleImportarOs = async (osId: string) => {
+    if (!isCaixaAberto) {
+      alert('O caixa está fechado. Abra o caixa antes de importar Ordens de Serviço para o PDV.')
+      return
+    }
     try {
       setImportandoOsId(osId)
       const dados = await erpApi.carregarOsPdv(osId)
@@ -146,6 +153,9 @@ export default function Pdv() {
 
   const { mutate: finalizar, isPending: finalizando } = useMutation({
     mutationFn: () => {
+      if (!isCaixaAberto) {
+        throw new Error('O caixa está fechado. Abra o caixa antes de realizar vendas no PDV.')
+      }
       if (total <= 0) {
         throw new Error('O valor total da venda não pode ser zerado (R$ 0,00).')
       }
@@ -295,7 +305,7 @@ export default function Pdv() {
   const totalPagto = Object.values(pagamento).reduce((s, v) => s + parseNum(v), 0)
   const troco = Math.max(0, totalPagto - total)
   const pagtoCobreTotal = (cart.length > 0 && totalPagto >= total) || (isVendaAvulsa && totalPagto >= total)
-  const podeFinalizar = pagtoCobreTotal && isDescontoAutorizado && total > 0
+  const podeFinalizar = pagtoCobreTotal && isDescontoAutorizado && total > 0 && isCaixaAberto
   const itensComAlertaEstoque = cart.filter(
     c => !c.produto.is_service && c.produto.controla_estoque !== 0 && (c.produto.estoque <= 0 || c.quant > c.produto.estoque)
   )
@@ -328,15 +338,77 @@ export default function Pdv() {
     }
   }
 
-  if (!statusCaixa) {
+  if (carregandoCaixa) {
     return (
-      <div className="flex flex-col items-center justify-center h-72 gap-4 text-center">
-        <p className="text-4xl">🔴</p>
-        <p className="text-white font-semibold">Caixa fechado</p>
-        <p className="text-slate-400 text-sm">Abra o caixa antes de realizar vendas.</p>
-        <a href="/erp/caixa" className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold">
-          Ir para Caixa
-        </a>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
+        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-slate-400 text-sm font-medium">Verificando status do caixa...</p>
+      </div>
+    )
+  }
+
+  if (!isCaixaAberto) {
+    const ultimo = statusCaixa?.ultimo_caixa_fechado
+    return (
+      <div className="flex items-center justify-center min-h-[calc(100vh-10rem)] px-4">
+        <div className="max-w-lg w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center space-y-6">
+          <div className="relative inline-flex items-center justify-center">
+            <div className="w-20 h-20 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 text-3xl shadow-inner">
+              <Lock className="w-10 h-10" />
+            </div>
+            <span className="absolute -top-1 -right-1 flex h-4 w-4">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500"></span>
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+              Caixa Fechado
+            </div>
+            <h2 className="text-2xl font-bold text-white tracking-tight">PDV Bloqueado</h2>
+            <p className="text-sm text-slate-400 leading-relaxed">
+              O caixa desta loja está atualmente fechado. Para utilizar o PDV, realizar vendas no balcão ou importar Ordens de Serviço (OS), é obrigatório realizar a abertura do caixa.
+            </p>
+          </div>
+
+          {ultimo && (
+            <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-4 text-left space-y-2.5">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Última Sessão Encerrada</p>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-400">Data e Hora:</span>
+                <span className="text-slate-200 font-mono font-medium">
+                  {fmtDate(`${ultimo.data_fechamento}T${ultimo.hora_fechamento || '00:00:00'}`)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-400">Total Fechado:</span>
+                <span className="text-emerald-400 font-bold font-mono">
+                  {R(ultimo.vr_fechamento || ultimo.vr_fechado_turno || 0)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="pt-2 flex flex-col gap-3">
+            <Link
+              to="/erp/caixa"
+              className="w-full py-3.5 px-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-950/50 transition-all flex items-center justify-center gap-2 group"
+            >
+              <Wallet className="w-4 h-4 transition-transform group-hover:scale-110" />
+              <span>Abrir Caixa Agora</span>
+              <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+            </Link>
+
+            <Link
+              to="/erp"
+              className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors text-center"
+            >
+              Voltar ao Dashboard
+            </Link>
+          </div>
+        </div>
       </div>
     )
   }
@@ -437,10 +509,19 @@ export default function Pdv() {
           {/* Botão Buscar OS Encerrada */}
           <button
             onClick={() => {
+              if (!isCaixaAberto) {
+                alert('O caixa está fechado. Abra o caixa antes de importar Ordens de Serviço para o PDV.')
+                return
+              }
               setShowOsModal(true)
               refetchOs()
             }}
-            className="px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors flex items-center gap-2 shrink-0 shadow-lg shadow-indigo-950/40"
+            disabled={!isCaixaAberto}
+            className={`px-4 py-3 text-white rounded-xl text-sm font-semibold transition-colors flex items-center gap-2 shrink-0 shadow-lg ${
+              !isCaixaAberto
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed shadow-none border border-slate-700/50'
+                : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-950/40'
+            }`}
           >
             <span>🚗</span>
             <span>Buscar OS Encerrada</span>
@@ -935,8 +1016,9 @@ export default function Pdv() {
                         ) : (
                           <button
                             onClick={() => handleImportarOs(os.id)}
-                            disabled={importandoEste}
-                            className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/50 transition-all shadow-md flex items-center gap-1.5 shrink-0"
+                            disabled={importandoEste || !isCaixaAberto}
+                            title={!isCaixaAberto ? 'O caixa está fechado. Abra o caixa antes de importar.' : undefined}
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/50 transition-all shadow-md flex items-center gap-1.5 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <span>{importandoEste ? 'Carregando…' : 'Importar para PDV →'}</span>
                           </button>

@@ -72,7 +72,7 @@ export const api = {
     }),
   updateOrderClient: (
     id: string,
-    client: { name: string; phone: string; document?: string },
+    client: { name: string; phone: string; document?: string; cep?: string; address?: string },
   ) =>
     request<Order>(`/orders/${id}/client`, {
       method: 'PATCH',

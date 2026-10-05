@@ -88,6 +88,32 @@ async function runMigrations() {
     console.log('[migration] os_orders colunas de cliente adicionadas');
   }
 
+  // colunas de endereço e CEP em os_orders (client_cep, client_address)
+  const [[{ cntCepCol }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntCepCol FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'client_cep'`
+  );
+  if (Number(cntCepCol) === 0) {
+    await pool.query(`
+      ALTER TABLE os_orders
+      ADD COLUMN client_cep VARCHAR(15) NULL,
+      ADD COLUMN client_address VARCHAR(255) NULL
+    `);
+    console.log('[migration] os_orders colunas client_cep e client_address adicionadas');
+  }
+
+  // Sincroniza retroativamente client_cep e client_address de cad_clientes se existirem
+  try {
+    await pool.query(`
+      UPDATE os_orders o
+      JOIN cad_clientes c ON c.id = o.client_id
+      SET o.client_cep = COALESCE(o.client_cep, c.cep),
+          o.client_address = COALESCE(o.client_address, c.endereco)
+      WHERE (o.client_cep IS NULL OR o.client_address IS NULL)
+        AND (c.cep IS NOT NULL OR c.endereco IS NOT NULL)
+    `);
+  } catch {}
+
   // tenant_id em os_orders
   const [[{ cnt3 }]] = await pool.query<any>(
     `SELECT COUNT(*) as cnt3 FROM information_schema.COLUMNS

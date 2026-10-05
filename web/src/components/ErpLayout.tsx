@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { erpApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import type { Tenant } from '../contexts/AuthContext'
 import {
@@ -140,6 +141,12 @@ export default function ErpLayout() {
   const { user, tenants, currentTenant, switchTenant, logout, isOwner } = useAuth()
   const visibleNav = nav.filter(item => !item.roles || item.roles.includes(user?.role ?? ''))
 
+  const { data: statusCaixa } = useQuery({
+    queryKey: ['caixa-status', currentTenant?.id],
+    queryFn: erpApi.caixaStatus,
+    refetchInterval: 20_000,
+  })
+
   function handleLogout() {
     logout()
     navigate('/login')
@@ -187,23 +194,52 @@ export default function ErpLayout() {
         {/* Área de rolagem dos itens de navegação da sidebar */}
         <div className="flex-1 overflow-y-auto">
           <nav className="px-3 py-3 space-y-1">
-            {visibleNav.map(({ to, label, icon: Icon, end }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <Icon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                <span>{label}</span>
-              </NavLink>
-            ))}
+            {visibleNav.map(({ to, label, icon: Icon, end }) => {
+              const isPdv = to === '/erp/pdv'
+              const isCaixa = to === '/erp/caixa'
+              const isAberto = Boolean(statusCaixa && statusCaixa.aberto && statusCaixa.id)
+
+              return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  className={({ isActive }) =>
+                    `group flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Icon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                    <span className="truncate">{label}</span>
+                  </div>
+
+                  {isPdv && statusCaixa && (
+                    <span
+                      title={isAberto ? 'Caixa Aberto - PDV Liberado' : 'Caixa Fechado - PDV Bloqueado'}
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        isAberto ? 'bg-emerald-400 shadow-sm shadow-emerald-400/60' : 'bg-rose-500'
+                      }`}
+                    />
+                  )}
+
+                  {isCaixa && statusCaixa && (
+                    <span
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 font-mono ${
+                        isAberto
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : 'bg-rose-500/20 text-rose-400'
+                      }`}
+                    >
+                      {isAberto ? 'Aberto' : 'Fechado'}
+                    </span>
+                  )}
+                </NavLink>
+              )
+            })}
           </nav>
 
           {/* Gestão (owner only) */}

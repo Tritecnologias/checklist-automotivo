@@ -1171,6 +1171,18 @@ router.post('/vendas', async (req, res) => {
 
     const tenantId = getErpWriteTenantId(req);
 
+    // Validação estrita: O caixa desta loja DEVE estar aberto para realizar vendas no PDV
+    const [[caixaAberto]] = await pool.query<any>(
+      `SELECT id, turno, terminal FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
+      [tenantId]
+    );
+    if (!caixaAberto) {
+      res.status(403).json({
+        message: 'O caixa está fechado. É obrigatório abrir o caixa da loja antes de realizar vendas no PDV.'
+      });
+      return;
+    }
+
     // Regra de segurança: Limite de desconto configurável para usuários comuns sem autorização do Administrador
     if (descontoAplicado > 0 && subtotalCalculado > 0) {
       let pctLimite = 4.0;
@@ -1241,12 +1253,8 @@ router.post('/vendas', async (req, res) => {
       }
     }
 
-    // Busca o caixa aberto no momento para a loja atual para vincular diretamente
-    const [[caixaAberto]] = await pool.query<any>(
-      `SELECT id, turno, terminal FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
-      [tenantId]
-    );
-    const id_caixa = caixaAberto?.id ?? null;
+    // Vincula a venda à sessão do caixa aberto
+    const id_caixa = Number(caixaAberto.id);
     const finalTurno = caixaAberto?.turno ?? turno;
     const finalTerminal = caixaAberto?.terminal ?? terminal;
     const userAuth = req.user as any;
@@ -2058,6 +2066,20 @@ async function getMaoDeObraProduto(): Promise<{ id: number; nome_produto: string
 
 router.get('/pdv/os-encerradas', async (req, res) => {
   try {
+    const tenantId = getErpWriteTenantId(req);
+
+    // Validação estrita: O caixa deve estar aberto para consultar e listar OS encerradas para o PDV
+    const [[caixaAberto]] = await pool.query<any>(
+      `SELECT id FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
+      [tenantId]
+    );
+    if (!caixaAberto) {
+      res.status(403).json({
+        message: 'O caixa está fechado. Abra o caixa antes de consultar ou importar ordens de serviço para o PDV.'
+      });
+      return;
+    }
+
     const search = String(req.query.search ?? '').trim();
     const apenasPendentes = req.query.apenas_pendentes === 'true' || req.query.apenas_pendentes === '1';
     const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true, 'o.tenant_id');
@@ -2127,6 +2149,20 @@ router.get('/pdv/os-encerradas', async (req, res) => {
 
 router.get('/pdv/os/:id', async (req, res) => {
   try {
+    const tenantId = getErpWriteTenantId(req);
+
+    // Validação estrita: O caixa deve estar aberto para carregar/importar itens da OS para o PDV
+    const [[caixaAberto]] = await pool.query<any>(
+      `SELECT id FROM mv_caixa WHERE status_caixa = 'A' AND tenant_id = ? ORDER BY id DESC LIMIT 1`,
+      [tenantId]
+    );
+    if (!caixaAberto) {
+      res.status(403).json({
+        message: 'O caixa está fechado. É obrigatório abrir o caixa da loja antes de importar Ordens de Serviço para o PDV.'
+      });
+      return;
+    }
+
     const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true);
     const [[order]] = await pool.query<any>(
       `SELECT * FROM os_orders WHERE id = ?${tenantClause}`,

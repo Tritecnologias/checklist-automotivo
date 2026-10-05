@@ -139,6 +139,9 @@ function stripPlate(nome: string): string {
 }
 
 function formatOrder(order: Record<string, unknown>, items: Record<string, unknown>[]) {
+  const clientCep = (order.client_cep as string) || (order.cep as string) || null;
+  const clientAddress = (order.client_address as string) || (order.endereco as string) || null;
+
   return {
     id: order.id,
     tenantId: Number(order.tenant_id),
@@ -148,7 +151,11 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
       name: (order.client_name as string) || '',
       phone: (order.client_phone as string) || '',
       document: (order.client_document as string) || null,
+      cep: clientCep,
+      address: clientAddress,
     },
+    cep: clientCep,
+    endereco: clientAddress,
     status: order.status,
     vendaControle: (order.venda_controle as string | null) ?? null,
     mecanicoId: order.mecanico_id ? Number(order.mecanico_id) : null,
@@ -236,18 +243,26 @@ router.get('/', async (req: Request, res: Response) => {
     const [rows] = await pool.execute(sql, [...params, ...tenantParams]);
 
     res.json(
-      (rows as Record<string, unknown>[]).map((o) => ({
-        id: o.id,
-        tenantId: Number(o.tenant_id),
-        vehicle: { plate: o.plate, model: o.model, mileage: o.mileage },
-        client: {
-          id: o.client_id ? Number(o.client_id) : null,
-          name: (o.client_name as string) || '',
-          phone: (o.client_phone as string) || '',
-          document: (o.client_document as string) || null,
-        },
-        status: o.status,
-        vendaControle: (o.venda_controle as string | null) ?? null,
+      (rows as Record<string, unknown>[]).map((o) => {
+        const clientCep = (o.client_cep as string) || (o.cep as string) || null;
+        const clientAddress = (o.client_address as string) || (o.endereco as string) || null;
+
+        return {
+          id: o.id,
+          tenantId: Number(o.tenant_id),
+          vehicle: { plate: o.plate, model: o.model, mileage: o.mileage },
+          client: {
+            id: o.client_id ? Number(o.client_id) : null,
+            name: (o.client_name as string) || '',
+            phone: (o.client_phone as string) || '',
+            document: (o.client_document as string) || null,
+            cep: clientCep,
+            address: clientAddress,
+          },
+          cep: clientCep,
+          endereco: clientAddress,
+          status: o.status,
+          vendaControle: (o.venda_controle as string | null) ?? null,
         mecanicoId: o.mecanico_id ? Number(o.mecanico_id) : null,
         mecanicoNome: (o.mecanico_nome as string | null) ?? null,
         auxiliarId: o.auxiliar_id ? Number(o.auxiliar_id) : null,
@@ -258,8 +273,9 @@ router.get('/', async (req: Request, res: Response) => {
         createdAt: o.created_at,
         updatedAt: o.updated_at,
         closedAt: o.closed_at ?? null,
-      })),
-    );
+      };
+    }),
+  );
   } catch (err) {
     console.error('GET /orders error:', err);
     res.status(500).json({ message: 'Erro ao listar OS' });
@@ -281,7 +297,7 @@ router.get('/lookup-plate/:plate', async (req: Request, res: Response) => {
   try {
     // 1. Tenta buscar na última OS gravada (correspondência exata da placa)
     const [orders] = await pool.execute<any[]>(
-      `SELECT plate, model, mileage, client_id, client_name, client_phone, client_document
+      `SELECT plate, model, mileage, client_id, client_name, client_phone, client_document, client_cep, client_address
        FROM os_orders
        WHERE REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') = ?
        ORDER BY created_at DESC
@@ -294,7 +310,7 @@ router.get('/lookup-plate/:plate', async (req: Request, res: Response) => {
     // Busca exclusivamente pela placa completa de 7 caracteres no nome do cliente (onde a placa fica armazenada no formato legado).
     // NÃO busca em inf_adicional para evitar falsos positivos com modelos de veículos.
     const [clients] = await pool.execute<any[]>(
-      `SELECT id, nome_cliente, telefone, celular, cpf_cnpj, inf_adicional
+      `SELECT id, nome_cliente, telefone, celular, cpf_cnpj, inf_adicional, cep, endereco
        FROM cad_clientes
        WHERE inativo = 0 AND (
          REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
@@ -319,12 +335,20 @@ router.get('/lookup-plate/:plate', async (req: Request, res: Response) => {
     const cleanClientDoc = clientRow
       ? clientRow.cpf_cnpj || ''
       : '';
+    const cleanClientCep = clientRow
+      ? clientRow.cep || ''
+      : '';
+    const cleanClientAddress = clientRow
+      ? clientRow.endereco || ''
+      : '';
 
     const resolvedClient = {
       id: lastOrder?.client_id ?? clientRow?.id ?? null,
       name: lastOrder?.client_name || cleanClientName || '',
       phone: lastOrder?.client_phone || cleanClientPhone || '',
       document: lastOrder?.client_document || cleanClientDoc || '',
+      cep: lastOrder?.client_cep || cleanClientCep || '',
+      address: lastOrder?.client_address || cleanClientAddress || '',
     };
 
     const resolvedVehicle = {
@@ -356,7 +380,15 @@ router.post('/', async (req: Request, res: Response) => {
     auxiliarId,
   } = req.body as {
     vehicle?: { plate?: string; model?: string; mileage?: number };
-    client?: { id?: number | null; name?: string; phone?: string; document?: string };
+    client?: {
+      id?: number | null;
+      name?: string;
+      phone?: string;
+      document?: string;
+      cep?: string;
+      address?: string;
+      endereco?: string;
+    };
     status?: string;
     mecanicoId?: number | null;
     auxiliarId?: number | null;
@@ -370,6 +402,8 @@ router.post('/', async (req: Request, res: Response) => {
   let clientName = String(client?.name ?? '').trim();
   let clientPhone = String(client?.phone ?? '').trim();
   let clientDoc = client?.document ? String(client.document).trim() : null;
+  let clientCep = client?.cep ? String(client.cep).trim() : null;
+  let clientAddress = client?.address ? String(client.address).trim() : (client?.endereco ? String(client.endereco).trim() : null);
   let finalClientId: number | null = client?.id ? Number(client.id) : null;
 
   // Se o cliente foi enviado pelo novo frontend, valida obrigatoriedade
@@ -435,9 +469,11 @@ router.post('/', async (req: Request, res: Response) => {
            SET telefone = COALESCE(NULLIF(?, ''), telefone),
                celular  = COALESCE(NULLIF(?, ''), celular),
                cpf_cnpj = COALESCE(NULLIF(?, ''), cpf_cnpj),
+               cep      = COALESCE(NULLIF(?, ''), cep),
+               endereco = COALESCE(NULLIF(?, ''), endereco),
                data_ultima_alteracao = CURDATE()
            WHERE id = ?`,
-          [clientPhone, clientPhone, clientDoc, finalClientId]
+          [clientPhone, clientPhone, clientDoc, clientCep, clientAddress, finalClientId]
         );
         await pool.query(
           'INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) VALUES (?, ?)',
@@ -479,9 +515,11 @@ router.post('/', async (req: Request, res: Response) => {
              SET telefone = COALESCE(NULLIF(?, ''), telefone),
                  celular  = COALESCE(NULLIF(?, ''), celular),
                  cpf_cnpj = COALESCE(NULLIF(?, ''), cpf_cnpj),
+                 cep      = COALESCE(NULLIF(?, ''), cep),
+                 endereco = COALESCE(NULLIF(?, ''), endereco),
                  data_ultima_alteracao = CURDATE()
              WHERE id = ?`,
-            [clientPhone, clientPhone, clientDoc, finalClientId]
+            [clientPhone, clientPhone, clientDoc, clientCep, clientAddress, finalClientId]
           );
           await pool.query(
             'INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) VALUES (?, ?)',
@@ -491,9 +529,9 @@ router.post('/', async (req: Request, res: Response) => {
           // Cria novo cliente no cad_clientes
           const rawNome = `${clientName} ${vehicle.plate.toUpperCase()}`.slice(0, 60);
           const [insResult] = await pool.query<any>(
-            `INSERT INTO cad_clientes (nome_cliente, telefone, celular, cpf_cnpj, inf_adicional, inativo, data_cadastro)
-             VALUES (?, ?, ?, ?, ?, 0, CURDATE())`,
-            [rawNome, clientPhone, clientPhone, clientDoc, vehicle.model.slice(0, 255)]
+            `INSERT INTO cad_clientes (nome_cliente, telefone, celular, cpf_cnpj, cep, endereco, inf_adicional, inativo, data_cadastro)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURDATE())`,
+            [rawNome, clientPhone, clientPhone, clientDoc, clientCep || null, clientAddress || null, vehicle.model.slice(0, 255)]
           );
           finalClientId = insResult.insertId;
           await pool.query(
@@ -526,8 +564,8 @@ router.post('/', async (req: Request, res: Response) => {
 
     await pool.execute(
       `INSERT INTO os_orders
-         (id, plate, model, mileage, status, total_amount, tenant_id, client_id, client_name, client_phone, client_document, mecanico_id, mecanico_nome, auxiliar_id, auxiliar_nome)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, plate, model, mileage, status, total_amount, tenant_id, client_id, client_name, client_phone, client_document, client_cep, client_address, mecanico_id, mecanico_nome, auxiliar_id, auxiliar_nome)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         vehicle.plate.toUpperCase(),
@@ -539,6 +577,8 @@ router.post('/', async (req: Request, res: Response) => {
         clientName,
         clientPhone,
         clientDoc,
+        clientCep || null,
+        clientAddress || null,
         finalMecId,
         finalMecNome,
         finalAuxId,
@@ -555,7 +595,11 @@ router.post('/', async (req: Request, res: Response) => {
         name: clientName,
         phone: clientPhone,
         document: clientDoc,
+        cep: clientCep || null,
+        address: clientAddress || null,
       },
+      cep: clientCep || null,
+      endereco: clientAddress || null,
       status: finalStatus,
       vendaControle: null,
       mecanicoId: finalMecId,
@@ -986,6 +1030,26 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
       return;
     }
 
+    // Regra obrigatória: Se estiver aprovando/ativando um orçamento (quote -> open/in_progress), CEP e Endereço devem existir
+    const [[currentOrder]] = await pool.query<any>('SELECT status, client_cep, client_address FROM os_orders WHERE id = ?', [req.params.id]);
+    if (currentOrder?.status === 'quote' && (status === 'open' || status === 'in_progress')) {
+      const cep = String(currentOrder.client_cep ?? '').trim();
+      const endereco = String(currentOrder.client_address ?? '').trim();
+
+      if (!cep || cep.replace(/\D/g, '').length < 8) {
+        res.status(422).json({
+          message: 'Para aprovar o orçamento, é obrigatório preencher um CEP válido do cliente.'
+        });
+        return;
+      }
+      if (!endereco || endereco.length < 3) {
+        res.status(422).json({
+          message: 'Para aprovar o orçamento, é obrigatório preencher o endereço do cliente.'
+        });
+        return;
+      }
+    }
+
     if (status === 'closed') {
       await pool.execute(
         'UPDATE os_orders SET status = ?, updated_at = NOW(), closed_at = NOW() WHERE id = ?',
@@ -1028,6 +1092,24 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
     if (order.venda_controle) {
       res.status(422).json({
         message: `Esta OS já foi finalizada no PDV (Venda #${order.venda_controle}) e não pode ser alterada.`
+      });
+      return;
+    }
+
+    // Regra obrigatória: CEP e Endereço devem existir no orçamento antes da aprovação
+    const cep = String(order.client_cep ?? '').trim();
+    const endereco = String(order.client_address ?? '').trim();
+
+    if (!cep || cep.replace(/\D/g, '').length < 8) {
+      res.status(422).json({
+        message: 'Para aprovar o orçamento, é obrigatório preencher um CEP válido do cliente.'
+      });
+      return;
+    }
+
+    if (!endereco || endereco.length < 3) {
+      res.status(422).json({
+        message: 'Para aprovar o orçamento, é obrigatório preencher o endereço completo do cliente.'
       });
       return;
     }
@@ -1150,15 +1232,20 @@ router.delete('/:id/items/:itemId', async (req: Request, res: Response) => {
 // ── PATCH /orders/:id/client ───────────────────────────────────────────────
 
 router.patch('/:id/client', async (req: Request, res: Response) => {
-  const { name, phone, document } = req.body as {
+  const { name, phone, document, cep, address, endereco } = req.body as {
     name?: string;
     phone?: string;
     document?: string;
+    cep?: string;
+    address?: string;
+    endereco?: string;
   };
 
   const clientName = String(name || '').trim();
   const clientPhone = String(phone || '').trim();
   const clientDoc = document ? String(document).trim() : null;
+  const clientCep = cep ? String(cep).trim() : null;
+  const clientAddress = address ? String(address).trim() : (endereco ? String(endereco).trim() : null);
 
   if (!clientName) {
     res.status(400).json({ message: 'Nome do cliente é obrigatório' });
@@ -1183,17 +1270,19 @@ router.patch('/:id/client', async (req: Request, res: Response) => {
          SET telefone = ?,
              celular  = ?,
              cpf_cnpj = COALESCE(NULLIF(?, ''), cpf_cnpj),
+             cep      = COALESCE(NULLIF(?, ''), cep),
+             endereco = COALESCE(NULLIF(?, ''), endereco),
              data_ultima_alteracao = CURDATE()
          WHERE id = ?`,
-        [clientPhone, clientPhone, clientDoc, clientId]
+        [clientPhone, clientPhone, clientDoc, clientCep, clientAddress, clientId]
       ).catch((e) => console.error('Erro ao atualizar cad_clientes:', e));
     }
 
     await pool.execute(
       `UPDATE os_orders
-       SET client_name = ?, client_phone = ?, client_document = ?, updated_at = NOW()
+       SET client_name = ?, client_phone = ?, client_document = ?, client_cep = ?, client_address = ?, updated_at = NOW()
        WHERE id = ?`,
-      [clientName, clientPhone, clientDoc, req.params.id]
+      [clientName, clientPhone, clientDoc, clientCep, clientAddress, req.params.id]
     );
 
     const [updatedOrders] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);

@@ -19,6 +19,7 @@ import { api, oficinaApi } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import type { OrderItem, CatalogItem, Mecanico } from '../types'
 import { useAuth } from '../contexts/AuthContext'
+import { lookupCep, formatCep } from '../lib/cep'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -49,7 +50,27 @@ export default function OrderDetail() {
   const [editClientName, setEditClientName]   = useState('')
   const [editClientPhone, setEditClientPhone] = useState('')
   const [editClientDoc, setEditClientDoc]     = useState('')
+  const [editClientCep, setEditClientCep]     = useState('')
+  const [editClientAddress, setEditClientAddress] = useState('')
+  const [loadingEditCep, setLoadingEditCep]   = useState(false)
   const [editClientError, setEditClientError] = useState('')
+
+  const handleEditCepSearch = async (cepInput: string) => {
+    const clean = cepInput.replace(/\D/g, '')
+    if (clean.length === 8) {
+      setLoadingEditCep(true)
+      try {
+        const res = await lookupCep(clean)
+        if (res && res.formattedAddress) {
+          setEditClientAddress(res.formattedAddress)
+        }
+      } catch (err) {
+        console.error('Erro ao buscar CEP:', err)
+      } finally {
+        setLoadingEditCep(false)
+      }
+    }
+  }
 
   // ── estado de busca no catálogo ───────────────────────────────────────────
   const [searchQuery, setSearchQuery]           = useState('')
@@ -166,6 +187,8 @@ export default function OrderDetail() {
         name: editClientName.trim(),
         phone: editClientPhone.trim(),
         document: editClientDoc.trim() || undefined,
+        cep: editClientCep.trim() || undefined,
+        address: editClientAddress.trim() || undefined,
       }),
     onSuccess: (updated) => {
       qc.setQueryData(['order', id], updated)
@@ -179,10 +202,30 @@ export default function OrderDetail() {
 
   // Aprovar Orçamento (Virar OS)
   const { mutate: approveQuote, isPending: approving } = useMutation({
-    mutationFn: () => api.approveQuote(id!),
+    mutationFn: () => {
+      const cCep = order?.client?.cep?.trim() || order?.cep?.trim() || ''
+      const cAddr = order?.client?.address?.trim() || order?.endereco?.trim() || ''
+      if (!cCep || cCep.replace(/\D/g, '').length < 8 || !cAddr || cAddr.length < 3) {
+        throw new Error('CEP_ADDRESS_REQUIRED')
+      }
+      return api.approveQuote(id!)
+    },
     onSuccess: (updated) => {
       qc.setQueryData(['order', id], updated)
       qc.invalidateQueries({ queryKey: ['orders'] })
+    },
+    onError: (err: any) => {
+      if (err?.message === 'CEP_ADDRESS_REQUIRED') {
+        setEditClientName(order?.client?.name || '')
+        setEditClientPhone(order?.client?.phone || '')
+        setEditClientDoc(order?.client?.document || '')
+        setEditClientCep(order?.client?.cep || order?.cep || '')
+        setEditClientAddress(order?.client?.address || order?.endereco || '')
+        setEditClientError('Para aprovar o orçamento, é obrigatório preencher o CEP e o Endereço completo do cliente.')
+        setEditClientOpen(true)
+      } else {
+        alert(err?.message || 'Erro ao aprovar orçamento')
+      }
     },
   })
 
@@ -535,6 +578,16 @@ export default function OrderDetail() {
               <span class="info-label">CPF / CNPJ:</span>
               <span class="info-value">${order.client.document}</span>
             </div>` : ''}
+            ${order.client?.cep ? `
+            <div class="info-row">
+              <span class="info-label">CEP:</span>
+              <span class="info-value">${order.client.cep}</span>
+            </div>` : ''}
+            ${order.client?.address ? `
+            <div class="info-row">
+              <span class="info-label">Endereço:</span>
+              <span class="info-value">${order.client.address}</span>
+            </div>` : ''}
           </div>
 
           <div class="card">
@@ -854,6 +907,8 @@ export default function OrderDetail() {
                     setEditClientName(order.client?.name || '')
                     setEditClientPhone(order.client?.phone || '')
                     setEditClientDoc(order.client?.document || '')
+                    setEditClientCep(order.client?.cep || order.cep || '')
+                    setEditClientAddress(order.client?.address || order.endereco || '')
                     setEditClientError('')
                     setEditClientOpen(true)
                   }}
@@ -891,6 +946,49 @@ export default function OrderDetail() {
                   <p className="text-xs text-slate-500 font-mono">
                     Doc: {order.client.document}
                   </p>
+                )}
+
+                <div className="pt-2 border-t border-slate-800/60 space-y-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 font-medium">CEP:</span>
+                    {order.client?.cep ? (
+                      <span className="font-mono text-slate-200 font-semibold">{order.client.cep}</span>
+                    ) : (
+                      <span className="text-amber-400/80 font-medium text-[11px]">Não informado</span>
+                    )}
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-slate-400 font-medium shrink-0">Endereço:</span>
+                    {order.client?.address ? (
+                      <span className="text-slate-200 leading-snug">{order.client.address}</span>
+                    ) : (
+                      <span className="text-amber-400/80 font-medium text-[11px]">Não informado</span>
+                    )}
+                  </div>
+                </div>
+
+                {isQuote && (!order.client?.cep || !order.client?.address) && (
+                  <div className="mt-2.5 p-2.5 rounded-xl bg-amber-950/50 border border-amber-800/60 text-amber-300 text-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span>⚠️</span>
+                      <span className="font-medium">CEP e Endereço obrigatórios para aprovação.</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditClientName(order.client?.name || '')
+                        setEditClientPhone(order.client?.phone || '')
+                        setEditClientDoc(order.client?.document || '')
+                        setEditClientCep(order.client?.cep || order.cep || '')
+                        setEditClientAddress(order.client?.address || order.endereco || '')
+                        setEditClientError('')
+                        setEditClientOpen(true)
+                      }}
+                      className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-[11px] font-bold shrink-0 transition-colors"
+                    >
+                      Preencher
+                    </button>
+                  </div>
                 )}
               </div>
             ) : (
@@ -1558,6 +1656,55 @@ export default function OrderDetail() {
                   type="text"
                   value={editClientDoc}
                   onChange={(e) => setEditClientDoc(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-300">
+                    CEP {isQuote && <span className="text-[10px] text-amber-400 font-bold">(Obrigatório no orçamento)</span>}
+                  </label>
+                  {loadingEditCep && (
+                    <span className="text-[10px] text-blue-400 animate-pulse">Buscando endereço…</span>
+                  )}
+                </div>
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    maxLength={9}
+                    placeholder="Ex: 30140-071"
+                    value={editClientCep}
+                    onChange={(e) => {
+                      const v = formatCep(e.target.value)
+                      setEditClientCep(v)
+                      if (v.replace(/\D/g, '').length === 8) {
+                        handleEditCepSearch(v)
+                      }
+                    }}
+                    onBlur={() => handleEditCepSearch(editClientCep)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleEditCepSearch(editClientCep)}
+                    disabled={loadingEditCep || editClientCep.replace(/\D/g, '').length !== 8}
+                    className="absolute right-2 px-2 py-1 text-[11px] bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-200 rounded-lg transition-colors"
+                  >
+                    🔍 Buscar
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Endereço Completo {isQuote && <span className="text-[10px] text-amber-400 font-bold">(Obrigatório no orçamento)</span>}
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Rua das Flores, 123, Centro - Belo Horizonte/MG"
+                  value={editClientAddress}
+                  onChange={(e) => setEditClientAddress(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>

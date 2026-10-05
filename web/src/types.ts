@@ -381,6 +381,8 @@ export interface OrderClient {
   name: string
   phone: string
   document?: string | null
+  cep?: string | null
+  address?: string | null
 }
 
 export interface OrderItem {
@@ -425,6 +427,8 @@ export interface Order {
   tenantId: number
   vehicle: Vehicle
   client?: OrderClient | null
+  cep?: string | null
+  endereco?: string | null
   status: OrderStatus
   vendaControle?: string | null
   mecanicoId?: number | null

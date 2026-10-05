@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge'
 import type { Order, OrderStatus, Mecanico } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import { Wrench } from 'lucide-react'
+import { lookupCep, formatCep } from '../lib/cep'
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -43,6 +44,9 @@ export default function Orders() {
   const [newClientName, setNewClientName]   = useState('')
   const [newClientPhone, setNewClientPhone] = useState('')
   const [newClientDoc, setNewClientDoc]     = useState('')
+  const [newClientCep, setNewClientCep]     = useState('')
+  const [newClientAddress, setNewClientAddress] = useState('')
+  const [cepLoading, setCepLoading]         = useState(false)
   const [newClientId, setNewClientId]       = useState<number | null>(null)
   const [newMecanicoId, setNewMecanicoId]   = useState<number | null>(null)
   const [newAuxiliarId, setNewAuxiliarId]   = useState<number | null>(null)
@@ -50,6 +54,23 @@ export default function Orders() {
   const [createError, setCreateError]       = useState('')
   const [lookupLoading, setLookupLoading]   = useState(false)
   const [lookupFeedback, setLookupFeedback] = useState<string | null>(null)
+
+  const handleCepSearch = async (cepInput: string) => {
+    const clean = cepInput.replace(/\D/g, '')
+    if (clean.length === 8) {
+      setCepLoading(true)
+      try {
+        const res = await lookupCep(clean)
+        if (res && res.formattedAddress) {
+          setNewClientAddress(res.formattedAddress)
+        }
+      } catch (err) {
+        console.error('Erro ao buscar CEP:', err)
+      } finally {
+        setCepLoading(false)
+      }
+    }
+  }
 
   const { data: orders = [], isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['orders', tid],
@@ -77,6 +98,8 @@ export default function Orders() {
           if (res.client.name) setNewClientName(res.client.name)
           if (res.client.phone) setNewClientPhone(res.client.phone)
           if (res.client.document) setNewClientDoc(res.client.document)
+          if (res.client.cep) setNewClientCep(formatCep(res.client.cep))
+          if (res.client.address) setNewClientAddress(res.client.address)
         }
         setLookupFeedback('Cadastro localizado! Valide e confirme o telefone e nome do cliente para prosseguir.')
       } else {
@@ -84,6 +107,8 @@ export default function Orders() {
         setNewClientName('')
         setNewClientPhone('')
         setNewClientDoc('')
+        setNewClientCep('')
+        setNewClientAddress('')
         setNewModel('')
         setNewMileage('')
         setLookupFeedback('Novo veículo / cliente! Preencha a ficha cadastral abaixo.')
@@ -120,6 +145,8 @@ export default function Orders() {
           name: clientName,
           phone: clientPhone,
           document: clientDoc || undefined,
+          cep: newClientCep.trim() || undefined,
+          address: newClientAddress.trim() || undefined,
         },
         newMecanicoId || undefined,
         newAuxiliarId || undefined
@@ -134,6 +161,8 @@ export default function Orders() {
       setNewClientName('')
       setNewClientPhone('')
       setNewClientDoc('')
+      setNewClientCep('')
+      setNewClientAddress('')
       setNewClientId(null)
       setNewMecanicoId(null)
       setNewAuxiliarId(null)
@@ -564,6 +593,56 @@ export default function Orders() {
                       placeholder="Ex: 000.000.000-00"
                       value={newClientDoc}
                       onChange={(e) => setNewClientDoc(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-slate-300">
+                        CEP {newStatus === 'quote' && <span className="text-[10px] text-purple-400 font-semibold">(Obrigatório p/ aprovação)</span>}
+                      </label>
+                      {cepLoading && (
+                        <span className="text-[10px] text-blue-400 animate-pulse">Buscando endereço…</span>
+                      )}
+                    </div>
+                    <div className="relative flex items-center">
+                      <input
+                        type="text"
+                        maxLength={9}
+                        placeholder="Ex: 30140-071"
+                        value={newClientCep}
+                        onChange={(e) => {
+                          const v = formatCep(e.target.value)
+                          setNewClientCep(v)
+                          if (v.replace(/\D/g, '').length === 8) {
+                            handleCepSearch(v)
+                          }
+                        }}
+                        onBlur={() => handleCepSearch(newClientCep)}
+                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCepSearch(newClientCep)}
+                        disabled={cepLoading || newClientCep.replace(/\D/g, '').length !== 8}
+                        className="absolute right-2 px-2 py-1 text-[11px] bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-200 rounded-lg transition-colors"
+                        title="Buscar endereço pelo CEP no ViaCEP"
+                      >
+                        🔍 Buscar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                      Endereço Completo {newStatus === 'quote' && <span className="text-[10px] text-purple-400 font-semibold">(Obrigatório p/ aprovação)</span>}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Rua das Flores, 123, Bairro Centro - Belo Horizonte/MG"
+                      value={newClientAddress}
+                      onChange={(e) => setNewClientAddress(e.target.value)}
                       className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
