@@ -42,6 +42,20 @@ export interface Order {
 
 export type ItemType = 'part' | 'service';
 
+export interface OrderItemExecutante {
+  id?: number;
+  itemId?: string;
+  orderId?: string;
+  mecanicoId: number;
+  mecanicoNome?: string;
+  tipoRateio: 'PERCENTUAL' | 'VALOR_FIXO';
+  percentual: number;
+  valorBase: number;
+  comissaoPct: number;
+  comissaoValor: number;
+  papel: 'titular' | 'auxiliar' | string;
+}
+
 export interface OrderItem {
   id: string;
   code: string;
@@ -57,6 +71,7 @@ export interface OrderItem {
   mecanicoNome?: string | null;
   comissaoPct?: number | null;
   comissaoValor?: number | null;
+  executantes?: OrderItemExecutante[];
 }
 
 // ─── Catálogo ────────────────────────────────────────────────────────────────

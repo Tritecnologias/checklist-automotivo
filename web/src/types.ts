@@ -387,6 +387,20 @@ export interface OrderClient {
   address?: string | null
 }
 
+export interface OrderItemExecutante {
+  id?: number
+  itemId?: string
+  orderId?: string
+  mecanicoId: number
+  mecanicoNome?: string
+  tipoRateio: 'PERCENTUAL' | 'VALOR_FIXO'
+  percentual: number
+  valorBase: number
+  comissaoPct: number
+  comissaoValor: number
+  papel: 'titular' | 'auxiliar' | string
+}
+
 export interface OrderItem {
   id: string
   productId?: number | null
@@ -405,6 +419,7 @@ export interface OrderItem {
   mecanicoNome?: string | null
   comissaoPct?: number | null
   comissaoValor?: number | null
+  executantes?: OrderItemExecutante[]
 }
 
 export interface InstItem {
@@ -910,6 +925,9 @@ export interface ExtratoItemComissao {
   mecanico_nome: string
   auxiliar_id?: number | null
   auxiliar_nome?: string | null
+  papel?: 'titular' | 'auxiliar' | string
+  tipo_rateio?: 'PERCENTUAL' | 'VALOR_FIXO' | string
+  percentual_rateio?: number | null
   comissao_pct: number
   comissao_valor: number
 }

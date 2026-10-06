@@ -17,6 +17,10 @@ import {
   ShieldCheck,
   Eye,
   EyeOff,
+  Users,
+  Percent,
+  DollarSign,
+  Scale,
 } from 'lucide-react'
 import { api, oficinaApi } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
@@ -129,6 +133,9 @@ export default function OrderDetail() {
   const [laborInputValue, setLaborInputValue]   = useState('')
   const [laborError, setLaborError]             = useState('')
 
+  // ── estado do modal de rateio de executantes (mecânico + auxiliar) ───────
+  const [rateioModalItem, setRateioModalItem]   = useState<OrderItem | null>(null)
+
   // Debounce da busca de catálogo
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -224,6 +231,21 @@ export default function OrderDetail() {
     },
     onError: (err: any) => {
       alert(err.message || 'Erro ao alterar mecânico do item')
+    },
+  })
+
+  // Atualizar Rateio de Executantes (Mecânico Titular + Auxiliar ou Equipe)
+  const { mutate: handleUpdateItemRateio, isPending: savingRateio } = useMutation({
+    mutationFn: ({ itemId, executantes }: { itemId: string; executantes: any[] }) =>
+      api.updateItemRateio(id!, itemId, executantes),
+    onSuccess: (updated) => {
+      qc.setQueryData(['order', id], updated)
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['oficina-produtividade'] })
+      setRateioModalItem(null)
+    },
+    onError: (err: any) => {
+      alert(err.message || 'Erro ao salvar rateio de mão de obra do item')
     },
   })
 
@@ -2156,6 +2178,7 @@ export default function OrderDetail() {
               onEditLabor={handleOpenEditLabor}
               onDeleteItem={setItemToDelete}
               onUpdateItemMechanic={(itemId, mecanicoId) => handleUpdateItemMechanic({ itemId, mecanicoId })}
+              onOpenRateio={(item) => setRateioModalItem(item)}
             />
           )}
           {services.length > 0 && (
@@ -2169,6 +2192,7 @@ export default function OrderDetail() {
               onEditLabor={handleOpenEditLabor}
               onDeleteItem={setItemToDelete}
               onUpdateItemMechanic={(itemId, mecanicoId) => handleUpdateItemMechanic({ itemId, mecanicoId })}
+              onOpenRateio={(item) => setRateioModalItem(item)}
             />
           )}
         </div>
@@ -2236,6 +2260,20 @@ export default function OrderDetail() {
           </div>
         </div>
       )}
+
+      {/* ── MODAL DE RATEIO DE MÃO DE OBRA (MECÂNICO TITULAR + AUXILIAR) ── */}
+      {rateioModalItem && (
+        <ModalRateioItem
+          item={rateioModalItem}
+          order={order}
+          mecanicos={mecanicos || []}
+          onClose={() => setRateioModalItem(null)}
+          onSave={(executantes) =>
+            handleUpdateItemRateio({ itemId: rateioModalItem.id, executantes })
+          }
+          isPending={savingRateio}
+        />
+      )}
     </div>
   )
 }
@@ -2250,6 +2288,7 @@ function ItemsTable({
   onEditLabor,
   onDeleteItem,
   onUpdateItemMechanic,
+  onOpenRateio,
 }: {
   title: string
   items: OrderItem[]
@@ -2260,6 +2299,7 @@ function ItemsTable({
   onEditLabor: (item: OrderItem) => void
   onDeleteItem: (item: OrderItem) => void
   onUpdateItemMechanic?: (itemId: string, mecanicoId: number | null) => void
+  onOpenRateio?: (item: OrderItem) => void
 }) {
   return (
     <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-lg">
@@ -2322,23 +2362,75 @@ function ItemsTable({
                   </div>
                 </td>
                 <td className="px-5 py-3 whitespace-nowrap">
-                  {!isClosed && onUpdateItemMechanic ? (
-                    <div>
-                      <select
-                        value={item.mecanicoId ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value ? Number(e.target.value) : null
-                          onUpdateItemMechanic(item.id, val)
-                        }}
-                        className="bg-slate-800/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 rounded-lg text-xs px-2 py-1 text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[150px] truncate cursor-pointer"
-                      >
-                        <option value="">Oficina / Padrão</option>
-                        {mecanicos?.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.nome}
-                          </option>
+                  {/* Se tem executantes cadastrados no rateio (> 1 ou rateio explícito) */}
+                  {item.executantes && item.executantes.length > 0 ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {item.executantes.map((ex, idx) => (
+                          <span
+                            key={idx}
+                            className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md font-medium border ${
+                              ex.papel === 'titular' || idx === 0
+                                ? 'bg-blue-950/70 border-blue-700/60 text-blue-300'
+                                : 'bg-emerald-950/70 border-emerald-700/60 text-emerald-300'
+                            }`}
+                            title={`Base: ${currency(ex.valorBase)} | Comissão: ${currency(ex.comissaoValor)} (${ex.comissaoPct}%)`}
+                          >
+                            <span className="font-semibold">{ex.mecanicoNome || 'Mecânico'}</span>
+                            <span className="text-[10px] opacity-85 font-mono">
+                              ({ex.tipoRateio === 'VALOR_FIXO' ? currency(ex.valorBase) : `${Number(ex.percentual).toFixed(0)}%`})
+                            </span>
+                          </span>
                         ))}
-                      </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {item.comissaoValor != null && item.comissaoValor > 0 && (
+                          <span className="text-[10px] text-purple-400 font-mono">
+                            Comissão: {currency(item.comissaoValor)}
+                          </span>
+                        )}
+                        {!isClosed && onOpenRateio && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenRateio(item)}
+                            className="inline-flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium hover:underline transition-colors ml-1"
+                            title="Editar divisão de mão de obra entre mecânico e auxiliar"
+                          >
+                            <Users className="w-3 h-3" />
+                            Ajustar Rateio
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : !isClosed && onUpdateItemMechanic ? (
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={item.mecanicoId ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value ? Number(e.target.value) : null
+                            onUpdateItemMechanic(item.id, val)
+                          }}
+                          className="bg-slate-800/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 rounded-lg text-xs px-2 py-1 text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[140px] truncate cursor-pointer"
+                        >
+                          <option value="">Oficina / Padrão</option>
+                          {mecanicos?.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.nome}
+                            </option>
+                          ))}
+                        </select>
+                        {onOpenRateio && (item.type === 'service' || (item.laborPrice ?? 0) > 0) && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenRateio(item)}
+                            className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-amber-400 border border-slate-700 transition-colors"
+                            title="Dividir mão de obra com Auxiliar ou outros mecânicos"
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                       {item.comissaoValor != null && item.comissaoValor > 0 && (
                         <span className="block text-[10px] text-purple-400 font-mono mt-0.5">
                           Comissão: {currency(item.comissaoValor)}
@@ -2347,9 +2439,21 @@ function ItemsTable({
                     </div>
                   ) : (
                     <div>
-                      <span className="text-xs text-slate-300 font-medium">
-                        {item.mecanicoNome || '—'}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-300 font-medium">
+                          {item.mecanicoNome || '—'}
+                        </span>
+                        {!isClosed && onOpenRateio && (item.type === 'service' || (item.laborPrice ?? 0) > 0) && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenRateio(item)}
+                            className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-amber-400 border border-slate-700 transition-colors"
+                            title="Visualizar ou configurar rateio de mão de obra"
+                          >
+                            <Users className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                       {item.comissaoValor != null && item.comissaoValor > 0 && (
                         <span className="block text-[10px] text-purple-400 font-mono mt-0.5">
                           Comissão: {currency(item.comissaoValor)}
@@ -2456,6 +2560,590 @@ function SummaryRow({
       <span className={`text-sm font-semibold font-mono ${color} ${bold ? 'text-base' : ''}`}>
         {value}
       </span>
+    </div>
+  )
+}
+
+interface ExecutanteRowState {
+  mecanicoId: number | ''
+  papel: 'titular' | 'auxiliar' | 'outro'
+  percentual: number | string
+  valorBase: number | string
+}
+
+function ModalRateioItem({
+  item,
+  order,
+  mecanicos,
+  onClose,
+  onSave,
+  isPending,
+}: {
+  item: OrderItem
+  order: any
+  mecanicos: Mecanico[]
+  onClose: () => void
+  onSave: (executantes: any[]) => void
+  isPending: boolean
+}) {
+  const isServico = item.type === 'service'
+  const totalBase = isServico ? (item.total + (item.laborPrice || 0)) : (item.laborPrice || 0)
+  const baseCalculo = totalBase > 0 ? totalBase : (isServico ? 0 : item.total)
+
+  // Determina modo inicial baseado nos executantes existentes ou default PERCENTUAL
+  const initialMode =
+    item.executantes && item.executantes.length > 0 && item.executantes[0].tipoRateio === 'VALOR_FIXO'
+      ? 'VALOR_FIXO'
+      : 'PERCENTUAL'
+
+  const [tipoRateio, setTipoRateio] = useState<'PERCENTUAL' | 'VALOR_FIXO'>(initialMode)
+
+  // Linhas de executantes
+  const [rows, setRows] = useState<ExecutanteRowState[]>(() => {
+    if (item.executantes && item.executantes.length > 0) {
+      return item.executantes.map((ex) => ({
+        mecanicoId: ex.mecanicoId,
+        papel: (ex.papel as any) || 'titular',
+        percentual: Number(ex.percentual) || 0,
+        valorBase: Number(ex.valorBase) || 0,
+      }))
+    }
+
+    // Se a OS já tem Mecânico Titular e Auxiliar definidos
+    const mecTitularId = item.mecanicoId || order.mecanicoId || ''
+    const mecAuxiliarId = order.auxiliarId || ''
+
+    if (mecAuxiliarId && mecAuxiliarId !== mecTitularId) {
+      const metade = Number((baseCalculo / 2).toFixed(2))
+      return [
+        {
+          mecanicoId: mecTitularId,
+          papel: 'titular',
+          percentual: 50,
+          valorBase: metade,
+        },
+        {
+          mecanicoId: mecAuxiliarId,
+          papel: 'auxiliar',
+          percentual: 50,
+          valorBase: Number((baseCalculo - metade).toFixed(2)),
+        },
+      ]
+    }
+
+    // Padrão 1 executante (100%)
+    return [
+      {
+        mecanicoId: mecTitularId,
+        papel: 'titular',
+        percentual: 100,
+        valorBase: baseCalculo,
+      },
+    ]
+  })
+
+  // Alternar entre modo PERCENTUAL e VALOR_FIXO
+  const handleToggleTipo = (novoTipo: 'PERCENTUAL' | 'VALOR_FIXO') => {
+    setTipoRateio(novoTipo)
+    if (novoTipo === 'PERCENTUAL') {
+      setRows((prev) =>
+        prev.map((r) => {
+          const v = Number(r.valorBase) || 0
+          const pct = baseCalculo > 0 ? Number(((v / baseCalculo) * 100).toFixed(2)) : 0
+          return { ...r, percentual: pct }
+        })
+      )
+    } else {
+      setRows((prev) =>
+        prev.map((r) => {
+          const p = Number(r.percentual) || 0
+          const val = Number(((baseCalculo * p) / 100).toFixed(2))
+          return { ...r, valorBase: val }
+        })
+      )
+    }
+  }
+
+  // Predefinições
+  const applyPresetEqual = () => {
+    const qtd = rows.length
+    if (qtd === 0) return
+    const pctCada = Number((100 / qtd).toFixed(2))
+    const valCada = Number((baseCalculo / qtd).toFixed(2))
+
+    setRows((prev) =>
+      prev.map((r, i) => {
+        const isLast = i === qtd - 1
+        const pct = isLast ? Number((100 - pctCada * (qtd - 1)).toFixed(2)) : pctCada
+        const val = isLast ? Number((baseCalculo - valCada * (qtd - 1)).toFixed(2)) : valCada
+        return {
+          ...r,
+          percentual: pct,
+          valorBase: val,
+        }
+      })
+    )
+  }
+
+  const applyPreset100Titular = () => {
+    setRows((prev) =>
+      prev.map((r, i) => ({
+        ...r,
+        percentual: i === 0 ? 100 : 0,
+        valorBase: i === 0 ? baseCalculo : 0,
+      }))
+    )
+  }
+
+  const applyPresetProportion = (pTitular: number, pAux: number) => {
+    const valTitular = Number(((baseCalculo * pTitular) / 100).toFixed(2))
+    const valAux = Number((baseCalculo - valTitular).toFixed(2))
+    setRows((prev) => {
+      const copy = [...prev]
+      if (copy.length >= 1) {
+        copy[0] = { ...copy[0], percentual: pTitular, valorBase: valTitular }
+      }
+      if (copy.length >= 2) {
+        copy[1] = { ...copy[1], percentual: pAux, valorBase: valAux }
+      }
+      return copy
+    })
+  }
+
+  // Manipulação de Linhas
+  const handleUpdateRow = (index: number, patch: Partial<ExecutanteRowState>) => {
+    setRows((prev) => {
+      const next = [...prev]
+      const current = { ...next[index], ...patch }
+
+      if ('percentual' in patch) {
+        const p = Number(patch.percentual) || 0
+        current.valorBase = Number(((baseCalculo * p) / 100).toFixed(2))
+      } else if ('valorBase' in patch) {
+        const v = Number(patch.valorBase) || 0
+        current.percentual = baseCalculo > 0 ? Number(((v / baseCalculo) * 100).toFixed(2)) : 0
+      }
+
+      next[index] = current
+      return next
+    })
+  }
+
+  const handleAddRow = () => {
+    const usedIds = new Set(rows.map((r) => Number(r.mecanicoId)).filter(Boolean))
+    const available = mecanicos.find((m) => !usedIds.has(m.id))
+    const isAux = available?.is_auxiliar || false
+
+    setRows((prev) => [
+      ...prev,
+      {
+        mecanicoId: available ? available.id : '',
+        papel: isAux ? 'auxiliar' : 'auxiliar',
+        percentual: 0,
+        valorBase: 0,
+      },
+    ])
+  }
+
+  const handleRemoveRow = (index: number) => {
+    if (rows.length <= 1) return
+    setRows((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  // Cálculos de validação e totais
+  const somaPercentual = rows.reduce((acc, r) => acc + (Number(r.percentual) || 0), 0)
+  const somaValor = rows.reduce((acc, r) => acc + (Number(r.valorBase) || 0), 0)
+
+  const isPctValid = Math.abs(somaPercentual - 100) <= 0.05
+  const isValorValid = Math.abs(somaValor - baseCalculo) <= 0.05
+  const isValid = tipoRateio === 'PERCENTUAL' ? isPctValid : isValorValid
+
+  const hasEmptyMec = rows.some((r) => !r.mecanicoId || Number(r.mecanicoId) <= 0)
+  const mecIds = rows.map((r) => Number(r.mecanicoId)).filter(Boolean)
+  const hasDuplicateMec = new Set(mecIds).size !== mecIds.length
+
+  // Pré-visualização das comissões
+  const rowsWithComissao = rows.map((r) => {
+    const mec = mecanicos.find((m) => m.id === Number(r.mecanicoId))
+    const pctComissao = mec
+      ? Number(isServico ? mec.comissao_servico_pct : mec.comissao_peca_pct || 0)
+      : 0
+    const valBase =
+      tipoRateio === 'VALOR_FIXO'
+        ? Number(r.valorBase) || 0
+        : (baseCalculo * (Number(r.percentual) || 0)) / 100
+    const comissao = pctComissao > 0 ? (valBase * pctComissao) / 100 : 0
+    return {
+      ...r,
+      mec,
+      pctComissao,
+      valBase,
+      comissao,
+    }
+  })
+
+  const totalComissaoPrevista = rowsWithComissao.reduce((acc, r) => acc + r.comissao, 0)
+
+  const handleSave = () => {
+    if (!isValid || hasEmptyMec || hasDuplicateMec) return
+
+    const payload = rows.map((r) => ({
+      mecanicoId: Number(r.mecanicoId),
+      papel: r.papel,
+      tipoRateio,
+      percentual: Number(r.percentual) || 0,
+      valorBase: Number(r.valorBase) || 0,
+    }))
+
+    onSave(payload)
+  }
+
+  const handleClearRateio = () => {
+    if (confirm('Deseja remover o rateio e restaurar a mão de obra 100% para o mecânico responsável?')) {
+      onSave([])
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+        {/* Cabeçalho */}
+        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                Divisão & Rateio de Mão de Obra
+                <span className="text-xs px-2 py-0.5 rounded-full font-mono bg-blue-950 text-blue-300 border border-blue-800/80">
+                  {isServico ? 'Serviço' : 'Peça'}
+                </span>
+              </h2>
+              <p className="text-xs text-slate-400 line-clamp-1">
+                {item.code ? `[${item.code}] ` : ''}{item.description}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Corpo do Modal */}
+        <div className="p-6 overflow-y-auto space-y-5">
+          {/* Cartão de Base de Cálculo */}
+          <div className="bg-slate-950/60 rounded-xl border border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block">
+                Valor Base do Item para Rateio
+              </span>
+              <span className="text-2xl font-black font-mono text-emerald-400">
+                {currency(baseCalculo)}
+              </span>
+            </div>
+            {/* Seletor de Modo: Percentual vs Fixo */}
+            <div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700">
+              <button
+                type="button"
+                onClick={() => handleToggleTipo('PERCENTUAL')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  tipoRateio === 'PERCENTUAL'
+                    ? 'bg-blue-600 text-white shadow'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Percent className="w-3.5 h-3.5" />
+                Percentual (%)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleTipo('VALOR_FIXO')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  tipoRateio === 'VALOR_FIXO'
+                    ? 'bg-blue-600 text-white shadow'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <DollarSign className="w-3.5 h-3.5" />
+                Valor Fixo (R$)
+              </button>
+            </div>
+          </div>
+
+          {/* Atalhos de Divisão Rápida */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-slate-400">Atalhos de Divisão:</span>
+              <span className="text-[11px] text-slate-500">
+                {tipoRateio === 'PERCENTUAL' ? 'Aplica em %' : 'Aplica proporcional em R$'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={applyPresetEqual}
+                className="bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-medium transition-colors text-center"
+              >
+                ⚖️ 50% / 50% Igualitário
+              </button>
+              <button
+                type="button"
+                onClick={applyPreset100Titular}
+                className="bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-medium transition-colors text-center"
+              >
+                👤 100% Titular
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPresetProportion(70, 30)}
+                className="bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-medium transition-colors text-center"
+              >
+                70% / 30%
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPresetProportion(80, 20)}
+                className="bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-medium transition-colors text-center"
+              >
+                80% / 20%
+              </button>
+            </div>
+          </div>
+
+          {/* Lista de Executantes */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-300">
+                Profissionais Executantes ({rows.length})
+              </span>
+              <button
+                type="button"
+                onClick={handleAddRow}
+                className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Adicionar Profissional
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {rowsWithComissao.map((row, idx) => (
+                <div
+                  key={idx}
+                  className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 rounded-xl p-3.5 transition-colors space-y-3"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 justify-between">
+                    {/* Seleção de Mecânico e Papel */}
+                    <div className="flex items-center gap-2 flex-1">
+                      <select
+                        value={row.mecanicoId}
+                        onChange={(e) => {
+                          const id = e.target.value ? Number(e.target.value) : ''
+                          const selectedMec = mecanicos.find((m) => m.id === id)
+                          handleUpdateRow(idx, {
+                            mecanicoId: id,
+                            papel: selectedMec?.is_auxiliar ? 'auxiliar' : (idx === 0 ? 'titular' : 'auxiliar'),
+                          })
+                        }}
+                        className="bg-slate-800 border border-slate-700 rounded-lg text-xs px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1 truncate"
+                      >
+                        <option value="">Selecione o profissional...</option>
+                        {mecanicos.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '• [Auxiliar]' : '• [Mecânico]'}
+                          </option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={row.papel}
+                        onChange={(e) => handleUpdateRow(idx, { papel: e.target.value as any })}
+                        className="bg-slate-800 border border-slate-700 rounded-lg text-xs px-2.5 py-2 text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 w-28 shrink-0"
+                      >
+                        <option value="titular">Titular</option>
+                        <option value="auxiliar">Auxiliar</option>
+                        <option value="outro">Equipe / Outro</option>
+                      </select>
+                    </div>
+
+                    {/* Campo de Entrada: % ou R$ */}
+                    <div className="flex items-center gap-2">
+                      {tipoRateio === 'PERCENTUAL' ? (
+                        <div className="flex items-center gap-1.5">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="0.1"
+                              value={row.percentual}
+                              onChange={(e) => handleUpdateRow(idx, { percentual: e.target.value })}
+                              className="bg-slate-800 border border-slate-700 rounded-lg text-xs px-2.5 py-2 pr-7 text-white font-mono w-24 text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              placeholder="0"
+                            />
+                            <span className="absolute right-2.5 top-2 text-xs text-slate-400 font-mono pointer-events-none">
+                              %
+                            </span>
+                          </div>
+                          <span className="text-xs font-mono text-slate-300 min-w-[90px] text-right">
+                            {currency(row.valBase)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              min="0"
+                              max={baseCalculo}
+                              step="0.01"
+                              value={row.valorBase}
+                              onChange={(e) => handleUpdateRow(idx, { valorBase: e.target.value })}
+                              className="bg-slate-800 border border-slate-700 rounded-lg text-xs px-2.5 py-2 text-white font-mono w-28 text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              placeholder="0,00"
+                            />
+                          </div>
+                          <span className="text-xs font-mono text-slate-400 min-w-[55px] text-right">
+                            {Number(row.percentual).toFixed(1)}%
+                          </span>
+                        </div>
+                      )}
+
+                      {rows.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveRow(idx)}
+                          className="p-1.5 text-slate-500 hover:text-red-400 rounded-lg hover:bg-slate-800 transition-colors"
+                          title="Remover profissional deste rateio"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Detalhes de Comissão Prevista do Profissional */}
+                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-800/80 text-slate-400">
+                    <span className="flex items-center gap-1.5">
+                      <span>Taxa de comissão:</span>
+                      <span className="font-mono font-medium text-slate-200">
+                        {row.mec ? `${row.pctComissao}%` : 'Não definida'}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span>Comissão a receber:</span>
+                      <span className="font-mono font-bold text-purple-400">
+                        {currency(row.comissao)}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Validação e Alertas */}
+          <div className="space-y-2">
+            {hasEmptyMec && (
+              <div className="bg-amber-950/40 border border-amber-800/70 rounded-xl p-3 text-amber-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>Selecione todos os profissionais executantes antes de salvar.</span>
+              </div>
+            )}
+
+            {hasDuplicateMec && (
+              <div className="bg-red-950/40 border border-red-800/70 rounded-xl p-3 text-red-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>O mesmo profissional foi selecionado mais de uma vez.</span>
+              </div>
+            )}
+
+            {/* Barra de Progresso e Balanço */}
+            <div
+              className={`rounded-xl p-3.5 border flex items-center justify-between transition-colors ${
+                isValid
+                  ? 'bg-emerald-950/40 border-emerald-800/70 text-emerald-300'
+                  : 'bg-red-950/40 border-red-800/70 text-red-300'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {isValid ? (
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                )}
+                <div>
+                  <span className="text-xs font-semibold block">
+                    {tipoRateio === 'PERCENTUAL'
+                      ? isValid
+                        ? 'Soma 100% Fechada (Rateio Equilibrado)'
+                        : `Soma atual: ${somaPercentual.toFixed(1)}% (Diferença: ${(100 - somaPercentual).toFixed(1)}%)`
+                      : isValid
+                      ? `Soma ${currency(somaValor)} Fechada (Rateio Equilibrado)`
+                      : `Soma atual: ${currency(somaValor)} (Diferença: ${currency(baseCalculo - somaValor)})`}
+                  </span>
+                  <span className="text-[11px] opacity-80">
+                    {isValid
+                      ? 'Todos os valores e percentuais totalizam o montante exato do serviço.'
+                      : tipoRateio === 'PERCENTUAL'
+                      ? 'A soma de todos os percentuais precisa ser exatamente 100%.'
+                      : `A soma de todos os valores nominais precisa ser exatamente ${currency(baseCalculo)}.`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-right pl-3">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                  Total Comissões
+                </span>
+                <span className="text-sm font-mono font-bold text-purple-400">
+                  {currency(totalComissaoPrevista)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Rodapé de Ações */}
+        <div className="px-6 py-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between">
+          <div>
+            {item.executantes && item.executantes.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearRateio}
+                disabled={isPending}
+                className="text-xs text-red-400 hover:text-red-300 hover:underline transition-colors disabled:opacity-50"
+              >
+                Remover rateio (restaurar 100% mecânico único)
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isPending}
+              className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isPending || !isValid || hasEmptyMec || hasDuplicateMec}
+              className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2"
+            >
+              {isPending ? 'Salvando...' : 'Salvar Rateio'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

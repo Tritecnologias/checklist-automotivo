@@ -218,6 +218,42 @@ async function fetchItems(orderId: string, tenantId = 1): Promise<Record<string,
      ORDER BY oi.created_at`,
     [tenantId, tenantId, orderId],
   );
+
+  const execMap = new Map<string, any[]>();
+  try {
+    const [execRows] = await pool.query<any>(
+      `SELECT ex.*, m.nome AS mecanico_nome, m.apelido AS mecanico_apelido
+       FROM os_item_executantes ex
+       JOIN cad_mecanicos m ON m.id = ex.mecanico_id
+       WHERE ex.order_id = ?
+       ORDER BY ex.id ASC`,
+      [orderId]
+    );
+    for (const e of (execRows as any[])) {
+      const list = execMap.get(e.item_id) || [];
+      list.push({
+        id: e.id,
+        itemId: e.item_id,
+        orderId: e.order_id,
+        mecanicoId: Number(e.mecanico_id),
+        mecanicoNome: e.mecanico_apelido || e.mecanico_nome,
+        tipoRateio: e.tipo_rateio,
+        percentual: Number(e.percentual),
+        valorBase: Number(e.valor_base),
+        comissaoPct: Number(e.comissao_pct),
+        comissaoValor: Number(e.comissao_valor),
+        papel: e.papel,
+      });
+      execMap.set(e.item_id, list);
+    }
+  } catch (exErr) {
+    // Tabela criada na migração
+  }
+
+  for (const r of (rows as any[])) {
+    r.executantes = execMap.get(r.id) || [];
+  }
+
   return rows as Record<string, unknown>[];
 }
 
@@ -269,6 +305,7 @@ function formatOrder(order: Record<string, unknown>, items: Record<string, unkno
       mecanicoNome: (i.mecanico_nome as string) || (i.cad_mecanico_nome as string) || null,
       comissaoPct: i.comissao_pct !== null && i.comissao_pct !== undefined ? Number(i.comissao_pct) : null,
       comissaoValor: i.comissao_valor !== null && i.comissao_valor !== undefined ? Number(i.comissao_valor) : null,
+      executantes: (i.executantes as any[]) || [],
     })),
     laborAmount: Number(order.labor_amount ?? 0),
     totalAmount: Number(order.total_amount),
@@ -770,16 +807,158 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
+interface ExecutanteInput {
+  mecanicoId: number;
+  tipoRateio?: 'PERCENTUAL' | 'VALOR_FIXO';
+  percentual?: number;
+  valorBase?: number;
+  papel?: 'titular' | 'auxiliar' | string;
+}
+
+async function saveItemExecutantes(
+  orderId: string,
+  itemId: string,
+  itemType: string,
+  totalItem: number,
+  laborPrice: number,
+  executantes: ExecutanteInput[]
+): Promise<any[]> {
+  await pool.execute('DELETE FROM os_item_executantes WHERE item_id = ?', [itemId]).catch(() => {});
+
+  if (!executantes || !Array.isArray(executantes) || executantes.length === 0) return [];
+
+  const isServico = itemType === 'service';
+  const totalBase = isServico ? (totalItem + laborPrice) : laborPrice;
+  const baseCalculo = totalBase > 0 ? totalBase : (isServico ? 0 : totalItem);
+
+  let totalComissaoItem = 0;
+  let firstMecId: number | null = null;
+  let firstMecNome: string | null = null;
+  const salvos: any[] = [];
+
+  for (let idx = 0; idx < executantes.length; idx++) {
+    const ex = executantes[idx];
+    const mecId = Number(ex.mecanicoId);
+    if (!mecId || mecId <= 0) continue;
+
+    const [[mec]] = await pool.query<any>(
+      'SELECT nome, apelido, comissao_servico_pct, comissao_peca_pct FROM cad_mecanicos WHERE id = ?',
+      [mecId]
+    );
+    if (!mec) continue;
+
+    const nome = mec.apelido || mec.nome;
+    if (!firstMecId) {
+      firstMecId = mecId;
+      firstMecNome = nome;
+    }
+
+    const tipoRateio = ex.tipoRateio === 'VALOR_FIXO' ? 'VALOR_FIXO' : 'PERCENTUAL';
+    let valorBase = 0;
+    let pctRateio = 0;
+
+    if (tipoRateio === 'VALOR_FIXO') {
+      valorBase = Number(ex.valorBase || 0);
+      pctRateio = baseCalculo > 0 ? (valorBase / baseCalculo) * 100 : 0;
+    } else {
+      pctRateio = Number(ex.percentual || 0);
+      valorBase = (baseCalculo * pctRateio) / 100;
+    }
+
+    const comissaoPct = isServico
+      ? Number(mec.comissao_servico_pct || 0)
+      : Number(mec.comissao_peca_pct || 0);
+    const comissaoValor = comissaoPct > 0 ? (valorBase * comissaoPct) / 100 : 0;
+    totalComissaoItem += comissaoValor;
+
+    const papel = ex.papel || (idx === 0 ? 'titular' : 'auxiliar');
+
+    const [ins] = await pool.execute<any>(
+      `INSERT INTO os_item_executantes
+         (item_id, order_id, mecanico_id, tipo_rateio, percentual, valor_base, comissao_pct, comissao_valor, papel)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [itemId, orderId, mecId, tipoRateio, pctRateio, valorBase, comissaoPct, comissaoValor, papel]
+    );
+
+    salvos.push({
+      id: ins.insertId,
+      itemId,
+      orderId,
+      mecanicoId: mecId,
+      mecanicoNome: nome,
+      tipoRateio,
+      percentual: pctRateio,
+      valorBase,
+      comissaoPct,
+      comissaoValor,
+      papel,
+    });
+  }
+
+  if (firstMecId) {
+    await pool.execute(
+      'UPDATE os_order_items SET mecanico_id = ?, mecanico_nome = ?, comissao_valor = ? WHERE id = ?',
+      [firstMecId, firstMecNome, totalComissaoItem, itemId]
+    );
+  }
+
+  return salvos;
+}
+
+async function syncExecutantesValues(
+  orderId: string,
+  itemId: string,
+  itemType: string,
+  totalItem: number,
+  laborPrice: number
+): Promise<void> {
+  const [execs] = await pool.query<any>(
+    'SELECT * FROM os_item_executantes WHERE item_id = ?',
+    [itemId]
+  ).catch(() => [[]]);
+  if (!execs || (execs as any[]).length === 0) return;
+
+  const isServico = itemType === 'service';
+  const totalBase = isServico ? (totalItem + laborPrice) : laborPrice;
+  const baseCalculo = totalBase > 0 ? totalBase : (isServico ? 0 : totalItem);
+
+  let totalComissao = 0;
+  for (const ex of (execs as any[])) {
+    let valorBase = Number(ex.valor_base);
+    let pctRateio = Number(ex.percentual);
+
+    if (ex.tipo_rateio === 'PERCENTUAL') {
+      valorBase = (baseCalculo * pctRateio) / 100;
+    } else {
+      pctRateio = baseCalculo > 0 ? (valorBase / baseCalculo) * 100 : 0;
+    }
+    const comissaoPct = Number(ex.comissao_pct);
+    const comissaoValor = comissaoPct > 0 ? (valorBase * comissaoPct) / 100 : 0;
+    totalComissao += comissaoValor;
+
+    await pool.execute(
+      'UPDATE os_item_executantes SET valor_base = ?, percentual = ?, comissao_valor = ? WHERE id = ?',
+      [valorBase, pctRateio, comissaoValor, ex.id]
+    );
+  }
+
+  await pool.execute(
+    'UPDATE os_order_items SET comissao_valor = ? WHERE id = ?',
+    [totalComissao, itemId]
+  );
+}
+
 // ── POST /orders/:id/items ──────────────────────────────────────────────────
 
 router.post('/:id/items', async (req: Request, res: Response) => {
-  const { catalogItemId, quantity = 1, unitPrice: overridePrice, laborPrice = 0, instalacaoId, mecanicoId } = req.body as {
+  const { catalogItemId, quantity = 1, unitPrice: overridePrice, laborPrice = 0, instalacaoId, mecanicoId, executantes } = req.body as {
     catalogItemId?: number | string;
     quantity?: number;
     unitPrice?: number;
     laborPrice?: number;
     instalacaoId?: number;
     mecanicoId?: number | null;
+    executantes?: ExecutanteInput[];
   };
 
   if (!catalogItemId) {
@@ -880,6 +1059,16 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       [itemId, req.params.id, product.id as any, product.code as any, product.description as any, product.type as any, qty, unitPrice, lp, total, instId, finalMecId, finalMecNome, comissaoPct, comissaoValor],
     );
 
+    let itemExecutantesSalvos: any[] = [];
+    if (executantes && Array.isArray(executantes) && executantes.length > 0) {
+      itemExecutantesSalvos = await saveItemExecutantes(req.params.id, itemId, String(product.type), total, lp, executantes);
+      if (itemExecutantesSalvos.length > 0) {
+        finalMecId = itemExecutantesSalvos[0].mecanicoId;
+        finalMecNome = itemExecutantesSalvos[0].mecanicoNome;
+        comissaoValor = itemExecutantesSalvos.reduce((acc, cur) => acc + (cur.comissaoValor || 0), 0);
+      }
+    }
+
     await recalcTotal(req.params.id);
 
     res.status(201).json({
@@ -897,6 +1086,7 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       mecanicoNome: finalMecNome,
       comissaoPct,
       comissaoValor,
+      executantes: itemExecutantesSalvos,
     });
   } catch (err) {
     console.error('POST /orders/:id/items error:', err);
@@ -939,6 +1129,8 @@ router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
       'UPDATE os_order_items SET quantity = ?, total = ?, comissao_valor = ? WHERE id = ?',
       [qty, total, comissaoVal, req.params.itemId],
     );
+
+    await syncExecutantesValues(req.params.id, req.params.itemId, String(item.type), total, Number(item.labor_price || 0));
 
     await recalcTotal(req.params.id);
 
@@ -1111,6 +1303,9 @@ router.patch('/:id/items/:itemId/mecanico', async (req: Request, res: Response) 
       [mecanicoId && Number(mecanicoId) > 0 ? Number(mecanicoId) : null, mecNome, comissaoPct, comissaoValor, req.params.itemId]
     );
 
+    // Se o usuário selecionou um mecânico direto no item, limpa rateio de múltiplos executantes
+    await pool.execute('DELETE FROM os_item_executantes WHERE item_id = ?', [req.params.itemId]).catch(() => {});
+
     const [orders] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
     const order = (orders as Record<string, unknown>[])[0];
     const items = await fetchItems(req.params.id, Number(order.tenant_id));
@@ -1119,6 +1314,65 @@ router.patch('/:id/items/:itemId/mecanico', async (req: Request, res: Response) 
   } catch (err) {
     console.error('PATCH /orders/:id/items/:itemId/mecanico error:', err);
     res.status(500).json({ message: 'Erro ao atribuir mecânico ao item' });
+  }
+});
+
+// ── PUT /orders/:id/items/:itemId/rateio ────────────────────────────────────
+// Configura rateio de mão de obra entre múltiplos executantes (mecânico titular + auxiliar ou equipe)
+router.put('/:id/items/:itemId/rateio', async (req: Request, res: Response) => {
+  const { executantes } = req.body as { executantes?: ExecutanteInput[] };
+
+  try {
+    if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
+
+    const [rows] = await pool.execute<any>(
+      'SELECT id, type, total, labor_price FROM os_order_items WHERE id = ? AND order_id = ?',
+      [req.params.itemId, req.params.id]
+    );
+    const item = rows[0];
+    if (!item) {
+      res.status(404).json({ message: 'Item não encontrado' });
+      return;
+    }
+
+    if (executantes && Array.isArray(executantes) && executantes.length > 0) {
+      await saveItemExecutantes(
+        req.params.id,
+        req.params.itemId,
+        String(item.type),
+        Number(item.total),
+        Number(item.labor_price || 0),
+        executantes
+      );
+    } else {
+      await pool.execute('DELETE FROM os_item_executantes WHERE item_id = ?', [req.params.itemId]).catch(() => {});
+      const [[itemData]] = await pool.query<any>(
+        'SELECT mecanico_id, type, total, labor_price FROM os_order_items WHERE id = ?',
+        [req.params.itemId]
+      );
+      if (itemData?.mecanico_id) {
+        const [[mec]] = await pool.query<any>(
+          'SELECT comissao_servico_pct, comissao_peca_pct FROM cad_mecanicos WHERE id = ?',
+          [itemData.mecanico_id]
+        );
+        const isServico = itemData.type === 'service';
+        const pct = mec ? Number(isServico ? mec.comissao_servico_pct : mec.comissao_peca_pct || 0) : 0;
+        const base = isServico ? (Number(itemData.total) + Number(itemData.labor_price || 0)) : Number(itemData.labor_price || 0);
+        const comissao = pct > 0 ? (base * pct) / 100 : 0;
+        await pool.execute('UPDATE os_order_items SET comissao_valor = ? WHERE id = ?', [comissao, req.params.itemId]);
+      } else {
+        await pool.execute('UPDATE os_order_items SET comissao_valor = 0 WHERE id = ?', [req.params.itemId]);
+      }
+    }
+
+    const [orders] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
+    const order = (orders as Record<string, unknown>[])[0];
+    const items = await fetchItems(req.params.id, Number(order.tenant_id));
+
+    res.json(formatOrder(order, items));
+  } catch (err) {
+    console.error('PUT /orders/:id/items/:itemId/rateio error:', err);
+    res.status(500).json({ message: 'Erro ao salvar rateio do item' });
   }
 });
 
@@ -1552,6 +1806,8 @@ router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => 
       [lp, comissaoVal, req.params.itemId, req.params.id],
     );
 
+    await syncExecutantesValues(req.params.id, req.params.itemId, String(item.type), Number(item.total), lp);
+
     await recalcTotal(req.params.id);
 
     const [orders] = await pool.execute('SELECT * FROM os_orders WHERE id = ?', [req.params.id]);
@@ -1572,6 +1828,8 @@ router.patch('/:id/items/:itemId/labor', async (req: Request, res: Response) => 
 router.delete('/:id/items/:itemId', async (req: Request, res: Response) => {
   try {
     if (!await assertOrderOpen(req.params.id, req.user!, req, res)) return;
+
+    await pool.execute('DELETE FROM os_item_executantes WHERE item_id = ?', [req.params.itemId]).catch(() => {});
 
     await pool.execute(
       'DELETE FROM os_order_items WHERE id = ? AND order_id = ?',

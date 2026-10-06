@@ -70,6 +70,21 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ mecanicoId, comissaoPct }),
     }),
+  updateItemRateio: (
+    orderId: string,
+    itemId: string,
+    executantes: {
+      mecanicoId: number
+      tipoRateio: 'PERCENTUAL' | 'VALOR_FIXO'
+      percentual?: number
+      valorBase?: number
+      papel?: 'titular' | 'auxiliar' | string
+    }[]
+  ) =>
+    request<Order>(`/orders/${orderId}/items/${itemId}/rateio`, {
+      method: 'PUT',
+      body: JSON.stringify({ executantes }),
+    }),
   updateOrderClient: (
     id: string,
     client: { name: string; phone: string; document?: string; cep?: string; address?: string },
@@ -144,6 +159,13 @@ export const api = {
       laborPrice?: number
       instalacaoId?: number | null
       mecanicoId?: number | null
+      executantes?: {
+        mecanicoId: number
+        tipoRateio?: 'PERCENTUAL' | 'VALOR_FIXO'
+        percentual?: number
+        valorBase?: number
+        papel?: 'titular' | 'auxiliar' | string
+      }[]
     }
   ) =>
     request<OrderItem>(`/orders/${orderId}/items`, {

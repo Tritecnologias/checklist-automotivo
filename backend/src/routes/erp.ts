@@ -5087,12 +5087,12 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
       statusFilter = " AND o.status IN ('open', 'in_progress')";
     }
 
-    // Filtro de mecânico se especificado (inclui titular ou auxiliar da OS)
+    // Filtro de mecânico se especificado (inclui titular, auxiliar ou executante com rateio)
     let mecItemFilter = '';
     const mecParams: any[] = [];
     if (mecanico_id && Number(mecanico_id) > 0) {
-      mecItemFilter = ' AND (oi.mecanico_id = ? OR o.mecanico_id = ? OR o.auxiliar_id = ?)';
-      mecParams.push(Number(mecanico_id), Number(mecanico_id), Number(mecanico_id));
+      mecItemFilter = ' AND (oi.mecanico_id = ? OR o.mecanico_id = ? OR o.auxiliar_id = ? OR EXISTS (SELECT 1 FROM os_item_executantes ex WHERE ex.item_id = oi.id AND ex.mecanico_id = ?))';
+      mecParams.push(Number(mecanico_id), Number(mecanico_id), Number(mecanico_id), Number(mecanico_id));
     }
 
     // 1. Busca todos os itens de OS executados no período com seus respectivos mecânicos
@@ -5264,8 +5264,36 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
 
     const extratoItens: any[] = [];
 
+    // Busca executantes com rateio para todos os itens retornados no período
+    const itemIds = (itemRows as any[]).map(r => r.item_id);
+    const executantesMap = new Map<string, any[]>();
+    if (itemIds.length > 0) {
+      try {
+        const [execRows] = await pool.query<any>(
+          `SELECT
+             ex.*,
+             m.nome AS cad_mecanico_nome,
+             m.apelido AS cad_mecanico_apelido,
+             m.comissao_servico_pct AS cad_serv_pct,
+             m.comissao_peca_pct AS cad_peca_pct,
+             m.chave_pix AS cad_chave_pix
+           FROM os_item_executantes ex
+           JOIN cad_mecanicos m ON m.id = ex.mecanico_id
+           WHERE ex.item_id IN (?)
+           ORDER BY ex.papel DESC, ex.id ASC`,
+          [itemIds]
+        );
+        for (const ex of (execRows as any[])) {
+          const list = executantesMap.get(ex.item_id) || [];
+          list.push(ex);
+          executantesMap.set(ex.item_id, list);
+        }
+      } catch (exErr) {
+        // Tabela criada na migração
+      }
+    }
+
     for (const row of itemRows as any[]) {
-      const mecId = row.mecanico_id ? Number(row.mecanico_id) : 0;
       const isServico = row.type === 'service';
       const qtd = Number(row.quantity);
       const unitPrice = Number(row.unit_price);
@@ -5277,114 +5305,214 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
       const valorPeca = isServico ? 0 : totalItem;
       const valorTotalLinha = totalItem + laborPrice;
 
-      // Comissão calculada da linha
-      let comissaoLinha = 0;
-      let pctAplicado = 0;
-
-      if (row.comissao_valor !== null && row.comissao_valor !== undefined) {
-        comissaoLinha = Number(row.comissao_valor);
-        pctAplicado = Number(row.comissao_pct || 0);
-      } else if (mecId > 0 && mecanicosStats.has(mecId)) {
-        // Fallback: calcula baseado nas taxas cadastradas do técnico
-        const mec = mecanicosStats.get(mecId)!;
-        if (isServico) {
-          pctAplicado = mec.comissao_servico_pct;
-          comissaoLinha = pctAplicado > 0 ? (valorServico * pctAplicado) / 100 : 0;
-        } else {
-          pctAplicado = mec.comissao_peca_pct;
-          comissaoLinha = pctAplicado > 0 ? (valorPeca * pctAplicado) / 100 : 0;
-        }
-      }
-
       faturamentoGeralServicos += valorServico;
       faturamentoGeralPecas += valorPeca;
-      totalComissoesGeral += comissaoLinha;
       osDistintasTotal.add(row.order_id);
 
-      // Acumula nas estatísticas do mecânico
-      let mecStat = mecanicosStats.get(mecId);
-      if (!mecStat) {
-        mecStat = {
-          id: mecId,
-          nome: row.mecanico_nome || row.cad_mecanico_nome || 'Mecânico #' + mecId,
-          apelido: row.cad_mecanico_apelido || null,
-          cpf: null,
-          telefone: null,
-          chave_pix: row.cad_chave_pix || null,
-          comissao_servico_pct: Number(row.cad_serv_pct || 0),
-          comissao_peca_pct: Number(row.cad_peca_pct || 0),
-          ativo: true,
-          is_auxiliar: false,
-          qtd_os_set: new Set<string>(),
-          qtd_servicos: 0,
-          qtd_pecas: 0,
-          total_servicos: 0,
-          total_pecas: 0,
-          total_produzido: 0,
-          comissao_servicos: 0,
-          comissao_pecas: 0,
-          total_comissao: 0,
-          total_pago: pagamentosMap.get(mecId) || 0,
-          saldo_a_pagar: 0,
-          ticket_medio: 0,
-          share_pct: 0,
-        };
-        mecanicosStats.set(mecId, mecStat);
-      }
+      const execs = executantesMap.get(row.item_id);
 
-      const currentMecStat = mecStat;
-      currentMecStat.qtd_os_set.add(row.order_id);
-      if (isServico) {
-        currentMecStat.qtd_servicos += 1;
-        currentMecStat.total_servicos += valorServico;
-        currentMecStat.comissao_servicos += comissaoLinha;
+      if (execs && execs.length > 0) {
+        // Cenário com Múltiplos Executantes / Rateio (Caso 1: Valor Fixo | Caso 2: Percentual)
+        for (const ex of execs) {
+          const exMecId = Number(ex.mecanico_id);
+          const valorBaseExec = Number(ex.valor_base);
+          const comissaoExec = Number(ex.comissao_valor);
+          const pctAplicado = Number(ex.comissao_pct);
+
+          totalComissoesGeral += comissaoExec;
+
+          let mecStat = mecanicosStats.get(exMecId);
+          if (!mecStat) {
+            mecStat = {
+              id: exMecId,
+              nome: ex.cad_mecanico_nome || 'Mecânico #' + exMecId,
+              apelido: ex.cad_mecanico_apelido || null,
+              cpf: null,
+              telefone: null,
+              chave_pix: ex.cad_chave_pix || null,
+              comissao_servico_pct: Number(ex.cad_serv_pct || 0),
+              comissao_peca_pct: Number(ex.cad_peca_pct || 0),
+              ativo: true,
+              is_auxiliar: ex.papel === 'auxiliar',
+              qtd_os_set: new Set<string>(),
+              qtd_servicos: 0,
+              qtd_pecas: 0,
+              total_servicos: 0,
+              total_pecas: 0,
+              total_produzido: 0,
+              comissao_servicos: 0,
+              comissao_pecas: 0,
+              total_comissao: 0,
+              total_pago: pagamentosMap.get(exMecId) || 0,
+              saldo_a_pagar: 0,
+              ticket_medio: 0,
+              share_pct: 0,
+            };
+            mecanicosStats.set(exMecId, mecStat);
+          }
+
+          mecStat.qtd_os_set.add(row.order_id);
+          if (isServico) {
+            mecStat.qtd_servicos += 1;
+            mecStat.total_servicos += valorBaseExec;
+            mecStat.comissao_servicos += comissaoExec;
+          } else {
+            mecStat.qtd_pecas += 1;
+            mecStat.total_pecas += valorBaseExec;
+            mecStat.comissao_pecas += comissaoExec;
+          }
+          mecStat.total_produzido += valorBaseExec;
+          mecStat.total_comissao += comissaoExec;
+
+          // Se estiver filtrando por um mecânico específico, só adiciona ao extrato se for ele
+          if (!mecanico_id || Number(mecanico_id) === 0 || Number(mecanico_id) === exMecId) {
+            const rotuloRateio = ex.tipo_rateio === 'VALOR_FIXO'
+              ? `Fixo R$ ${valorBaseExec.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+              : `${Number(ex.percentual).toFixed(0)}%`;
+            const papelBadge = ex.papel === 'auxiliar' ? 'Auxiliar' : 'Titular';
+
+            extratoItens.push({
+              item_id: `${row.item_id}_${ex.id}`,
+              order_id: row.order_id,
+              os_numero: String(row.order_id).slice(0, 8).toUpperCase(),
+              plate: row.plate,
+              model: row.model,
+              mileage: Number(row.mileage || 0),
+              client_name: row.client_name || 'Sem nome',
+              client_phone: row.client_phone || '',
+              order_status: row.order_status,
+              venda_controle: row.venda_controle || null,
+              data_referencia: row.data_referencia,
+              data_os: row.order_created_at,
+              data_fechamento: row.order_closed_at,
+              descricao: `${row.description} [${papelBadge} • ${rotuloRateio}]`,
+              codigo: row.code,
+              tipo: row.type,
+              quantidade: qtd,
+              unit_price: unitPrice,
+              labor_price: laborPrice,
+              total_item: totalItem,
+              valor_base: valorBaseExec,
+              valor_total_linha: valorTotalLinha,
+              mecanico_id: exMecId,
+              mecanico_nome: ex.cad_mecanico_apelido || ex.cad_mecanico_nome || `Técnico #${exMecId}`,
+              auxiliar_id: row.auxiliar_id ? Number(row.auxiliar_id) : null,
+              auxiliar_nome: row.auxiliar_nome || null,
+              papel: ex.papel,
+              tipo_rateio: ex.tipo_rateio,
+              percentual_rateio: Number(ex.percentual),
+              comissao_pct: pctAplicado,
+              comissao_valor: comissaoExec,
+            });
+          }
+        }
       } else {
-        currentMecStat.qtd_pecas += 1;
-        currentMecStat.total_pecas += valorPeca;
-        currentMecStat.comissao_pecas += comissaoLinha;
-      }
-      currentMecStat.total_produzido += valorTotalLinha;
-      currentMecStat.total_comissao += comissaoLinha;
+        // Cenário padrão com mecânico único (retrocompatibilidade perfeita)
+        const mecId = row.mecanico_id ? Number(row.mecanico_id) : 0;
+        let comissaoLinha = 0;
+        let pctAplicado = 0;
 
-      // Se a OS possui Auxiliar atribuído, contabiliza a participação na OS para ele também
-      if (row.auxiliar_id && Number(row.auxiliar_id) > 0) {
-        const auxId = Number(row.auxiliar_id);
-        const auxStat = mecanicosStats.get(auxId);
-        if (auxStat) {
-          auxStat.qtd_os_set.add(row.order_id);
+        if (row.comissao_valor !== null && row.comissao_valor !== undefined) {
+          comissaoLinha = Number(row.comissao_valor);
+          pctAplicado = Number(row.comissao_pct || 0);
+        } else if (mecId > 0 && mecanicosStats.has(mecId)) {
+          const mec = mecanicosStats.get(mecId)!;
+          if (isServico) {
+            pctAplicado = mec.comissao_servico_pct;
+            comissaoLinha = pctAplicado > 0 ? (valorServico * pctAplicado) / 100 : 0;
+          } else {
+            pctAplicado = mec.comissao_peca_pct;
+            comissaoLinha = pctAplicado > 0 ? (valorPeca * pctAplicado) / 100 : 0;
+          }
+        }
+
+        totalComissoesGeral += comissaoLinha;
+
+        let mecStat = mecanicosStats.get(mecId);
+        if (!mecStat) {
+          mecStat = {
+            id: mecId,
+            nome: row.mecanico_nome || row.cad_mecanico_nome || 'Mecânico #' + mecId,
+            apelido: row.cad_mecanico_apelido || null,
+            cpf: null,
+            telefone: null,
+            chave_pix: row.cad_chave_pix || null,
+            comissao_servico_pct: Number(row.cad_serv_pct || 0),
+            comissao_peca_pct: Number(row.cad_peca_pct || 0),
+            ativo: true,
+            is_auxiliar: false,
+            qtd_os_set: new Set<string>(),
+            qtd_servicos: 0,
+            qtd_pecas: 0,
+            total_servicos: 0,
+            total_pecas: 0,
+            total_produzido: 0,
+            comissao_servicos: 0,
+            comissao_pecas: 0,
+            total_comissao: 0,
+            total_pago: pagamentosMap.get(mecId) || 0,
+            saldo_a_pagar: 0,
+            ticket_medio: 0,
+            share_pct: 0,
+          };
+          mecanicosStats.set(mecId, mecStat);
+        }
+
+        const currentMecStat = mecStat;
+        currentMecStat.qtd_os_set.add(row.order_id);
+        if (isServico) {
+          currentMecStat.qtd_servicos += 1;
+          currentMecStat.total_servicos += valorServico;
+          currentMecStat.comissao_servicos += comissaoLinha;
+        } else {
+          currentMecStat.qtd_pecas += 1;
+          currentMecStat.total_pecas += valorPeca;
+          currentMecStat.comissao_pecas += comissaoLinha;
+        }
+        currentMecStat.total_produzido += valorTotalLinha;
+        currentMecStat.total_comissao += comissaoLinha;
+
+        if (row.auxiliar_id && Number(row.auxiliar_id) > 0) {
+          const auxId = Number(row.auxiliar_id);
+          const auxStat = mecanicosStats.get(auxId);
+          if (auxStat) {
+            auxStat.qtd_os_set.add(row.order_id);
+          }
+        }
+
+        if (!mecanico_id || Number(mecanico_id) === 0 || Number(mecanico_id) === mecId || Number(mecanico_id) === Number(row.auxiliar_id)) {
+          extratoItens.push({
+            item_id: row.item_id,
+            order_id: row.order_id,
+            os_numero: String(row.order_id).slice(0, 8).toUpperCase(),
+            plate: row.plate,
+            model: row.model,
+            mileage: Number(row.mileage || 0),
+            client_name: row.client_name || 'Sem nome',
+            client_phone: row.client_phone || '',
+            order_status: row.order_status,
+            venda_controle: row.venda_controle || null,
+            data_referencia: row.data_referencia,
+            data_os: row.order_created_at,
+            data_fechamento: row.order_closed_at,
+            descricao: row.description,
+            codigo: row.code,
+            tipo: row.type,
+            quantidade: qtd,
+            unit_price: unitPrice,
+            labor_price: laborPrice,
+            total_item: totalItem,
+            valor_base: isServico ? valorServico : valorPeca,
+            valor_total_linha: valorTotalLinha,
+            mecanico_id: mecId > 0 ? mecId : null,
+            mecanico_nome: row.mecanico_nome || row.cad_mecanico_nome || (mecId === 0 ? 'Não atribuído' : 'Técnico #' + mecId),
+            auxiliar_id: row.auxiliar_id ? Number(row.auxiliar_id) : null,
+            auxiliar_nome: row.auxiliar_nome || null,
+            comissao_pct: pctAplicado,
+            comissao_valor: comissaoLinha,
+          });
         }
       }
-
-      extratoItens.push({
-        item_id: row.item_id,
-        order_id: row.order_id,
-        os_numero: String(row.order_id).slice(0, 8).toUpperCase(),
-        plate: row.plate,
-        model: row.model,
-        mileage: Number(row.mileage || 0),
-        client_name: row.client_name || 'Sem nome',
-        client_phone: row.client_phone || '',
-        order_status: row.order_status,
-        venda_controle: row.venda_controle || null,
-        data_referencia: row.data_referencia,
-        data_os: row.order_created_at,
-        data_fechamento: row.order_closed_at,
-        descricao: row.description,
-        codigo: row.code,
-        tipo: row.type,
-        quantidade: qtd,
-        unit_price: unitPrice,
-        labor_price: laborPrice,
-        total_item: totalItem,
-        valor_base: isServico ? valorServico : valorPeca,
-        valor_total_linha: valorTotalLinha,
-        mecanico_id: mecId > 0 ? mecId : null,
-        mecanico_nome: row.mecanico_nome || row.cad_mecanico_nome || (mecId === 0 ? 'Não atribuído' : 'Técnico #' + mecId),
-        auxiliar_id: row.auxiliar_id ? Number(row.auxiliar_id) : null,
-        auxiliar_nome: row.auxiliar_nome || null,
-        comissao_pct: pctAplicado,
-        comissao_valor: comissaoLinha,
-      });
     }
 
     // Calcula percentual de participação (share) e saldos por mecânico

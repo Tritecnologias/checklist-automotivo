@@ -718,6 +718,28 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  // Tabela de rateio de múltiplos executantes por item (Caso 1: Valor Fixo / Caso 2: Percentual)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`os_item_executantes\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`item_id\` CHAR(36) NOT NULL,
+      \`order_id\` CHAR(36) NOT NULL,
+      \`mecanico_id\` INT NOT NULL,
+      \`tipo_rateio\` ENUM('PERCENTUAL', 'VALOR_FIXO') NOT NULL DEFAULT 'PERCENTUAL',
+      \`percentual\` DECIMAL(5,2) NOT NULL DEFAULT 100.00,
+      \`valor_base\` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+      \`comissao_pct\` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+      \`comissao_valor\` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+      \`papel\` VARCHAR(20) NOT NULL DEFAULT 'titular',
+      \`created_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY \`idx_exec_item\` (\`item_id\`),
+      KEY \`idx_exec_order\` (\`order_id\`),
+      KEY \`idx_exec_mecanico\` (\`mecanico_id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  console.log('[migration] os_item_executantes configurada');
+
   // Seed inicial de técnicos se tabela estiver vazia
   const [[{ cntMecanicosInit }]] = await pool.query<any>('SELECT COUNT(*) as cntMecanicosInit FROM cad_mecanicos');
   if (Number(cntMecanicosInit) === 0) {
