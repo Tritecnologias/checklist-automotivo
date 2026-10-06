@@ -1,7 +1,7 @@
 import { useAuth } from '@/lib/AuthContext';
 import { useRouter } from 'expo-router';
 import { useColorScheme } from 'nativewind';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -18,6 +18,7 @@ export default function LoginScreen() {
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
 
+  const passwordInputRef = useRef<TextInput>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -41,7 +42,7 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       className="flex-1 bg-slate-50 dark:bg-slate-950"
     >
       <View className="flex-1 justify-center px-6">
@@ -71,6 +72,7 @@ export default function LoginScreen() {
               autoCapitalize="none"
               keyboardType="email-address"
               returnKeyType="next"
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
               autoFocus
             />
           </View>
@@ -80,6 +82,7 @@ export default function LoginScreen() {
               Senha
             </Text>
             <TextInput
+              ref={passwordInputRef}
               className="h-12 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 text-slate-900 dark:text-slate-50 text-base"
               placeholder="••••••••"
               placeholderTextColor={isDark ? '#64748b' : '#94a3b8'}

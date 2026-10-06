@@ -17,15 +17,52 @@ async function verifyAdminPassword(params: {
   password?: string;
   adminUserId?: number;
   adminEmail?: string;
+  supervisorPin?: string;
   currentUserId: number;
   orderTenantId: number;
 }): Promise<{ ok: boolean; message?: string; adminUser?: any }> {
-  const { password, adminUserId, adminEmail, currentUserId, orderTenantId } = params;
+  const { password, adminUserId, adminEmail, supervisorPin, currentUserId, orderTenantId } = params;
+
+  if (supervisorPin && /^\d{4}$/.test(String(supervisorPin).trim())) {
+    const pin = String(supervisorPin).trim();
+    const [rows] = await pool.query<any>(
+      'SELECT id, supervisor_name FROM os_supervisor_pins WHERE pin = ? AND active = 1',
+      [pin]
+    );
+    const record = rows[0];
+    if (record) {
+      return {
+        ok: true,
+        adminUser: {
+          id: record.id || currentUserId,
+          nome: record.supervisor_name,
+          role: 'manager',
+        },
+      };
+    }
+
+    const envPin = process.env.SUPERVISOR_PIN;
+    if (envPin && pin === envPin) {
+      return {
+        ok: true,
+        adminUser: {
+          id: currentUserId,
+          nome: 'Supervisor',
+          role: 'manager',
+        },
+      };
+    }
+
+    return {
+      ok: false,
+      message: 'PIN de supervisor inválido.',
+    };
+  }
 
   if (!password || !password.trim()) {
     return {
       ok: false,
-      message: 'A senha do administrador é obrigatória para finalizar a Ordem de Serviço.',
+      message: 'A senha do administrador ou PIN de supervisor é obrigatória para finalizar a Ordem de Serviço.',
     };
   }
 
@@ -1426,10 +1463,12 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
     }
 
     if (status === 'closed') {
-      const { adminPassword, adminUserId, adminEmail, client } = req.body as {
+      const { adminPassword, adminUserId, adminEmail, supervisorPin, isBalcao, client } = req.body as {
         adminPassword?: string;
         adminUserId?: number;
         adminEmail?: string;
+        supervisorPin?: string;
+        isBalcao?: boolean;
         client?: {
           name?: string;
           document?: string;
@@ -1440,26 +1479,80 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
         };
       };
 
-      const authResult = await verifyAdminPassword({
-        password: adminPassword,
-        adminUserId,
-        adminEmail,
-        currentUserId: req.user!.userId,
-        orderTenantId: Number(order.tenant_id),
-      });
+      const mecNome = String(order.mecanico_nome ?? '').toUpperCase();
+      const placa = String(order.plate ?? '').toUpperCase();
+      const isBalcaoOrder = isBalcao === true ||
+        mecNome.includes('BALC') ||
+        placa.includes('BALC') ||
+        (Number(order.labor_amount ?? 0) === 0 && (!order.mecanico_id || mecNome.includes('BALC')));
 
-      if (!authResult.ok) {
-        const code = authResult.message?.includes('obrigatória') ? 400
-          : authResult.message?.includes('incorreta') ? 401
-          : 403;
-        res.status(code).json({ message: authResult.message });
+      let adminUser: { id: number; nome: string; role?: string } | null = null;
+
+      // 1. Validação por PIN de Supervisor (4 dígitos)
+      if (supervisorPin && /^\d{4}$/.test(String(supervisorPin).trim())) {
+        const pin = String(supervisorPin).trim();
+        const [pinRows] = await pool.query<any>(
+          'SELECT id, supervisor_name FROM os_supervisor_pins WHERE pin = ? AND active = 1',
+          [pin]
+        );
+        const pinRec = pinRows[0];
+        if (pinRec) {
+          adminUser = {
+            id: pinRec.id || req.user!.userId,
+            nome: pinRec.supervisor_name || 'Supervisor',
+            role: 'manager',
+          };
+        } else if (process.env.SUPERVISOR_PIN && pin === process.env.SUPERVISOR_PIN) {
+          adminUser = {
+            id: req.user!.userId,
+            nome: 'Supervisor',
+            role: 'manager',
+          };
+        } else if (!isBalcaoOrder) {
+          res.status(401).json({ message: 'PIN de supervisor incorreto. Encerramento de OS não autorizado.' });
+          return;
+        }
+      }
+
+      // 2. Validação por Senha de Administrador (se fornecida ou se for OS de oficina sem PIN)
+      if (!adminUser && (adminPassword || !isBalcaoOrder)) {
+        const authResult = await verifyAdminPassword({
+          password: adminPassword,
+          adminUserId,
+          adminEmail,
+          currentUserId: req.user!.userId,
+          orderTenantId: Number(order.tenant_id),
+        });
+
+        if (!authResult.ok) {
+          if (!isBalcaoOrder) {
+            const code = authResult.message?.includes('obrigatória') ? 400
+              : authResult.message?.includes('incorreta') ? 401
+              : 403;
+            res.status(code).json({ message: authResult.message });
+            return;
+          }
+        } else {
+          adminUser = authResult.adminUser;
+        }
+      }
+
+      // 3. Fallback para Venda de Balcão (permite liberação direta ao caixa pelo operador logado)
+      if (!adminUser && isBalcaoOrder) {
+        adminUser = {
+          id: req.user!.userId,
+          nome: (req.user as any)?.nome || req.user?.email || 'Operador Balcão',
+          role: req.user!.role,
+        };
+      }
+
+      if (!adminUser) {
+        res.status(400).json({ message: 'Autorização necessária para finalizar a Ordem de Serviço.' });
         return;
       }
 
-      const adminUser = authResult.adminUser;
-
-      // Validação obrigatória dos dados do cliente (CPF, Telefone, CEP e Endereço) para envio ao PDV
-      const finalClientName = client?.name !== undefined ? String(client.name).trim() : (order.client_name ? String(order.client_name).trim() : '');
+      // Validação dos dados do cliente para envio ao PDV
+      let finalClientName = client?.name !== undefined ? String(client.name).trim() : (order.client_name ? String(order.client_name).trim() : '');
       const finalClientDoc = client?.document !== undefined ? String(client.document).trim() : (order.client_document ? String(order.client_document).trim() : '');
       const finalClientPhone = client?.phone !== undefined ? String(client.phone).trim() : (order.client_phone ? String(order.client_phone).trim() : '');
       const finalClientCep = client?.cep !== undefined ? String(client.cep).trim() : (order.client_cep ? String(order.client_cep).trim() : '');
@@ -1467,32 +1560,41 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
         ? String(client.address).trim()
         : (client?.endereco !== undefined ? String(client.endereco).trim() : (order.client_address ? String(order.client_address).trim() : ''));
 
-      if (!finalClientName) {
-        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, o nome do cliente é obrigatório.' });
-        return;
-      }
+      if (isBalcaoOrder) {
+        if (!finalClientName) {
+          finalClientName = 'Consumidor Balcão';
+        }
+        // No balcão rápido, CPF, Telefone, CEP e Endereço são opcionais
+      } else {
+        if (!finalClientName) {
+          finalClientName = order.plate ? `Cliente (${order.plate})` : 'Cliente Oficina';
+        }
 
-      const cleanDoc = finalClientDoc.replace(/\D/g, '');
-      if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
-        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CPF (11 dígitos) ou CNPJ (14 dígitos) válido do cliente.' });
-        return;
-      }
+        // Validação estrita preservada para fechamento administrativo via Web (sem supervisorPin no tablet)
+        if (!supervisorPin) {
+          const cleanDoc = finalClientDoc.replace(/\D/g, '');
+          if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+            res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CPF (11 dígitos) ou CNPJ (14 dígitos) válido do cliente.' });
+            return;
+          }
 
-      const cleanPhone = finalClientPhone.replace(/\D/g, '');
-      if (!cleanPhone || cleanPhone.length < 8) {
-        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório informar um telefone / WhatsApp válido do cliente.' });
-        return;
-      }
+          const cleanPhone = finalClientPhone.replace(/\D/g, '');
+          if (!cleanPhone || cleanPhone.length < 8) {
+            res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório informar um telefone / WhatsApp válido do cliente.' });
+            return;
+          }
 
-      const cleanCep = finalClientCep.replace(/\D/g, '');
-      if (!cleanCep || cleanCep.length !== 8) {
-        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CEP válido (8 dígitos) do cliente.' });
-        return;
-      }
+          const cleanCep = finalClientCep.replace(/\D/g, '');
+          if (!cleanCep || cleanCep.length !== 8) {
+            res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CEP válido (8 dígitos) do cliente.' });
+            return;
+          }
 
-      if (!finalClientAddress || finalClientAddress.length < 3) {
-        res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher o endereço completo do cliente.' });
-        return;
+          if (!finalClientAddress || finalClientAddress.length < 3) {
+            res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher o endereço completo do cliente.' });
+            return;
+          }
+        }
       }
 
       await pool.execute(
@@ -1508,7 +1610,16 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
              finalizado_por_id = ?,
              finalizado_por_nome = ?
          WHERE id = ?`,
-        [finalClientName, finalClientDoc, finalClientPhone, finalClientCep, finalClientAddress, adminUser.id, adminUser.nome, req.params.id],
+        [
+          finalClientName,
+          finalClientDoc || null,
+          finalClientPhone || null,
+          finalClientCep || null,
+          finalClientAddress || null,
+          adminUser.id,
+          adminUser.nome,
+          req.params.id,
+        ],
       );
 
       // Sincroniza dados confirmados em cad_clientes
@@ -1547,12 +1658,14 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
 });
 
 // ── POST /orders/:id/finalizar ──────────────────────────────────────────────
-// Finaliza a Ordem de Serviço com validação estrita de senha de administrador e confirmação dos dados do cliente
+// Finaliza a Ordem de Serviço com validação de senha de administrador ou PIN de supervisor e confirmação dos dados
 router.post('/:id/finalizar', async (req: Request, res: Response) => {
-  const { adminPassword, adminUserId, adminEmail, client } = req.body as {
+  const { adminPassword, adminUserId, adminEmail, supervisorPin, isBalcao, client } = req.body as {
     adminPassword?: string;
     adminUserId?: number;
     adminEmail?: string;
+    supervisorPin?: string;
+    isBalcao?: boolean;
     client?: {
       name?: string;
       document?: string;
@@ -1589,26 +1702,80 @@ router.post('/:id/finalizar', async (req: Request, res: Response) => {
       return;
     }
 
-    const authResult = await verifyAdminPassword({
-      password: adminPassword,
-      adminUserId,
-      adminEmail,
-      currentUserId: req.user!.userId,
-      orderTenantId: Number(order.tenant_id),
-    });
+    const mecNome = String(order.mecanico_nome ?? '').toUpperCase();
+    const placa = String(order.plate ?? '').toUpperCase();
+    const isBalcaoOrder = isBalcao === true ||
+      mecNome.includes('BALC') ||
+      placa.includes('BALC') ||
+      (Number(order.labor_amount ?? 0) === 0 && (!order.mecanico_id || mecNome.includes('BALC')));
 
-    if (!authResult.ok) {
-      const code = authResult.message?.includes('obrigatória') ? 400
-        : authResult.message?.includes('incorreta') ? 401
-        : 403;
-      res.status(code).json({ message: authResult.message });
+    let adminUser: { id: number; nome: string; role?: string } | null = null;
+
+    // 1. Validação por PIN de Supervisor (4 dígitos)
+    if (supervisorPin && /^\d{4}$/.test(String(supervisorPin).trim())) {
+      const pin = String(supervisorPin).trim();
+      const [pinRows] = await pool.query<any>(
+        'SELECT id, supervisor_name FROM os_supervisor_pins WHERE pin = ? AND active = 1',
+        [pin]
+      );
+      const pinRec = pinRows[0];
+      if (pinRec) {
+        adminUser = {
+          id: pinRec.id || req.user!.userId,
+          nome: pinRec.supervisor_name || 'Supervisor',
+          role: 'manager',
+        };
+      } else if (process.env.SUPERVISOR_PIN && pin === process.env.SUPERVISOR_PIN) {
+        adminUser = {
+          id: req.user!.userId,
+          nome: 'Supervisor',
+          role: 'manager',
+        };
+      } else if (!isBalcaoOrder) {
+        res.status(401).json({ message: 'PIN de supervisor incorreto. Encerramento de OS não autorizado.' });
+        return;
+      }
+    }
+
+    // 2. Validação por Senha de Administrador (se fornecida ou se for OS de oficina sem PIN)
+    if (!adminUser && (adminPassword || !isBalcaoOrder)) {
+      const authResult = await verifyAdminPassword({
+        password: adminPassword,
+        adminUserId,
+        adminEmail,
+        currentUserId: req.user!.userId,
+        orderTenantId: Number(order.tenant_id),
+      });
+
+      if (!authResult.ok) {
+        if (!isBalcaoOrder) {
+          const code = authResult.message?.includes('obrigatória') ? 400
+            : authResult.message?.includes('incorreta') ? 401
+            : 403;
+          res.status(code).json({ message: authResult.message });
+          return;
+        }
+      } else {
+        adminUser = authResult.adminUser;
+      }
+    }
+
+    // 3. Fallback para Venda de Balcão (permite liberação direta ao caixa pelo operador logado)
+    if (!adminUser && isBalcaoOrder) {
+      adminUser = {
+        id: req.user!.userId,
+        nome: (req.user as any)?.nome || req.user?.email || 'Operador Balcão',
+        role: req.user!.role,
+      };
+    }
+
+    if (!adminUser) {
+      res.status(400).json({ message: 'Autorização necessária para finalizar a Ordem de Serviço.' });
       return;
     }
 
-    const adminUser = authResult.adminUser;
-
-    // Validação obrigatória dos dados do cliente (CPF, Telefone, CEP e Endereço) para envio ao PDV
-    const finalClientName = client?.name !== undefined ? String(client.name).trim() : (order.client_name ? String(order.client_name).trim() : '');
+    // Validação dos dados do cliente para envio ao PDV
+    let finalClientName = client?.name !== undefined ? String(client.name).trim() : (order.client_name ? String(order.client_name).trim() : '');
     const finalClientDoc = client?.document !== undefined ? String(client.document).trim() : (order.client_document ? String(order.client_document).trim() : '');
     const finalClientPhone = client?.phone !== undefined ? String(client.phone).trim() : (order.client_phone ? String(order.client_phone).trim() : '');
     const finalClientCep = client?.cep !== undefined ? String(client.cep).trim() : (order.client_cep ? String(order.client_cep).trim() : '');
@@ -1616,32 +1783,40 @@ router.post('/:id/finalizar', async (req: Request, res: Response) => {
       ? String(client.address).trim()
       : (client?.endereco !== undefined ? String(client.endereco).trim() : (order.client_address ? String(order.client_address).trim() : ''));
 
-    if (!finalClientName) {
-      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, o nome do cliente é obrigatório.' });
-      return;
-    }
+    if (isBalcaoOrder) {
+      if (!finalClientName) {
+        finalClientName = 'Consumidor Balcão';
+      }
+    } else {
+      if (!finalClientName) {
+        finalClientName = order.plate ? `Cliente (${order.plate})` : 'Cliente Oficina';
+      }
 
-    const cleanDoc = finalClientDoc.replace(/\D/g, '');
-    if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
-      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CPF (11 dígitos) ou CNPJ (14 dígitos) válido do cliente.' });
-      return;
-    }
+      // Validação estrita mantida caso seja encerramento administrativo via Web (sem supervisorPin no tablet)
+      if (!supervisorPin) {
+        const cleanDoc = finalClientDoc.replace(/\D/g, '');
+        if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+          res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CPF (11 dígitos) ou CNPJ (14 dígitos) válido do cliente.' });
+          return;
+        }
 
-    const cleanPhone = finalClientPhone.replace(/\D/g, '');
-    if (!cleanPhone || cleanPhone.length < 8) {
-      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório informar um telefone / WhatsApp válido do cliente.' });
-      return;
-    }
+        const cleanPhone = finalClientPhone.replace(/\D/g, '');
+        if (!cleanPhone || cleanPhone.length < 8) {
+          res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório informar um telefone / WhatsApp válido do cliente.' });
+          return;
+        }
 
-    const cleanCep = finalClientCep.replace(/\D/g, '');
-    if (!cleanCep || cleanCep.length !== 8) {
-      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CEP válido (8 dígitos) do cliente.' });
-      return;
-    }
+        const cleanCep = finalClientCep.replace(/\D/g, '');
+        if (!cleanCep || cleanCep.length !== 8) {
+          res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher um CEP válido (8 dígitos) do cliente.' });
+          return;
+        }
 
-    if (!finalClientAddress || finalClientAddress.length < 3) {
-      res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher o endereço completo do cliente.' });
-      return;
+        if (!finalClientAddress || finalClientAddress.length < 3) {
+          res.status(422).json({ message: 'Para finalizar a OS e enviar ao PDV, é obrigatório preencher o endereço completo do cliente.' });
+          return;
+        }
+      }
     }
 
     await pool.execute(
@@ -1657,7 +1832,16 @@ router.post('/:id/finalizar', async (req: Request, res: Response) => {
            finalizado_por_nome = ?,
            updated_at = NOW()
        WHERE id = ?`,
-      [finalClientName, finalClientDoc, finalClientPhone, finalClientCep, finalClientAddress, adminUser.id, adminUser.nome, req.params.id]
+      [
+        finalClientName,
+        finalClientDoc || null,
+        finalClientPhone || null,
+        finalClientCep || null,
+        finalClientAddress || null,
+        adminUser.id,
+        adminUser.nome,
+        req.params.id,
+      ]
     );
 
     // Sincroniza dados confirmados em cad_clientes

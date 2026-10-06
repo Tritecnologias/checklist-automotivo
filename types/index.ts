@@ -38,6 +38,19 @@ export interface Order {
   closedAt: string | null;
 }
 
+export interface Mecanico {
+  id: number;
+  tenant_id: number;
+  tenant_nome?: string | null;
+  user_id?: number | null;
+  user_nome?: string | null;
+  user_email?: string | null;
+  nome: string;
+  apelido?: string | null;
+  ativo: boolean;
+  is_auxiliar?: boolean;
+}
+
 // ─── Itens da Ordem ──────────────────────────────────────────────────────────
 
 export type ItemType = 'part' | 'service';

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
   AddItemPayload,
   CatalogItem,
+  Mecanico,
   Order,
   OrderClient,
   OrderItem,
@@ -91,15 +92,19 @@ export const api = {
       source?: string;
     }>(`/orders/lookup-plate/${encodeURIComponent(plate)}`),
 
+  listMecanicos: (apenasAtivos: boolean = true) =>
+    request<Mecanico[]>(`/erp/mecanicos${apenasAtivos ? '?ativo=1' : ''}`),
+
   createOrder: (
     vehicle: Vehicle,
     status: 'quote' | 'open' = 'open',
     client?: OrderClient,
     mecanicoId?: number | null,
+    auxiliarId?: number | null,
   ) =>
     request<Order>('/orders', {
       method: 'POST',
-      body: JSON.stringify({ vehicle, status, client, mecanicoId }),
+      body: JSON.stringify({ vehicle, status, client, mecanicoId, auxiliarId }),
     }),
 
   updateOrderClient: (id: string, client: { name: string; phone: string; document?: string; cep?: string; address?: string }) =>
@@ -132,10 +137,14 @@ export const api = {
 
   getOrder: (id: string) => request<Order>(`/orders/${id}`),
 
-  updateOrderStatus: (id: string, status: string) =>
+  updateOrderStatus: (
+    id: string,
+    status: string,
+    options?: { supervisorPin?: string; adminPassword?: string; isBalcao?: boolean }
+  ) =>
     request<Order>(`/orders/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, ...options }),
     }),
 
   // ─── Catálogo ──────────────────────────────────────────────────────────────

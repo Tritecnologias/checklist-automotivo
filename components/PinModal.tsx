@@ -23,7 +23,7 @@ interface PinModalProps {
   /** Descrição do item alvo (exibida no modal) */
   itemDescription?: string;
   /** Chamado apenas após PIN validado com sucesso pelo backend */
-  onAuthorized: () => void;
+  onAuthorized: (pin: string) => void;
   onCancel: () => void;
 }
 
@@ -74,7 +74,7 @@ export function PinModal({
       onSuccess: (result) => {
         if (result.authorized) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          onAuthorized();
+          onAuthorized(pin);
         } else {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           setError('PIN inválido. Tente novamente.');

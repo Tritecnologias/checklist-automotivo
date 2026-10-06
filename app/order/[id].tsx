@@ -52,8 +52,6 @@ export default function OrderScreen() {
     | { mode: 'orderItem'; item: OrderItem }
     | null
   >(null);
-  const [pinVerified, setPinVerified] = useState(false);
-  const [showUnlockPin, setShowUnlockPin] = useState(false);
   const debouncedSearch = useDebounce(search, 400);
 
   // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -92,11 +90,31 @@ export default function OrderScreen() {
   const { mutate: updateItemLabor } = useUpdateItemLabor(id);
 
   const { mutate: changeOrderStatus, isPending: changingStatus } = useMutation({
-    mutationFn: (status: string) => api.updateOrderStatus(id, status),
-    onSuccess: (updated: Order) => {
+    mutationFn: (variables: { status: string; supervisorPin?: string; adminPassword?: string; isBalcao?: boolean } | string) => {
+      if (typeof variables === 'string') {
+        return api.updateOrderStatus(id, variables);
+      }
+      return api.updateOrderStatus(id, variables.status, {
+        supervisorPin: variables.supervisorPin,
+        adminPassword: variables.adminPassword,
+        isBalcao: variables.isBalcao,
+      });
+    },
+    onSuccess: (updated: Order, variables) => {
       qc.setQueryData(['order', id], updated);
       qc.invalidateQueries({ queryKey: ['orders'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const isClosing = typeof variables === 'string' ? variables === 'closed' : variables.status === 'closed';
+      if (isClosing) {
+        Alert.alert(
+          'Sucesso!',
+          'A comanda foi concluída e enviada ao Caixa / PDV para recebimento.',
+          [
+            { text: 'Voltar ao Início', onPress: () => router.replace('/') },
+            { text: 'Permanecer aqui', style: 'default' },
+          ]
+        );
+      }
     },
     onError: (err: any) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -220,14 +238,44 @@ export default function OrderScreen() {
     });
   }, [isClosed]);
 
+  const isBalcao = Boolean(
+    order?.mecanicoNome?.toUpperCase().includes('BALC') ||
+    order?.vehicle?.plate?.toUpperCase().includes('BALC') ||
+    (items.length > 0 && totalLabor === 0)
+  );
+
   const handleCloseRequest = useCallback(() => {
     if (!order) return;
-    Alert.alert(
-      'Finalizar Ordem de Serviço',
-      'Por segurança e integração direta com o PDV, o encerramento da OS deve ser realizado pelo Painel Web por um Administrador (com conferência obrigatória dos dados do cliente e senha administrativa).',
-      [{ text: 'Entendido', style: 'default' }]
-    );
-  }, [order]);
+    if (items.length === 0) {
+      Alert.alert('Comanda Vazia', 'Adicione pelo menos um produto ou serviço antes de enviar a comanda ao caixa.');
+      return;
+    }
+
+    if (isBalcao) {
+      Alert.alert(
+        'Enviar ao Caixa / PDV',
+        `Deseja concluir esta Venda de Balcão (${currency(totalGeral)}) e liberá-la para recebimento imediato no Caixa?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Confirmar e Enviar',
+            style: 'default',
+            onPress: () => {
+              changeOrderStatus({ status: 'closed', isBalcao: true });
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    // Para OS normal de oficina (com serviços/mão de obra):
+    setPendingAction({
+      type: 'close',
+      itemId: order.id,
+      itemDescription: `Concluir e Enviar ao Caixa: ${order.vehicle.plate}`,
+    });
+  }, [order, items.length, isBalcao, totalGeral, changeOrderStatus]);
 
   const handleReopenRequest = useCallback(() => {
     if (!order) return;
@@ -295,7 +343,7 @@ export default function OrderScreen() {
     [updateQty, isClosed],
   );
 
-  const handlePinAuthorized = useCallback(() => {
+  const handlePinAuthorized = useCallback((pin: string) => {
     if (!pendingAction) return;
 
     if (pendingAction.type === 'delete') {
@@ -308,7 +356,7 @@ export default function OrderScreen() {
         { onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success) },
       );
     } else if (pendingAction.type === 'close') {
-      changeOrderStatus('closed');
+      changeOrderStatus({ status: 'closed', supervisorPin: pin });
     } else if (pendingAction.type === 'reopen') {
       changeOrderStatus('open');
     }
@@ -343,64 +391,7 @@ export default function OrderScreen() {
 
   const showSearchResults = !isClosed && debouncedSearch.length >= 2;
 
-  // ─── Tela de bloqueio para OS encerrada ───────────────────────────────────────
 
-  if (isClosed && !pinVerified) {
-    return (
-      <View className="flex-1 bg-slate-50 dark:bg-slate-950 items-center justify-center px-6">
-        <Text style={{ fontSize: 64 }}>🔒</Text>
-        <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-4 text-center">
-          OS Encerrada
-        </Text>
-        <Text className="text-base text-gray-500 dark:text-slate-400 text-center mt-1">
-          {order.vehicle.plate} — {order.vehicle.model}
-        </Text>
-        <Text className="text-sm text-gray-400 dark:text-slate-500 text-center mt-3 leading-5">
-          Esta OS está encerrada.{'\n'}Somente o Supervisor pode acessar o conteúdo.
-        </Text>
-
-        <View className="mt-5 w-full bg-slate-100 dark:bg-slate-800 rounded-2xl p-4 gap-1.5">
-          <View className="flex-row justify-between">
-            <Text className="text-xs text-gray-400 dark:text-slate-500">Aberta em</Text>
-            <Text className="text-xs font-medium text-gray-600 dark:text-slate-300">
-              {fmtDate(order.createdAt as unknown as string)}
-            </Text>
-          </View>
-          {order.closedAt && (
-            <View className="flex-row justify-between">
-              <Text className="text-xs text-gray-400 dark:text-slate-500">Encerrada em</Text>
-              <Text className="text-xs font-medium text-red-500 dark:text-red-400">
-                {fmtDate(order.closedAt)}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <TouchableOpacity
-          onPress={() => setShowUnlockPin(true)}
-          activeOpacity={0.8}
-          className="w-full mt-10 py-4 rounded-2xl bg-blue-600 items-center"
-        >
-          <Text className="text-white font-bold text-base">🔑 Entrar com PIN de Supervisor</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-          className="w-full mt-3 py-4 rounded-2xl bg-slate-200 dark:bg-slate-800 items-center"
-        >
-          <Text className="text-gray-600 dark:text-slate-400 font-medium text-base">Voltar</Text>
-        </TouchableOpacity>
-
-        <PinModal
-          visible={showUnlockPin}
-          itemDescription={`Acessar OS encerrada: ${order.vehicle.plate}`}
-          onAuthorized={() => { setPinVerified(true); setShowUnlockPin(false); }}
-          onCancel={() => setShowUnlockPin(false)}
-        />
-      </View>
-    );
-  }
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
@@ -576,11 +567,20 @@ export default function OrderScreen() {
 
         {/* Banner somente-leitura */}
         {isClosed && (
-          <View className="flex-row items-center gap-2 mt-3 px-3 py-2.5 rounded-xl bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700">
-            <Text style={{ fontSize: 14 }}>🔒</Text>
-            <Text className="flex-1 text-xs text-gray-500 dark:text-slate-400">
-              OS encerrada — somente leitura. Somente um administrador pode reabrir.
-            </Text>
+          <View className="flex-row items-center gap-2 mt-3 px-3.5 py-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+            <Text style={{ fontSize: 18 }}>{order.vendaControle ? '✅' : '💳'}</Text>
+            <View className="flex-1">
+              <Text className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                {order.vendaControle
+                  ? `OS Faturada no Caixa (Venda #${order.vendaControle})`
+                  : 'Comanda Enviada ao Caixa / PDV'}
+              </Text>
+              <Text className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">
+                {order.vendaControle
+                  ? 'Esta ordem foi paga e finalizada no PDV. Somente leitura.'
+                  : 'Aguardando recebimento no terminal de caixa do PDV.'}
+              </Text>
+            </View>
           </View>
         )}
       </View>
@@ -700,28 +700,38 @@ export default function OrderScreen() {
                     <TouchableOpacity
                       onPress={handleCloseRequest}
                       disabled={changingStatus}
-                      className="flex-1 py-3 rounded-xl bg-red-50 dark:bg-red-900/30 items-center"
+                      className={`flex-1 py-3.5 rounded-xl items-center flex-row justify-center gap-1.5 ${
+                        isBalcao
+                          ? 'bg-emerald-600 dark:bg-emerald-500'
+                          : 'bg-blue-600 dark:bg-blue-500'
+                      }`}
                     >
                       {changingStatus ? (
-                        <ActivityIndicator size="small" color="#dc2626" />
+                        <ActivityIndicator size="small" color="#ffffff" />
                       ) : (
-                        <Text className="text-sm font-semibold text-red-600 dark:text-red-400">
-                          🔒 Fechar OS
-                        </Text>
+                        <>
+                          <Text style={{ fontSize: 14 }}>{isBalcao ? '💳' : '🏁'}</Text>
+                          <Text className="text-sm font-bold text-white">
+                            {isBalcao ? 'Enviar ao Caixa' : 'Concluir e Enviar ao Caixa'}
+                          </Text>
+                        </>
                       )}
                     </TouchableOpacity>
                   ) : (
                     <TouchableOpacity
                       onPress={handleReopenRequest}
                       disabled={changingStatus}
-                      className="flex-1 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/30 items-center"
+                      className="flex-1 py-3.5 rounded-xl bg-amber-50 dark:bg-amber-900/30 items-center flex-row justify-center gap-1.5 border border-amber-200 dark:border-amber-800"
                     >
                       {changingStatus ? (
                         <ActivityIndicator size="small" color="#d97706" />
                       ) : (
-                        <Text className="text-sm font-semibold text-amber-600 dark:text-amber-400">
-                          🔓 Reabrir OS
-                        </Text>
+                        <>
+                          <Text style={{ fontSize: 14 }}>🔓</Text>
+                          <Text className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+                            Reabrir OS
+                          </Text>
+                        </>
                       )}
                     </TouchableOpacity>
                   )}
