@@ -62,9 +62,10 @@ function getPresetDates(preset: PeriodoPreset): { inicio: string; fim: string } 
     return { inicio: d, fim: d }
   }
   if (preset === 'esta_semana') {
-    const day = now.getDay()
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1) // segunda-feira
-    const seg = new Date(now.setDate(diff))
+    const cur = new Date()
+    const day = cur.getDay()
+    const diff = cur.getDate() - day + (day === 0 ? -6 : 1) // segunda-feira
+    const seg = new Date(new Date().setDate(diff))
     return { inicio: toIso(seg), fim: toIso(new Date()) }
   }
   if (preset === 'este_mes') {
@@ -596,7 +597,7 @@ export default function OficinaProdutividade() {
               onChange={(e) => setMecanicoFiltro(e.target.value)}
               className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="todos">Todos os Mecânicos</option>
+              <option value="todos">Todos os Mecânicos (Visão Geral)</option>
               {listaMecanicos.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.nome} {m.apelido ? `(${m.apelido})` : ''} {!m.ativo ? '— Inativo' : ''}
@@ -620,14 +621,60 @@ export default function OficinaProdutividade() {
             </select>
           </div>
         </div>
+
+        {/* Resumo de Filtros Ativos e Botão de Limpeza */}
+        {(mecanicoFiltro !== 'todos' || statusFiltro !== 'todas' || preset === 'personalizado') && (
+          <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-slate-800/80 text-xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-slate-400 text-[11px] font-semibold flex items-center gap-1">
+                <Filter className="w-3 h-3 text-blue-400" />
+                Filtros ativos:
+              </span>
+              {mecanicoFiltro !== 'todos' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-900/50 text-blue-300 border border-blue-700/60 text-[11px] font-medium">
+                  Técnico: {listaMecanicos.find((m) => String(m.id) === mecanicoFiltro)?.nome || mecanicoFiltro}
+                  <button onClick={() => setMecanicoFiltro('todos')} className="hover:text-white" title="Remover filtro de mecânico">
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+              {statusFiltro !== 'todas' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-900/50 text-indigo-300 border border-indigo-700/60 text-[11px] font-medium">
+                  Status: {statusFiltro === 'concluidas' ? 'Apenas Finalizadas' : 'Apenas Abertas'}
+                  <button onClick={() => setStatusFiltro('todas')} className="hover:text-white" title="Remover filtro de status">
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+              {preset === 'personalizado' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-[11px] font-medium">
+                  Período: {dataInicio ? fmtData(dataInicio) : '…'} até {dataFim ? fmtData(dataFim) : '…'}
+                </span>
+              )}
+            </div>
+
+            <button
+              onClick={() => {
+                setMecanicoFiltro('todos')
+                setStatusFiltro('todas')
+                handlePresetChange('este_mes')
+              }}
+              className="text-xs text-rose-400 hover:text-rose-300 font-semibold underline transition-colors"
+            >
+              Limpar todos os filtros
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── CARDS DE RESUMO (KPIS) ──────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        {/* Faturamento Oficina */}
+        {/* Faturamento Oficina / Produção Mecânico */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Faturamento OS</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider">
+              {mecanicoFiltro !== 'todos' ? 'Produção do Técnico' : 'Faturamento OS'}
+            </span>
             <DollarSign className="w-4 h-4 text-blue-400" />
           </div>
           <div className="mt-2">
@@ -635,7 +682,7 @@ export default function OficinaProdutividade() {
               {R(resumo?.faturamento_total || 0)}
             </p>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              {resumo?.qtd_os || 0} OS atendidas
+              {resumo?.qtd_os || 0} OS {mecanicoFiltro !== 'todos' ? 'com participação' : 'atendidas'}
             </p>
           </div>
         </div>
@@ -651,7 +698,7 @@ export default function OficinaProdutividade() {
               {R(resumo?.faturamento_servicos || 0)}
             </p>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              {resumo?.qtd_servicos || 0} serviços prestados
+              {resumo?.qtd_servicos || 0} serviços {mecanicoFiltro !== 'todos' ? 'deste técnico' : 'prestados'}
             </p>
           </div>
         </div>
@@ -666,7 +713,9 @@ export default function OficinaProdutividade() {
             <p className="text-xl font-bold text-amber-300 font-mono">
               {R(resumo?.faturamento_pecas || 0)}
             </p>
-            <p className="text-[10px] text-slate-400 mt-0.5">Lançadas em serviços</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {mecanicoFiltro !== 'todos' ? 'Lançadas para este técnico' : 'Lançadas em serviços'}
+            </p>
           </div>
         </div>
 
@@ -680,7 +729,9 @@ export default function OficinaProdutividade() {
             <p className="text-xl font-bold text-purple-300 font-mono">
               {R(resumo?.total_comissoes || 0)}
             </p>
-            <p className="text-[10px] text-slate-400 mt-0.5">Total a crédito</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {mecanicoFiltro !== 'todos' ? 'Crédito deste técnico' : 'Total a crédito'}
+            </p>
           </div>
         </div>
 
@@ -694,7 +745,9 @@ export default function OficinaProdutividade() {
             <p className="text-xl font-bold text-emerald-400 font-mono">
               {R(resumo?.total_comissoes_pagas || 0)}
             </p>
-            <p className="text-[10px] text-slate-400 mt-0.5">Adiantamentos e baixas</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {mecanicoFiltro !== 'todos' ? 'Pago ao técnico no período' : 'Adiantamentos e baixas'}
+            </p>
           </div>
         </div>
 
@@ -716,13 +769,47 @@ export default function OficinaProdutividade() {
             <p className="text-xl font-bold text-rose-400 font-mono">
               {R(resumo?.saldo_comissoes_pendente || 0)}
             </p>
-            <p className="text-[10px] text-rose-300/80 mt-0.5">A acertar com equipe</p>
+            <p className="text-[10px] text-rose-300/80 mt-0.5">
+              {mecanicoFiltro !== 'todos' ? 'A acertar com este técnico' : 'A acertar com equipe'}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* ── DESTAQUE DO PERÍODO ──────────────────────────────────────────── */}
-      {resumo?.mecanico_destaque && (
+      {/* ── BANNER: FILTRO INDIVIDUAL ATIVO ─────────────────────────────── */}
+      {mecanicoFiltro !== 'todos' && (
+        <div className="bg-gradient-to-r from-blue-950/40 via-slate-900 to-indigo-950/30 border border-blue-800/50 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-4 shadow-xl">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 text-xl shadow-lg shrink-0">
+              <Filter className="w-5 h-5 text-blue-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                  Filtro Individual Ativo
+                </span>
+                <span className="text-xs text-slate-400">
+                  Exibindo exclusivamente dados e extrato de:
+                </span>
+              </div>
+              <h3 className="text-base font-bold text-white mt-0.5">
+                {listaMecanicos.find((m) => String(m.id) === mecanicoFiltro)?.nome || 'Técnico selecionado'}
+              </h3>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setMecanicoFiltro('todos')}
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm"
+          >
+            <X className="w-3.5 h-3.5 text-slate-400" />
+            <span>Remover filtro de técnico (Ver toda oficina)</span>
+          </button>
+        </div>
+      )}
+
+      {/* ── DESTAQUE DO PERÍODO (Apenas na visão geral da oficina) ───────── */}
+      {resumo?.mecanico_destaque && mecanicoFiltro === 'todos' && (
         <div className="bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/50 border border-blue-800/50 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-4 shadow-xl">
           <div className="flex items-center gap-3.5">
             <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-300 text-2xl shadow-lg shrink-0">
@@ -848,9 +935,15 @@ export default function OficinaProdutividade() {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
             <div>
-              <h2 className="text-base font-bold text-white">Ranking de Produtividade da Oficina</h2>
+              <h2 className="text-base font-bold text-white">
+                {mecanicoFiltro !== 'todos'
+                  ? `Produtividade Individual: ${listaMecanicos.find((m) => String(m.id) === mecanicoFiltro)?.nome || 'Técnico'}`
+                  : 'Ranking de Produtividade da Oficina'}
+              </h2>
               <p className="text-xs text-slate-400">
-                Desempenho comparativo de cada profissional com mão de obra, peças, comissão acumulada e saldo
+                {mecanicoFiltro !== 'todos'
+                  ? 'Detalhamento de produção, serviços, peças, comissão acumulada e saldo deste profissional'
+                  : 'Desempenho comparativo de cada profissional com mão de obra, peças, comissão acumulada e saldo'}
               </p>
             </div>
             <div className="text-xs text-slate-400">

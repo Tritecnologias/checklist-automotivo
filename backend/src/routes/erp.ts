@@ -5079,20 +5079,25 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
 
     const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true, 'o.tenant_id');
 
-    // Filtros de status de OS: 'all' (todas exceto orçamentos), 'closed' (apenas finalizadas), 'open' (em andamento)
-    let statusFilter = " AND o.status != 'quote'";
-    if (status === 'closed') {
+    // Filtros de status de OS: 'todas'/'all', 'concluidas'/'closed', 'abertas'/'open'
+    let statusFilter = " AND o.status NOT IN ('quote', 'canceled')";
+    if (status === 'closed' || status === 'concluidas') {
       statusFilter = " AND o.status = 'closed'";
-    } else if (status === 'open') {
+    } else if (status === 'open' || status === 'abertas') {
       statusFilter = " AND o.status IN ('open', 'in_progress')";
     }
 
-    // Filtro de mecânico se especificado (inclui titular, auxiliar ou executante com rateio)
+    // Filtro de mecânico se especificado (inclui titular do item, da OS caso sem item, auxiliar ou executante com rateio)
+    const filtroMecId = mecanico_id && Number(mecanico_id) > 0 ? Number(mecanico_id) : null;
     let mecItemFilter = '';
     const mecParams: any[] = [];
-    if (mecanico_id && Number(mecanico_id) > 0) {
-      mecItemFilter = ' AND (oi.mecanico_id = ? OR o.mecanico_id = ? OR o.auxiliar_id = ? OR EXISTS (SELECT 1 FROM os_item_executantes ex WHERE ex.item_id = oi.id AND ex.mecanico_id = ?))';
-      mecParams.push(Number(mecanico_id), Number(mecanico_id), Number(mecanico_id), Number(mecanico_id));
+    if (filtroMecId) {
+      mecItemFilter = ` AND (
+        oi.mecanico_id = ?
+        OR (oi.mecanico_id IS NULL AND (o.mecanico_id = ? OR o.auxiliar_id = ?))
+        OR EXISTS (SELECT 1 FROM os_item_executantes ex WHERE ex.item_id = oi.id AND ex.mecanico_id = ?)
+      )`;
+      mecParams.push(filtroMecId, filtroMecId, filtroMecId, filtroMecId);
     }
 
     // 1. Busca todos os itens de OS executados no período com seus respectivos mecânicos
@@ -5365,7 +5370,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
           mecStat.total_comissao += comissaoExec;
 
           // Se estiver filtrando por um mecânico específico, só adiciona ao extrato se for ele
-          if (!mecanico_id || Number(mecanico_id) === 0 || Number(mecanico_id) === exMecId) {
+          if (!filtroMecId || filtroMecId === exMecId) {
             const rotuloRateio = ex.tipo_rateio === 'VALOR_FIXO'
               ? `Fixo R$ ${valorBaseExec.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
               : `${Number(ex.percentual).toFixed(0)}%`;
@@ -5407,12 +5412,15 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
           }
         }
       } else {
-        // Cenário padrão com mecânico único (retrocompatibilidade perfeita)
-        const mecId = row.mecanico_id ? Number(row.mecanico_id) : 0;
+        // Cenário padrão com mecânico único (retrocompatibilidade e herança da OS)
+        const mecId = row.mecanico_id
+          ? Number(row.mecanico_id)
+          : (row.order_mecanico_id ? Number(row.order_mecanico_id) : 0);
+
         let comissaoLinha = 0;
         let pctAplicado = 0;
 
-        if (row.comissao_valor !== null && row.comissao_valor !== undefined) {
+        if (row.comissao_valor !== null && row.comissao_valor !== undefined && Number(row.comissao_valor) > 0) {
           comissaoLinha = Number(row.comissao_valor);
           pctAplicado = Number(row.comissao_pct || 0);
         } else if (mecId > 0 && mecanicosStats.has(mecId)) {
@@ -5430,9 +5438,10 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
 
         let mecStat = mecanicosStats.get(mecId);
         if (!mecStat) {
+          const fallbackNome = row.mecanico_nome || row.cad_mecanico_nome || row.order_mecanico_nome || (mecId === 0 ? 'Não atribuído' : 'Técnico #' + mecId);
           mecStat = {
             id: mecId,
-            nome: row.mecanico_nome || row.cad_mecanico_nome || 'Mecânico #' + mecId,
+            nome: fallbackNome,
             apelido: row.cad_mecanico_apelido || null,
             cpf: null,
             telefone: null,
@@ -5467,6 +5476,9 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
         } else {
           currentMecStat.qtd_pecas += 1;
           currentMecStat.total_pecas += valorPeca;
+          if (laborPrice > 0) {
+            currentMecStat.total_servicos += laborPrice;
+          }
           currentMecStat.comissao_pecas += comissaoLinha;
         }
         currentMecStat.total_produzido += valorTotalLinha;
@@ -5480,7 +5492,8 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
           }
         }
 
-        if (!mecanico_id || Number(mecanico_id) === 0 || Number(mecanico_id) === mecId || Number(mecanico_id) === Number(row.auxiliar_id)) {
+        if (!filtroMecId || filtroMecId === mecId || filtroMecId === Number(row.auxiliar_id)) {
+          const nomeMec = currentMecStat.nome || row.mecanico_nome || row.cad_mecanico_nome || row.order_mecanico_nome || (mecId === 0 ? 'Não atribuído' : 'Técnico #' + mecId);
           extratoItens.push({
             item_id: row.item_id,
             order_id: row.order_id,
@@ -5505,7 +5518,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
             valor_base: isServico ? valorServico : valorPeca,
             valor_total_linha: valorTotalLinha,
             mecanico_id: mecId > 0 ? mecId : null,
-            mecanico_nome: row.mecanico_nome || row.cad_mecanico_nome || (mecId === 0 ? 'Não atribuído' : 'Técnico #' + mecId),
+            mecanico_nome: nomeMec,
             auxiliar_id: row.auxiliar_id ? Number(row.auxiliar_id) : null,
             auxiliar_nome: row.auxiliar_nome || null,
             comissao_pct: pctAplicado,
@@ -5554,6 +5567,16 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
       })
       .sort((a, b) => b.total_servicos - a.total_servicos);
 
+    // Se houver filtro de mecânico específico, filtra o ranking retornado para apenas ele
+    let mecanicosRetorno = listaMecanicos;
+    if (filtroMecId) {
+      mecanicosRetorno = listaMecanicos.filter(m => m.id === filtroMecId);
+    }
+
+    // Mecânico específico para o resumo quando filtrado
+    const mecSelecionado = filtroMecId ? (mecanicosStats.get(filtroMecId) || null) : null;
+    const pagamentosMecSelecionado = filtroMecId ? (pagamentosMap.get(filtroMecId) || 0) : 0;
+
     // Total de pagamentos realizados no período geral
     let totalPagamentosGeral = 0;
     for (const val of pagamentosMap.values()) {
@@ -5565,35 +5588,55 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
     const ticketMedioGeral = qtdOsTotal > 0 ? faturamentoTotalOficina / qtdOsTotal : 0;
     const saldoComissoesPendente = Math.max(0, totalComissoesGeral - totalPagamentosGeral);
 
-    // Mecânico destaque (maior faturamento de serviços com id > 0)
-    const topMecanico = listaMecanicos.find(m => m.id > 0 && m.total_servicos > 0) || null;
+    // Mecânico destaque (maior faturamento de serviços com id > 0) — apenas na visão geral da oficina
+    const topMecanico = !filtroMecId
+      ? (listaMecanicos.find(m => m.id > 0 && m.total_servicos > 0) || null)
+      : null;
+
+    // Resumo: se um mecânico específico foi filtrado, exibe os totais dele. Caso contrário, exibe os totais da oficina
+    const resumoFinal = filtroMecId && mecSelecionado
+      ? {
+          faturamento_total: (mecSelecionado.total_servicos + mecSelecionado.total_pecas),
+          faturamento_servicos: mecSelecionado.total_servicos,
+          faturamento_pecas: mecSelecionado.total_pecas,
+          total_comissoes: (mecSelecionado.comissao_servicos + mecSelecionado.comissao_pecas),
+          total_comissoes_pagas: pagamentosMecSelecionado,
+          saldo_comissoes_pendente: Math.max(0, (mecSelecionado.comissao_servicos + mecSelecionado.comissao_pecas) - pagamentosMecSelecionado),
+          qtd_os: mecSelecionado.qtd_os_set.size,
+          qtd_servicos: mecSelecionado.qtd_servicos,
+          ticket_medio_os: mecSelecionado.qtd_os_set.size > 0
+            ? (mecSelecionado.total_servicos + mecSelecionado.total_pecas) / mecSelecionado.qtd_os_set.size
+            : 0,
+          mecanico_destaque: null,
+        }
+      : {
+          faturamento_total: faturamentoTotalOficina,
+          faturamento_servicos: faturamentoGeralServicos,
+          faturamento_pecas: faturamentoGeralPecas,
+          total_comissoes: totalComissoesGeral,
+          total_comissoes_pagas: totalPagamentosGeral,
+          saldo_comissoes_pendente: saldoComissoesPendente,
+          qtd_os: qtdOsTotal,
+          qtd_servicos: extratoItens.filter(i => i.tipo === 'service').length,
+          ticket_medio_os: ticketMedioGeral,
+          mecanico_destaque: topMecanico ? {
+            id: topMecanico.id,
+            nome: topMecanico.nome,
+            apelido: topMecanico.apelido,
+            total_servicos: topMecanico.total_servicos,
+            total_comissao: topMecanico.total_comissao,
+            share_pct: topMecanico.share_pct,
+          } : null,
+        };
 
     res.json({
       periodo: {
         data_inicio: dtInicio,
         data_fim: dtFim,
-        status_filtro: status || 'closed',
+        status_filtro: status || 'todas',
       },
-      resumo: {
-        faturamento_total: faturamentoTotalOficina,
-        faturamento_servicos: faturamentoGeralServicos,
-        faturamento_pecas: faturamentoGeralPecas,
-        total_comissoes: totalComissoesGeral,
-        total_comissoes_pagas: totalPagamentosGeral,
-        saldo_comissoes_pendente: saldoComissoesPendente,
-        qtd_os: qtdOsTotal,
-        qtd_servicos: extratoItens.filter(i => i.tipo === 'service').length,
-        ticket_medio_os: ticketMedioGeral,
-        mecanico_destaque: topMecanico ? {
-          id: topMecanico.id,
-          nome: topMecanico.nome,
-          apelido: topMecanico.apelido,
-          total_servicos: topMecanico.total_servicos,
-          total_comissao: topMecanico.total_comissao,
-          share_pct: topMecanico.share_pct,
-        } : null,
-      },
-      mecanicos: listaMecanicos,
+      resumo: resumoFinal,
+      mecanicos: mecanicosRetorno,
       extrato: extratoItens,
     });
   } catch (err: any) {
