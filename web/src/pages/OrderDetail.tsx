@@ -2428,7 +2428,7 @@ function ItemsTable({
                             </option>
                           ))}
                         </select>
-                        {onOpenRateio && (item.type === 'service' || (item.laborPrice ?? 0) > 0) && (
+                        {onOpenRateio && (item.type === 'service' || (item.total ?? 0) > 0 || (item.laborPrice ?? 0) > 0) && (
                           <button
                             type="button"
                             onClick={() => onOpenRateio(item)}
@@ -2451,7 +2451,7 @@ function ItemsTable({
                         <span className="text-xs text-slate-300 font-medium">
                           {item.mecanicoNome || '—'}
                         </span>
-                        {!isClosed && onOpenRateio && (item.type === 'service' || (item.laborPrice ?? 0) > 0) && (
+                        {!isClosed && onOpenRateio && (item.type === 'service' || (item.total ?? 0) > 0 || (item.laborPrice ?? 0) > 0) && (
                           <button
                             type="button"
                             onClick={() => onOpenRateio(item)}
@@ -2595,8 +2595,7 @@ function ModalRateioItem({
   isPending: boolean
 }) {
   const isServico = item.type === 'service'
-  const totalBase = isServico ? (item.total + (item.laborPrice || 0)) : (item.laborPrice || 0)
-  const baseCalculo = totalBase > 0 ? totalBase : (isServico ? 0 : item.total)
+  const baseCalculo = Number(((Number(item.total) || 0) + (Number(item.laborPrice) || 0)).toFixed(2))
 
   // Determina modo inicial baseado nos executantes existentes ou default PERCENTUAL
   const initialMode =
@@ -2609,12 +2608,18 @@ function ModalRateioItem({
   // Linhas de executantes
   const [rows, setRows] = useState<ExecutanteRowState[]>(() => {
     if (item.executantes && item.executantes.length > 0) {
-      return item.executantes.map((ex) => ({
-        mecanicoId: ex.mecanicoId,
-        papel: (ex.papel as any) || 'titular',
-        percentual: Number(ex.percentual) || 0,
-        valorBase: Number(ex.valorBase) || 0,
-      }))
+      return item.executantes.map((ex) => {
+        const pct = Number(ex.percentual) || 0
+        const vBase = initialMode === 'PERCENTUAL'
+          ? Number(((baseCalculo * pct) / 100).toFixed(2))
+          : (Number(ex.valorBase) || 0)
+        return {
+          mecanicoId: ex.mecanicoId,
+          papel: (ex.papel as any) || 'titular',
+          percentual: pct,
+          valorBase: vBase,
+        }
+      })
     }
 
     // Se a OS já tem Mecânico Titular e Auxiliar definidos

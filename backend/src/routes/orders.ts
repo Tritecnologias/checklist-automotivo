@@ -865,8 +865,7 @@ async function saveItemExecutantes(
   if (!executantes || !Array.isArray(executantes) || executantes.length === 0) return [];
 
   const isServico = itemType === 'service';
-  const totalBase = isServico ? (totalItem + laborPrice) : laborPrice;
-  const baseCalculo = totalBase > 0 ? totalBase : (isServico ? 0 : totalItem);
+  const baseCalculo = Number(((Number(totalItem) || 0) + (Number(laborPrice) || 0)).toFixed(2));
 
   let totalComissaoItem = 0;
   let firstMecId: number | null = null;
@@ -956,8 +955,7 @@ async function syncExecutantesValues(
   if (!execs || (execs as any[]).length === 0) return;
 
   const isServico = itemType === 'service';
-  const totalBase = isServico ? (totalItem + laborPrice) : laborPrice;
-  const baseCalculo = totalBase > 0 ? totalBase : (isServico ? 0 : totalItem);
+  const baseCalculo = Number(((Number(totalItem) || 0) + (Number(laborPrice) || 0)).toFixed(2));
 
   let totalComissao = 0;
   for (const ex of (execs as any[])) {

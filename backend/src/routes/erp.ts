@@ -5565,7 +5565,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
             unit_price: unitPrice,
             labor_price: laborPrice,
             total_item: totalItem,
-            valor_base: isServico ? valorServico : valorPeca,
+            valor_base: valorTotalLinha,
             valor_total_linha: valorTotalLinha,
             mecanico_id: mecId > 0 ? mecId : null,
             mecanico_nome: nomeMec,
