@@ -34,7 +34,12 @@ export default function Vendas() {
       {/* Lista */}
       <div className="flex-1 space-y-4 min-w-0">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-white">Vendas</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Vendas</h1>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Loja: <span className="text-blue-400 font-semibold">{currentTenant?.nome || 'Loja Principal'}</span>
+            </p>
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -47,7 +52,7 @@ export default function Vendas() {
           <input
             value={search}
             onChange={e => { setSearch(e.target.value); setPage(1) }}
-            placeholder="Buscar cliente ou controle…"
+            placeholder="Buscar por cliente, placa, modelo ou controle…"
             className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
           />
         </div>
@@ -62,9 +67,9 @@ export default function Vendas() {
               <thead>
                 <tr className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-800">
                   <th className="px-4 py-3">Controle</th>
-                  <th className="px-4 py-3">Cliente</th>
+                  <th className="px-4 py-3">Cliente / Veículo</th>
                   <th className="px-4 py-3">Hora</th>
-                  <th className="px-4 py-3 text-right">Total</th>
+                  <th className="px-4 py-3 text-right">Forma / Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
@@ -77,9 +82,36 @@ export default function Vendas() {
                     }`}
                   >
                     <td className="px-4 py-3 font-mono text-xs text-slate-400">{v.controle}</td>
-                    <td className="px-4 py-3 text-slate-200">{v.nome_cliente || 'Consumidor final'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-200 font-medium">{v.nome_cliente || 'Consumidor final'}</span>
+                          {v.os_id && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                              OS
+                            </span>
+                          )}
+                        </div>
+                        {(v.os_plate || v.os_model) && (
+                          <span className="text-xs text-slate-400 font-mono mt-0.5">
+                            🚗 {[v.os_model, v.os_plate].filter(Boolean).join(' • ')}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-slate-400">{v.hora_venda}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-emerald-400">{R(Number(v.vr_total))}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex flex-col items-end">
+                        <span className="font-semibold text-emerald-400">{R(Number(v.vr_total))}</span>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          {Number(v.vr_pix) > 0 && <span className="text-[10px] px-1 py-0.2 rounded bg-teal-900/40 text-teal-300">PIX</span>}
+                          {Number(v.vr_cartao) > 0 && <span className="text-[10px] px-1 py-0.2 rounded bg-indigo-900/40 text-indigo-300">Cartão</span>}
+                          {Number(v.vr_dinheiro) > 0 && <span className="text-[10px] px-1 py-0.2 rounded bg-amber-900/40 text-amber-300">Dinheiro</span>}
+                          {Number(v.vr_nota) > 0 && <span className="text-[10px] px-1 py-0.2 rounded bg-purple-900/40 text-purple-300">Nota</span>}
+                          {Number(v.vr_ticket) > 0 && <span className="text-[10px] px-1 py-0.2 rounded bg-slate-800 text-slate-300">Outros</span>}
+                        </div>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -118,16 +150,39 @@ export default function Vendas() {
               <div className="p-5 space-y-4 text-sm">
                 <div>
                   <p className="text-xs text-slate-500">Controle</p>
-                  <p className="font-mono text-slate-300">{detalhe.controle}</p>
+                  <div className="flex items-center justify-between">
+                    <p className="font-mono text-slate-300">{detalhe.controle}</p>
+                    {detalhe.os_id && (
+                      <a
+                        href={`/os/${detalhe.os_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 underline flex items-center gap-1"
+                      >
+                        Ver OS #{detalhe.os_plate || detalhe.os_id.slice(0, 8)} ↗
+                      </a>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">Cliente</p>
-                  <p className="text-slate-200">{detalhe.nome_cliente || 'Consumidor final'}</p>
+                  <p className="text-slate-200 font-medium">{detalhe.nome_cliente || 'Consumidor final'}</p>
+                  {(detalhe.os_plate || detalhe.os_model) && (
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">
+                      🚗 {[detalhe.os_model, detalhe.os_plate].filter(Boolean).join(' • ')}
+                    </p>
+                  )}
+                  {(detalhe.cpf_cnpj || detalhe.telefone || detalhe.celular) && (
+                    <div className="text-[11px] text-slate-400 mt-2 space-y-0.5 bg-slate-800/40 p-2 rounded-lg border border-slate-800">
+                      {detalhe.cpf_cnpj && <p>CPF/CNPJ: {detalhe.cpf_cnpj}</p>}
+                      {(detalhe.telefone || detalhe.celular) && <p>Tel: {detalhe.telefone || detalhe.celular}</p>}
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t border-slate-800 pt-4">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Itens</p>
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                     {(detalhe.itens ?? []).map((item, i) => (
                       <div key={i} className="flex items-start gap-2">
                         <span className="text-xs text-slate-600 mt-0.5 w-4">{item.quant}×</span>
@@ -151,7 +206,7 @@ export default function Vendas() {
                     { label: 'NOTA',           val: detalhe.vr_nota },
                     { label: 'Cheque',         val: detalhe.vr_cheque },
                     { label: 'Carnê',          val: detalhe.vr_carne },
-                    { label: 'Ticket',         val: detalhe.vr_ticket },
+                    { label: 'Ticket / Outros', val: detalhe.vr_ticket },
                     { label: 'Desconto/Ajust.', val: detalhe.vr_adicional },
                   ].filter(x => Number(x.val) !== 0).map(({ label, val }) => (
                     <div key={label} className="flex justify-between text-xs">

@@ -151,6 +151,12 @@ export interface Venda {
   id_cliente: number
   nome_cliente: string
   itens?: VendaItem[]
+  os_id?: string | null
+  os_plate?: string | null
+  os_model?: string | null
+  cpf_cnpj?: string | null
+  telefone?: string | null
+  celular?: string | null
 }
 
 export interface VendaItem {
