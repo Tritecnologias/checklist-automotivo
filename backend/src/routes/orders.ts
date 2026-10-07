@@ -1089,6 +1089,60 @@ router.post('/:id/items', async (req: Request, res: Response) => {
       }
     }
 
+    // Se o mesmo produto com a mesma instalação e mesmo mecânico já existir nesta OS e sem rateio especial,
+    // consolida aumentando a quantidade em vez de duplicar a linha (evita duplicação por duplo clique)
+    if (!executantes || !Array.isArray(executantes) || executantes.length === 0) {
+      const [existingItems] = await pool.execute<any>(
+        `SELECT id, quantity, unit_price, labor_price, total
+         FROM os_order_items
+         WHERE order_id = ?
+           AND product_id = ?
+           AND ((instalacao_id IS NULL AND ? IS NULL) OR instalacao_id = ?)
+           AND ((mecanico_id IS NULL AND ? IS NULL) OR mecanico_id = ?)
+         LIMIT 1`,
+        [req.params.id, product.id as any, instId, instId, finalMecId, finalMecId]
+      );
+      const existingItem = (existingItems as any[])[0];
+      if (existingItem) {
+        const newQty = Number(existingItem.quantity) + qty;
+        const newTotal = newQty * unitPrice;
+        const newLp = Number(existingItem.labor_price || 0) + lp;
+        let newComissaoValor = 0;
+        if (comissaoPct && comissaoPct > 0) {
+          const base = (product.type === 'service') ? (newTotal + newLp) : newTotal;
+          newComissaoValor = (base * comissaoPct) / 100;
+        }
+
+        await pool.execute(
+          `UPDATE os_order_items
+           SET quantity = ?, unit_price = ?, labor_price = ?, total = ?, comissao_pct = ?, comissao_valor = ?
+           WHERE id = ?`,
+          [newQty, unitPrice, newLp, newTotal, comissaoPct, newComissaoValor, existingItem.id]
+        );
+
+        await recalcTotal(req.params.id);
+
+        res.status(200).json({
+          id: existingItem.id,
+          code: product.code,
+          description: product.description,
+          type: product.type,
+          quantity: newQty,
+          unitPrice,
+          laborPrice: newLp,
+          total: newTotal,
+          instalacaoId: instId,
+          instalacaoSigla,
+          mecanicoId: finalMecId,
+          mecanicoNome: finalMecNome,
+          comissaoPct,
+          comissaoValor: newComissaoValor,
+          executantes: [],
+        });
+        return;
+      }
+    }
+
     await pool.execute(
       `INSERT INTO os_order_items
          (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total, instalacao_id, mecanico_id, mecanico_nome, comissao_pct, comissao_valor)

@@ -1331,6 +1331,7 @@ router.post('/vendas', async (req, res) => {
 
           let osLabor = 0;
           const soldPartProductIds: number[] = [];
+          const matchedOsItemIds = new Set<string>();
 
           for (const item of itens) {
             const pid = Number(item.id_produto);
@@ -1345,11 +1346,34 @@ router.post('/vendas', async (req, res) => {
 
             soldPartProductIds.push(pid);
 
-            const existing = (existingOsItems as any[]).find(
-              oi => Number(oi.product_id) === pid && oi.type === 'part'
-            );
+            // 1. Tenta encontrar pelo ID exato do item da OS se veio do PDV
+            let existing: any = null;
+            if ((item as any).os_item_id) {
+              existing = (existingOsItems as any[]).find(
+                oi => oi.id === (item as any).os_item_id && !matchedOsItemIds.has(oi.id)
+              );
+            }
+
+            // 2. Fallback: encontra por product_id (peça OU serviço)
+            if (!existing && pid > 0) {
+              existing = (existingOsItems as any[]).find(
+                oi => !matchedOsItemIds.has(oi.id) && Number(oi.product_id) === pid
+              );
+            }
+
+            // 3. Fallback: encontra por código ou descrição
+            const anyItem = item as any;
+            if (!existing && (anyItem.codigo || anyItem.descricao)) {
+              existing = (existingOsItems as any[]).find(
+                oi => !matchedOsItemIds.has(oi.id) && (
+                  (anyItem.codigo && oi.code && String(oi.code).trim() === String(anyItem.codigo).trim()) ||
+                  (anyItem.descricao && oi.description && String(oi.description).trim().toLowerCase() === String(anyItem.descricao).trim().toLowerCase())
+                )
+              );
+            }
 
             if (existing) {
+              matchedOsItemIds.add(existing.id);
               await pool.query(
                 'UPDATE os_order_items SET quantity = ?, unit_price = ?, total = ? WHERE id = ?',
                 [qty, val, itemTot, existing.id]
@@ -1364,12 +1388,14 @@ router.post('/vendas', async (req, res) => {
               const pCode = prodInfo?.cod_barra || '';
               const pDesc = prodInfo?.nome_produto || `Item #${pid}`;
               const pType = (prodInfo?.id_tipo === 2 || prodInfo?.id_tipo === 9) ? 'service' : 'part';
+              const mecId = osRow.mecanico_id ? Number(osRow.mecanico_id) : null;
+              const mecNome = osRow.mecanico_nome || null;
 
               await pool.query(
                 `INSERT INTO os_order_items
-                   (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-                [newItemId, id_os, pid, pCode, pDesc, pType, qty, val, itemTot]
+                   (id, order_id, product_id, code, description, type, quantity, unit_price, labor_price, total, mecanico_id, mecanico_nome)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                [newItemId, id_os, pid, pCode, pDesc, pType, qty, val, itemTot, mecId, mecNome]
               );
             }
           }
@@ -2273,6 +2299,7 @@ router.get('/pdv/os/:id', async (req, res) => {
       const controlaEstoque = Number(item.controla_estoque ?? 1);
 
       itensPdv.push({
+        os_item_id: item.id,
         produto: {
           id: Number(item.product_id),
           nome_produto: item.description,
@@ -5298,7 +5325,30 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
       }
     }
 
-    for (const row of itemRows as any[]) {
+    // Deduplicação defensiva: caso itens tenham sido duplicados no banco (ex: sincronização do PDV sem mecanico_id)
+    // Ordenamos priorizando itens que possuem mecanico_id preenchido ou data de criação mais antiga
+    const sortedItemRows = [...(itemRows as any[])].sort((a, b) => {
+      const aHasMec = a.mecanico_id ? 1 : 0;
+      const bHasMec = b.mecanico_id ? 1 : 0;
+      if (bHasMec !== aHasMec) return bHasMec - aHasMec;
+      return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+    });
+
+    const seenItemFingerprints = new Set<string>();
+    const deduplicatedItemRows: any[] = [];
+
+    for (const r of sortedItemRows) {
+      if (r.product_id && Number(r.product_id) > 0) {
+        const fp = `${r.order_id}_${r.product_id}_${r.type}_${r.quantity}_${r.unit_price}`;
+        if (seenItemFingerprints.has(fp) && !r.mecanico_id) {
+          continue; // Pula item duplicado gerado pelo PDV sem técnico atribuído
+        }
+        seenItemFingerprints.add(fp);
+      }
+      deduplicatedItemRows.push(r);
+    }
+
+    for (const row of deduplicatedItemRows) {
       const isServico = row.type === 'service';
       const qtd = Number(row.quantity);
       const unitPrice = Number(row.unit_price);

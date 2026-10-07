@@ -21,6 +21,7 @@ interface CartItem {
   produto: ProdutoPdv
   quant: number
   valor: number
+  os_item_id?: string
 }
 
 interface Pagamento {
@@ -171,7 +172,7 @@ export default function Pdv() {
       if (total <= 0) {
         throw new Error('O valor total da venda não pode ser zerado (R$ 0,00).')
       }
-      const itens = cart.map(c => ({ id_produto: c.produto.id, valor: c.valor, quant: c.quant }))
+      const itens = cart.map(c => ({ id_produto: c.produto.id, valor: c.valor, quant: c.quant, os_item_id: c.os_item_id }))
       const outrosVal = parseNum(pagamento.outros)
       const pag = {
         vr_dinheiro: parseNum(pagamento.dinheiro),

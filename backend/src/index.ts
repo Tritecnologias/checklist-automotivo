@@ -812,6 +812,33 @@ async function runMigrations() {
     console.warn('[migration] Aviso ao configurar índices de vendas/estoque:', idxErr);
   }
 
+  // Limpeza e saneamento de itens duplicados de OS gerados por sincronização do PDV
+  try {
+    const [dupDeleted] = await pool.query<any>(`
+      DELETE d FROM os_order_items d
+      JOIN os_order_items o ON o.order_id = d.order_id
+        AND o.product_id = d.product_id
+        AND o.product_id IS NOT NULL
+        AND o.product_id > 0
+        AND o.id != d.id
+        AND (
+          d.created_at > o.created_at
+          OR (d.created_at = o.created_at AND d.id > o.id)
+        )
+      WHERE (
+        -- Cenário da duplicação pelo PDV: original com mecânico e cópia gerada no PDV sem mecânico
+        (o.mecanico_id IS NOT NULL AND d.mecanico_id IS NULL)
+        -- Ou itens idênticos com mesma quantidade e preço na mesma OS
+        OR (d.mecanico_id IS NULL AND d.quantity = o.quantity AND d.unit_price = o.unit_price)
+      )
+    `);
+    if (dupDeleted && dupDeleted.affectedRows > 0) {
+      console.log(`[migration] Limpeza de itens duplicados de OS: ${dupDeleted.affectedRows} item(ns) removido(s)`);
+    }
+  } catch (cleanErr) {
+    console.warn('[migration] Aviso ao limpar itens duplicados de OS:', cleanErr);
+  }
+
   console.log('[migration] tabelas de multi-tenant e financeiro OK');
 }
 

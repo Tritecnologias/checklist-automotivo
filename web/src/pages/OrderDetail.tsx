@@ -379,25 +379,33 @@ export default function OrderDetail() {
     },
   })
 
+  const isSubmittingAddItemRef = useRef(false)
+
   // Adicionar Item
   const { mutate: handleAddItem, isPending: addingItem } = useMutation({
     mutationFn: async () => {
-      if (!selectedCatalogItem) throw new Error('Nenhum item selecionado')
-      if (
-        selectedCatalogItem.instalacoes &&
-        selectedCatalogItem.instalacoes.length > 0 &&
-        !addItemInstId
-      ) {
-        throw new Error('Selecione o local de instalação obrigatório')
+      if (isSubmittingAddItemRef.current) return
+      isSubmittingAddItemRef.current = true
+      try {
+        if (!selectedCatalogItem) throw new Error('Nenhum item selecionado')
+        if (
+          selectedCatalogItem.instalacoes &&
+          selectedCatalogItem.instalacoes.length > 0 &&
+          !addItemInstId
+        ) {
+          throw new Error('Selecione o local de instalação obrigatório')
+        }
+        return await api.addItem(id!, {
+          catalogItemId: selectedCatalogItem.id,
+          quantity: addItemQty,
+          unitPrice: addItemUnitPrice,
+          laborPrice: addItemLabor,
+          instalacaoId: addItemInstId,
+          mecanicoId: addItemMecanicoId ?? undefined,
+        })
+      } finally {
+        isSubmittingAddItemRef.current = false
       }
-      return api.addItem(id!, {
-        catalogItemId: selectedCatalogItem.id,
-        quantity: addItemQty,
-        unitPrice: addItemUnitPrice,
-        laborPrice: addItemLabor,
-        instalacaoId: addItemInstId,
-        mecanicoId: addItemMecanicoId ?? undefined,
-      })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['order', id] })
