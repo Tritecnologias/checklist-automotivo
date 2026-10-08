@@ -2,19 +2,36 @@ import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db';
 import { JWT_SECRET, type JwtPayload } from '../middleware/auth';
+import { getUserPermissions, userHasPermission } from '../lib/permissions';
 
 const router = Router();
 const ADMIN_TOKEN = process.env.ADMIN_PASSWORD ?? 'admin@2026';
 
-function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  // Aceita JWT (role owner ou manager) OU token fixo legado
+async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  // Aceita JWT OU token fixo legado
   const authHeader = req.headers['authorization'];
   if (authHeader?.startsWith('Bearer ')) {
     try {
       const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as JwtPayload;
+      req.user = payload;
+
       if (payload.role === 'owner' || payload.role === 'manager') {
-        req.user = payload;
         next();
+        return;
+      }
+
+      // Verifica se o usuário (ex: caixa ou operador) tem permissão para a funcionalidade
+      const perms = await getUserPermissions(payload.userId, payload.role);
+      const path = req.path;
+      let needed = 'produtos';
+      if (path.includes('product-types')) needed = 'config_tipos';
+      else if (path.includes('instalacoes')) needed = 'config_instalacoes';
+
+      if (userHasPermission(perms, needed, payload.role)) {
+        next();
+        return;
+      } else {
+        res.status(403).json({ message: 'Permissão insuficiente para este recurso' });
         return;
       }
     } catch { /* token inválido — tenta legado */ }
@@ -25,6 +42,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   }
   res.status(401).json({ message: 'Não autorizado' });
 }
+
 
 router.use(requireAdmin);
 

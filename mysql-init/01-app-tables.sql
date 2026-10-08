@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `nome`        VARCHAR(100) NOT NULL,
   `email`       VARCHAR(150) NOT NULL,
   `senha_hash`  VARCHAR(255) NOT NULL,
-  `role`        ENUM('owner','manager','operator') NOT NULL DEFAULT 'operator',
+  `role`        VARCHAR(50)  NOT NULL DEFAULT 'operator',
+  `custom_permissions` TINYINT(1) NOT NULL DEFAULT 0,
   `tenant_id`   INT          NULL,
   `ativo`       TINYINT(1)   NOT NULL DEFAULT 1,
   `created_at`  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -35,6 +36,24 @@ CREATE TABLE IF NOT EXISTS `user_tenants` (
   `tenant_id` INT NOT NULL,
   PRIMARY KEY (`user_id`, `tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ── Permissões por Papel (Perfil) ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `role_permissions` (
+  `role`       VARCHAR(50)  NOT NULL,
+  `permission` VARCHAR(100) NOT NULL,
+  `created_at` TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`role`, `permission`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ── Permissões Específicas por Usuário ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `user_permissions` (
+  `user_id`    INT          NOT NULL,
+  `permission` VARCHAR(100) NOT NULL,
+  `created_at` TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`user_id`, `permission`),
+  KEY `idx_user_permissions_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- Loja padrão (migração de dados existentes)
 INSERT IGNORE INTO `tenants` (id, nome, slug) VALUES (1, 'Loja Principal', 'loja-principal');

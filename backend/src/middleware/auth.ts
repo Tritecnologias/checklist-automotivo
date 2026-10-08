@@ -11,6 +11,7 @@ export interface JwtPayload {
   tenantIds: number[];
   mecanicoId?: number | null;
   mecanicoNome?: string | null;
+  permissions?: string[];
 }
 
 declare global {
@@ -54,3 +55,4 @@ export function allowedTenants(user: JwtPayload): number[] | null {
   if (user.role === 'owner') return null;
   return user.tenantIds;
 }
+

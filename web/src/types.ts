@@ -366,13 +366,38 @@ export interface UserAdmin {
   id: number
   nome: string
   email: string
-  role: 'owner' | 'manager' | 'operator' | 'caixa' | 'mecanico'
+  role: 'owner' | 'manager' | 'operator' | 'caixa' | 'mecanico' | string
   tenant_id: number | null
   tenant_nome: string | null
   tenant_count: number
   ativo: number
+  custom_permissions?: number
   mecanico_id?: number | null
 }
+
+export interface PermissionItem {
+  id: string
+  nome: string
+  descricao: string
+  rota?: string
+}
+
+export interface PermissionCategory {
+  categoria: string
+  icone: string
+  permissoes: PermissionItem[]
+}
+
+export interface UserPermissionsDetail {
+  userId: number
+  nome: string
+  email: string
+  role: string
+  custom_permissions: boolean
+  permissions: string[]
+  rolePermissions: string[]
+}
+
 
 // ── Checklist Types ───────────────────────────────────────────────────────────
 

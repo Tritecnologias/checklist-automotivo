@@ -36,8 +36,10 @@ import SugestaoCompras from './pages/SugestaoCompras'
 import KardexEstoque from './pages/KardexEstoque'
 import OficinaProdutividade from './pages/OficinaProdutividade'
 import DreGerencial from './pages/DreGerencial'
+import GerenciadorPapeis from './pages/GerenciadorPapeis'
 
 export default function App() {
+
   return (
     <AuthProvider>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -82,7 +84,10 @@ export default function App() {
               <Route path="/erp/crm/manutencoes" element={<CrmManutencoes />} />
               <Route path="/erp/lojas"        element={<Lojas />} />
               <Route path="/erp/usuarios"     element={<Usuarios />} />
+              <Route path="/erp/permissoes"   element={<GerenciadorPapeis />} />
+              <Route path="/erp/papeis"       element={<Navigate to="/erp/permissoes" replace />} />
               <Route path="/erp/importar"           element={<ImportarEstoque />} />
+
               <Route path="/erp/config/instalacoes" element={<ConfigInstalacoes />} />
               <Route path="/erp/config/tipos"       element={<ConfigTiposProdutos />} />
               <Route path="/erp/config/parametros"  element={<ConfigParametros />} />

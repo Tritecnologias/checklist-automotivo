@@ -10,8 +10,10 @@ import authUsersRouter from './routes/authUsers';
 import tenantsRouter   from './routes/tenants';
 import adminRouter     from './routes/admin';
 import erpRouter       from './routes/erp';
+import { DEFAULT_ROLE_PERMISSIONS } from './lib/permissions';
 
 const app  = express();
+
 const PORT = Number(process.env.PORT ?? 3000);
 
 async function runMigrations() {
@@ -232,6 +234,60 @@ async function runMigrations() {
     );
     console.log('[seed] Owner padrão criado: admin@4rodas.com / Admin@2026');
   }
+
+  // Suporte a papéis dinâmicos e custom_permissions na tabela users
+  try {
+    await pool.query("ALTER TABLE users MODIFY COLUMN role VARCHAR(50) NOT NULL DEFAULT 'operator'");
+  } catch {}
+
+  const [[{ cntCustomPerm }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntCustomPerm FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'custom_permissions'`
+  );
+  if (Number(cntCustomPerm) === 0) {
+    await pool.query('ALTER TABLE users ADD COLUMN custom_permissions TINYINT(1) NOT NULL DEFAULT 0');
+    console.log('[migration] users.custom_permissions adicionada');
+  }
+
+  // Tabela role_permissions
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`role_permissions\` (
+      \`role\`       VARCHAR(50)  NOT NULL,
+      \`permission\` VARCHAR(100) NOT NULL,
+      \`created_at\` TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (\`role\`, \`permission\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Tabela user_permissions
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`user_permissions\` (
+      \`user_id\`    INT          NOT NULL,
+      \`permission\` VARCHAR(100) NOT NULL,
+      \`created_at\` TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (\`user_id\`, \`permission\`),
+      KEY \`idx_user_permissions_user\` (\`user_id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Seed inicial de role_permissions caso a tabela esteja vazia
+  const [[{ rolePermCount }]] = await pool.query<any>(
+    'SELECT COUNT(*) as rolePermCount FROM role_permissions'
+  );
+  if (Number(rolePermCount) === 0) {
+    const seedValues: [string, string][] = [];
+    for (const [role, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
+      if (role === 'owner') continue;
+      for (const perm of perms) {
+        seedValues.push([role, perm]);
+      }
+    }
+    if (seedValues.length > 0) {
+      await pool.query('INSERT IGNORE INTO role_permissions (role, permission) VALUES ?', [seedValues]);
+      console.log('[seed] Permissões padrão dos cargos populadas');
+    }
+  }
+
   // tenant_id em mv_caixa
   const [[{ cnt4 }]] = await pool.query<any>(
     `SELECT COUNT(*) as cnt4 FROM information_schema.COLUMNS

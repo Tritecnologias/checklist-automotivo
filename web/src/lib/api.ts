@@ -6,8 +6,9 @@ import type {
   ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
   CurvaAbcResponse, ValorizacaoEstoqueResponse, SugestaoComprasResponse, KardexResponse,
   Mecanico, MecanicoProdutividade, ExtratoItemComissao, ProdutividadeOficinaResponse, MecanicoPagamento,
-  DreResponse, UsuarioSistema,
+  DreResponse, UsuarioSistema, PermissionCategory, UserPermissionsDetail,
 } from '../types'
+
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const jwt = localStorage.getItem('erp_jwt_token')
@@ -635,7 +636,25 @@ export const usersApi = {
   }) => adminRequest('/auth/users/' + id, { method: 'PATCH', body: JSON.stringify(data) }),
 }
 
+export const permissionsApi = {
+  getCatalog: () => adminRequest<PermissionCategory[]>('/auth/permissions/catalog'),
+  getRolePermissions: () => adminRequest<Record<string, string[]>>('/auth/roles/permissions'),
+  saveRolePermissions: (role: string, permissions: string[]) =>
+    adminRequest<{ ok: boolean }>(`/auth/roles/${role}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ permissions }),
+    }),
+  getUserPermissions: (userId: number) =>
+    adminRequest<UserPermissionsDetail>(`/auth/users/${userId}/permissions`),
+  saveUserPermissions: (userId: number, data: { permissions: string[]; custom: boolean }) =>
+    adminRequest<{ ok: boolean; user: UserPermissionsDetail }>(`/auth/users/${userId}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+}
+
 export const adminApi = {
+
   listProducts: (search: string, page: number, status?: string, tipo?: string | number) =>
     adminRequest<{
       data: any[]

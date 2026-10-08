@@ -34,6 +34,7 @@ import {
   DollarSign,
   ShoppingBag,
   History,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -42,27 +43,28 @@ type NavItem = {
   label: string
   icon: LucideIcon
   end?: boolean
-  roles?: string[]
+  permission?: string
 }
 
 const nav: NavItem[] = [
-  { to: '/erp',              label: 'Dashboard',        icon: LayoutDashboard, end: true },
-  { to: '/erp/pdv',          label: 'PDV',              icon: ShoppingCart },
-  { to: '/erp/caixa',        label: 'Caixa',            icon: Wallet },
-  { to: '/erp/produtos',     label: 'Produtos',         icon: Tag,             roles: ['owner', 'manager'] },
-  { to: '/erp/estoque',      label: 'Estoque',          icon: Boxes,           roles: ['owner', 'manager'] },
-  { to: '/erp/estoque/valorizacao', label: 'Valorização', icon: DollarSign,    roles: ['owner', 'manager'] },
-  { to: '/erp/estoque/curva-abc', label: 'Curva ABC',   icon: BarChart3,       roles: ['owner', 'manager'] },
-  { to: '/erp/estoque/sugestao-compras', label: 'Sugestão Compras', icon: ShoppingBag, roles: ['owner', 'manager'] },
-  { to: '/erp/estoque/kardex', label: 'Kardex Estoque', icon: History,         roles: ['owner', 'manager'] },
-  { to: '/erp/oficina',      label: 'Oficina & Comissões', icon: Wrench,       roles: ['owner', 'manager'] },
-  { to: '/erp/vendas',       label: 'Vendas',           icon: Receipt,         roles: ['owner', 'manager'] },
-  { to: '/erp/contas',       label: 'Contas a Receber', icon: CircleDollarSign,roles: ['owner', 'manager'] },
-  { to: '/erp/contas-pagar', label: 'Contas a Pagar',   icon: TrendingDown,    roles: ['owner', 'manager'] },
-  { to: '/erp/dre',          label: 'DRE Gerencial',    icon: PieChart,        roles: ['owner', 'manager'] },
-  { to: '/erp/clientes',     label: 'Clientes',         icon: Users,           roles: ['owner', 'manager'] },
-  { to: '/erp/crm',          label: 'CRM / Retorno',    icon: HeartHandshake,  roles: ['owner', 'manager'] },
+  { to: '/erp',              label: 'Dashboard',        icon: LayoutDashboard, end: true, permission: 'dashboard' },
+  { to: '/erp/pdv',          label: 'PDV',              icon: ShoppingCart,     permission: 'pdv' },
+  { to: '/erp/caixa',        label: 'Caixa',            icon: Wallet,           permission: 'caixa' },
+  { to: '/erp/produtos',     label: 'Produtos',         icon: Tag,             permission: 'produtos' },
+  { to: '/erp/estoque',      label: 'Estoque',          icon: Boxes,           permission: 'estoque' },
+  { to: '/erp/estoque/valorizacao', label: 'Valorização', icon: DollarSign,    permission: 'estoque_valorizacao' },
+  { to: '/erp/estoque/curva-abc', label: 'Curva ABC',   icon: BarChart3,       permission: 'estoque_curva_abc' },
+  { to: '/erp/estoque/sugestao-compras', label: 'Sugestão Compras', icon: ShoppingBag, permission: 'estoque_sugestao_compras' },
+  { to: '/erp/estoque/kardex', label: 'Kardex Estoque', icon: History,         permission: 'estoque_kardex' },
+  { to: '/erp/oficina',      label: 'Oficina & Comissões', icon: Wrench,       permission: 'oficina' },
+  { to: '/erp/vendas',       label: 'Vendas',           icon: Receipt,         permission: 'vendas' },
+  { to: '/erp/contas',       label: 'Contas a Receber', icon: CircleDollarSign,permission: 'contas_receber' },
+  { to: '/erp/contas-pagar', label: 'Contas a Pagar',   icon: TrendingDown,    permission: 'contas_pagar' },
+  { to: '/erp/dre',          label: 'DRE Gerencial',    icon: PieChart,        permission: 'dre' },
+  { to: '/erp/clientes',     label: 'Clientes',         icon: Users,           permission: 'clientes' },
+  { to: '/erp/crm',          label: 'CRM / Retorno',    icon: HeartHandshake,  permission: 'crm' },
 ]
+
 
 const ROLE_LABEL: Record<string, string> = {
   owner:    'Proprietário',
@@ -138,8 +140,9 @@ function TenantSwitcher({ tenants, current, onSwitch }: {
 export default function ErpLayout() {
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const { user, tenants, currentTenant, switchTenant, logout, isOwner } = useAuth()
-  const visibleNav = nav.filter(item => !item.roles || item.roles.includes(user?.role ?? ''))
+  const { user, tenants, currentTenant, switchTenant, logout, isOwner, hasPermission } = useAuth()
+  const visibleNav = nav.filter(item => !item.permission || hasPermission(item.permission))
+
 
   const { data: statusCaixa } = useQuery({
     queryKey: ['caixa-status', currentTenant?.id],
@@ -242,101 +245,119 @@ export default function ErpLayout() {
             })}
           </nav>
 
-          {/* Gestão (owner only) */}
-          {isOwner && (
+          {/* Gestão */}
+
+          {(isOwner || hasPermission('usuarios') || hasPermission('lojas') || hasPermission('relatorio_multi_lojas') || hasPermission('importar') || hasPermission('config_tipos') || hasPermission('config_instalacoes') || hasPermission('config_parametros')) && (
             <div className="px-3 py-3 border-t border-slate-800/80 space-y-1">
               <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-3 mb-1.5">Gestão</p>
-              <NavLink
-                to="/erp/relatorios/multi-lojas"
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <Building2 className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                <span>Multi-Lojas</span>
-              </NavLink>
-              <NavLink
-                to="/erp/lojas"
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <Store className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                <span>Lojas</span>
-              </NavLink>
-              <NavLink
-                to="/erp/usuarios"
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <UserCheck className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                <span>Usuários</span>
-              </NavLink>
-              <NavLink
-                to="/erp/importar"
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <UploadCloud className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                <span>Importar</span>
-              </NavLink>
-              <NavLink
-                to="/erp/config/tipos"
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <Layers className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                <span>Tipos de Produto</span>
-              </NavLink>
-              <NavLink
-                to="/erp/config/instalacoes"
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <Wrench className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                <span>Instalações</span>
-              </NavLink>
-              <NavLink
-                to="/erp/produtos"
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <Shield className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                <span>Admin</span>
-              </NavLink>
-              <NavLink
-                to="/erp/config/parametros"
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
-                  }`
-                }
-              >
-                <SlidersHorizontal className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                <span>Parâmetros PDV</span>
-              </NavLink>
+              {(isOwner || hasPermission('relatorio_multi_lojas')) && (
+                <NavLink
+                  to="/erp/relatorios/multi-lojas"
+                  className={({ isActive }) =>
+                    `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <Building2 className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                  <span>Multi-Lojas</span>
+                </NavLink>
+              )}
+              {(isOwner || hasPermission('lojas')) && (
+                <NavLink
+                  to="/erp/lojas"
+                  className={({ isActive }) =>
+                    `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <Store className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                  <span>Lojas</span>
+                </NavLink>
+              )}
+              {(isOwner || hasPermission('usuarios')) && (
+                <NavLink
+                  to="/erp/usuarios"
+                  className={({ isActive }) =>
+                    `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <UserCheck className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                  <span>Usuários</span>
+                </NavLink>
+              )}
+              {(isOwner || hasPermission('usuarios')) && (
+                <NavLink
+                  to="/erp/permissoes"
+                  className={({ isActive }) =>
+                    `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <ShieldCheck className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105 text-amber-400" />
+                  <span className="font-semibold text-amber-300">Papéis & Permissões</span>
+                </NavLink>
+              )}
+              {(isOwner || hasPermission('importar')) && (
+                <NavLink
+                  to="/erp/importar"
+                  className={({ isActive }) =>
+                    `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <UploadCloud className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                  <span>Importar</span>
+                </NavLink>
+              )}
+              {(isOwner || hasPermission('config_tipos')) && (
+                <NavLink
+                  to="/erp/config/tipos"
+                  className={({ isActive }) =>
+                    `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <Layers className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                  <span>Tipos de Produto</span>
+                </NavLink>
+              )}
+              {(isOwner || hasPermission('config_instalacoes')) && (
+                <NavLink
+                  to="/erp/config/instalacoes"
+                  className={({ isActive }) =>
+                    `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <Wrench className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                  <span>Instalações</span>
+                </NavLink>
+              )}
+              {(isOwner || hasPermission('config_parametros')) && (
+                <NavLink
+                  to="/erp/config/parametros"
+                  className={({ isActive }) =>
+                    `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <SlidersHorizontal className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                  <span>Parâmetros</span>
+                </NavLink>
+              )}
             </div>
           )}
         </div>
+
 
         {/* Rodapé */}
         <div className="px-3 py-3 border-t border-slate-800/80 space-y-1 shrink-0">

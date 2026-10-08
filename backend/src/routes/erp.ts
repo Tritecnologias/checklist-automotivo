@@ -3,8 +3,10 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db';
 import { JWT_SECRET, type JwtPayload } from '../middleware/auth';
+import { getUserPermissions, userHasPermission } from '../lib/permissions';
 
 // ── Tenant helpers ────────────────────────────────────────────────────────────
+
 
 function getErpWriteTenantId(req: Request): number {
   const user = req.user as JwtPayload | undefined;
@@ -61,15 +63,53 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   res.status(401).json({ message: 'Não autorizado' });
 }
 
-// Rotas restritas a owner/manager — caixa não tem acesso
-function requireManagerUp(req: Request, res: Response, next: NextFunction) {
-  const role = (req.user as JwtPayload | undefined)?.role;
-  if (role !== 'owner' && role !== 'manager') {
-    res.status(403).json({ message: 'Permissão insuficiente' });
+// Rotas restritas: owner/manager têm acesso geral; outros cargos/usuários dependem de permissões específicas
+async function requireManagerUp(req: Request, res: Response, next: NextFunction) {
+  const user = req.user as JwtPayload | undefined;
+  if (!user) {
+    res.status(401).json({ message: 'Não autorizado' });
     return;
   }
-  next();
+  if (user.role === 'owner' || user.role === 'manager') {
+    next();
+    return;
+  }
+
+  // Identifica a permissão necessária com base no caminho da rota
+  const path = req.path;
+  let neededPerm = '';
+  if (path.startsWith('/clientes')) neededPerm = 'clientes';
+  else if (path.startsWith('/estoque/curva-abc')) neededPerm = 'estoque_curva_abc';
+  else if (path.startsWith('/estoque/valorizacao')) neededPerm = 'estoque_valorizacao';
+  else if (path.startsWith('/estoque/sugestao-compras')) neededPerm = 'estoque_sugestao_compras';
+  else if (path.startsWith('/estoque/kardex')) neededPerm = 'estoque_kardex';
+  else if (path.startsWith('/estoque')) neededPerm = 'estoque';
+  else if (path.startsWith('/contas-pagar')) neededPerm = 'contas_pagar';
+  else if (path.startsWith('/fornecedores')) neededPerm = 'contas_pagar';
+  else if (path.startsWith('/contas')) neededPerm = 'contas_receber';
+  else if (path.startsWith('/crm')) neededPerm = 'crm';
+  else if (path.startsWith('/dre')) neededPerm = 'dre';
+  else if (path.startsWith('/oficina') || path.startsWith('/mecanicos')) neededPerm = 'oficina';
+  else if (path.startsWith('/relatorios/multi-lojas')) neededPerm = 'relatorio_multi_lojas';
+  else if (path.startsWith('/config/parametros')) neededPerm = 'config_parametros';
+
+  if (neededPerm) {
+    try {
+      const perms = await getUserPermissions(user.userId, user.role);
+      if (userHasPermission(perms, neededPerm, user.role)) {
+        next();
+        return;
+      }
+    } catch (err) {
+      console.error('Erro ao verificar permissão do usuário no ERP:', err);
+      res.status(500).json({ message: 'Erro interno ao validar permissões' });
+      return;
+    }
+  }
+
+  res.status(403).json({ message: 'Permissão insuficiente' });
 }
+
 
 router.use(requireAdmin);
 

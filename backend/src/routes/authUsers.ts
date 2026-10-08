@@ -3,8 +3,17 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db';
 import { JWT_SECRET, requireAuth, requireRole, type JwtPayload } from '../middleware/auth';
+import {
+  PERMISSION_CATALOG,
+  getUserPermissions,
+  getAllRolePermissions,
+  setRolePermissions,
+  getUserPermissionsDetail,
+  setUserPermissions,
+} from '../lib/permissions';
 
 const router = Router();
+
 
 // ── POST /auth/login ──────────────────────────────────────────────────────────
 
@@ -66,6 +75,8 @@ router.post('/login', async (req, res) => {
       await pool.query('UPDATE cad_mecanicos SET user_id = ? WHERE id = ?', [user.id, mecVinculado.id]).catch(() => {});
     }
 
+    const permissions = await getUserPermissions(user.id, user.role);
+
     const payload: JwtPayload = {
       userId: user.id,
       email: user.email,
@@ -74,6 +85,7 @@ router.post('/login', async (req, res) => {
       tenantIds,
       mecanicoId,
       mecanicoNome,
+      permissions,
     };
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
@@ -98,10 +110,12 @@ router.post('/login', async (req, res) => {
         role: user.role,
         mecanico_id: mecanicoId,
         mecanico_nome: mecanicoNome,
+        permissions,
       },
       tenants,
     });
   } catch (err) {
+
     console.error('POST /auth/login error:', err);
     res.status(500).json({ message: 'Erro interno' });
   }
@@ -164,6 +178,8 @@ router.get('/me', requireAuth, async (req, res) => {
     }
 
     const [tenants] = await pool.query<any>(tenantsQuery, tenantsParams);
+    const permissions = await getUserPermissions(user.id, user.role);
+
     res.json({
       user: {
         id: user.id,
@@ -172,6 +188,7 @@ router.get('/me', requireAuth, async (req, res) => {
         role: user.role,
         mecanico_id: mecanicoId,
         mecanico_nome: mecanicoNome,
+        permissions,
       },
       tenants,
     });
@@ -234,6 +251,7 @@ router.get('/users', requireAuth, requireRole('owner', 'manager'), async (req, r
   try {
     const [rows] = await pool.query<any>(
       `SELECT u.id, u.nome, u.email, u.role, u.tenant_id, u.ativo,
+              COALESCE(u.custom_permissions, 0) AS custom_permissions,
               t.nome AS tenant_nome,
               (SELECT COUNT(*) FROM user_tenants ut WHERE ut.user_id = u.id) AS tenant_count
        FROM users u
@@ -241,6 +259,7 @@ router.get('/users', requireAuth, requireRole('owner', 'manager'), async (req, r
        ORDER BY u.nome`
     );
     res.json(rows);
+
   } catch (err) {
     res.status(500).json({ message: 'Erro interno' });
   }
@@ -334,4 +353,78 @@ router.post('/select-tenant', requireAuth, async (req, res) => {
   }
 });
 
+// ── PERMISSIONS / PAPÉIS ──────────────────────────────────────────────────────
+
+// GET /auth/permissions/catalog — catálogo completo de funções do sistema
+router.get('/permissions/catalog', requireAuth, (_req, res) => {
+  res.json(PERMISSION_CATALOG);
+});
+
+// GET /auth/roles/permissions — mapa de permissões padrão dos cargos
+router.get('/roles/permissions', requireAuth, requireRole('owner', 'manager'), async (_req, res) => {
+  try {
+    const rolesMap = await getAllRolePermissions();
+    res.json(rolesMap);
+  } catch (err) {
+    console.error('GET /auth/roles/permissions error:', err);
+    res.status(500).json({ message: 'Erro ao carregar permissões dos perfis' });
+  }
+});
+
+// PUT /auth/roles/:role/permissions — salvar permissões de um cargo
+router.put('/roles/:role/permissions', requireAuth, requireRole('owner'), async (req, res) => {
+  const { role } = req.params;
+  const { permissions } = req.body as { permissions?: string[] };
+  if (!role || !Array.isArray(permissions)) {
+    res.status(400).json({ message: 'role e array de permissões são obrigatórios' });
+    return;
+  }
+  if (role === 'owner') {
+    res.status(400).json({ message: 'Permissões do perfil Proprietário são fixas (acesso total)' });
+    return;
+  }
+  try {
+    await setRolePermissions(role, permissions);
+    res.json({ ok: true, role, permissions });
+  } catch (err) {
+    console.error(`PUT /auth/roles/${role}/permissions error:`, err);
+    res.status(500).json({ message: 'Erro ao salvar permissões do perfil' });
+  }
+});
+
+// GET /auth/users/:id/permissions — detalhe de permissões do usuário
+router.get('/users/:id/permissions', requireAuth, requireRole('owner', 'manager'), async (req, res) => {
+  const userId = Number(req.params.id);
+  if (!userId) {
+    res.status(400).json({ message: 'id de usuário inválido' });
+    return;
+  }
+  try {
+    const detail = await getUserPermissionsDetail(userId);
+    res.json(detail);
+  } catch (err: any) {
+    console.error(`GET /auth/users/${userId}/permissions error:`, err);
+    res.status(404).json({ message: err?.message ?? 'Usuário não encontrado' });
+  }
+});
+
+// PUT /auth/users/:id/permissions — salvar ou restaurar permissões do usuário
+router.put('/users/:id/permissions', requireAuth, requireRole('owner'), async (req, res) => {
+  const userId = Number(req.params.id);
+  const { permissions, custom } = req.body as { permissions?: string[]; custom?: boolean };
+  if (!userId) {
+    res.status(400).json({ message: 'id de usuário inválido' });
+    return;
+  }
+  try {
+    await setUserPermissions(userId, permissions ?? [], Boolean(custom));
+    const updated = await getUserPermissionsDetail(userId);
+    res.json({ ok: true, user: updated });
+  } catch (err: any) {
+    console.error(`PUT /auth/users/${userId}/permissions error:`, err);
+    res.status(500).json({ message: 'Erro ao salvar permissões do usuário' });
+  }
+});
+
 export default router;
+

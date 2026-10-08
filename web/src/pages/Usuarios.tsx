@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RotateCw } from 'lucide-react'
+import { RotateCw, ShieldCheck, UserCheck } from 'lucide-react'
 import { tenantsApi, usersApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import type { UserAdmin } from '../types'
+
 
 const MULTI_TENANT_ROLES = ['manager', 'operator', 'caixa', 'mecanico']
 
@@ -29,6 +31,7 @@ const EMPTY_FORM = {
 }
 
 export default function Usuarios() {
+  const navigate = useNavigate()
   const { isOwner } = useAuth()
   const qc = useQueryClient()
 
@@ -117,11 +120,29 @@ export default function Usuarios() {
 
   return (
     <div className="max-w-4xl">
+      {/* Abas Superiores */}
+      <div className="flex items-center gap-2 mb-6 border-b border-slate-800 pb-3">
+        <button
+          className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold shadow-md shadow-blue-600/30 flex items-center gap-2"
+        >
+          <UserCheck className="w-3.5 h-3.5" />
+          <span>Usuários</span>
+        </button>
+        <button
+          onClick={() => navigate('/erp/permissoes')}
+          className="px-4 py-2 bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 border border-slate-700/60"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+          <span>Papéis & Permissões</span>
+        </button>
+      </div>
+
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Usuários</h1>
-          <p className="text-sm text-slate-400 mt-1">Gerencie os acessos ao sistema</p>
+          <p className="text-sm text-slate-400 mt-1">Gerencie os colaboradores e acessos ao sistema</p>
         </div>
+
         <div className="flex items-center gap-3">
           <button
             onClick={() => refetch()}
@@ -359,9 +380,19 @@ export default function Usuarios() {
                     <p className="text-xs text-slate-400">{u.email}</p>
                   </td>
                   <td className="px-5 py-3.5">
-                    <span className={`inline-block text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${ROLE_COLOR[u.role]}`}>
-                      {ROLE_OPTS.find(r => r.value === u.role)?.label ?? u.role}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className={`inline-block text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${ROLE_COLOR[u.role] ?? 'bg-slate-500/20 text-slate-300'}`}>
+                        {ROLE_OPTS.find(r => r.value === u.role)?.label ?? u.role}
+                      </span>
+                      {Boolean(u.custom_permissions) && (
+                        <span
+                          className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase tracking-wide"
+                          title="Este usuário possui permissões personalizadas exclusivas"
+                        >
+                          Personalizado
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-5 py-3.5">
                     {u.role === 'owner' ? (
@@ -383,6 +414,16 @@ export default function Usuarios() {
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-3">
+                      {u.role !== 'owner' && (
+                        <button
+                          onClick={() => navigate(`/erp/permissoes?userId=${u.id}`)}
+                          className="text-xs text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1 font-semibold"
+                          title="Configurar papéis e permissões deste usuário"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Permissões</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => startEdit(u)}
                         className="text-xs text-slate-400 hover:text-white transition-colors"
@@ -399,6 +440,7 @@ export default function Usuarios() {
                       )}
                     </div>
                   </td>
+
                 </tr>
               ))}
               {users.length === 0 && (

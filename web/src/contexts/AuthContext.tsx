@@ -11,7 +11,10 @@ export interface AuthUser {
   id: number
   nome: string
   email: string
-  role: 'owner' | 'manager' | 'operator' | 'caixa'
+  role: 'owner' | 'manager' | 'operator' | 'caixa' | 'mecanico' | string
+  mecanico_id?: number | null
+  mecanico_nome?: string | null
+  permissions?: string[]
 }
 
 interface AuthState {
@@ -25,11 +28,14 @@ interface AuthContextValue extends AuthState {
   login: (token: string, user: AuthUser, tenants: Tenant[]) => void
   logout: () => void
   switchTenant: (tenant: Tenant) => void
+  refreshUser: () => Promise<void>
+  hasPermission: (perm: string) => boolean
   isOwner: boolean
   isAuthenticated: boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
+
 
 const STORAGE_TOKEN   = 'erp_jwt_token'
 const STORAGE_USER    = 'erp_user'
@@ -80,18 +86,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.invalidateQueries()
   }, [])
 
+  const refreshUser = useCallback(async () => {
+    const token = localStorage.getItem(STORAGE_TOKEN)
+    if (!token) return
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.user) {
+          localStorage.setItem(STORAGE_USER, JSON.stringify(data.user))
+          setState(s => ({
+            ...s,
+            user: data.user,
+            tenants: data.tenants ?? s.tenants,
+          }))
+        }
+      }
+    } catch (e) {
+      console.error('Erro ao recarregar dados do usuário:', e)
+    }
+  }, [])
+
+  const hasPermission = useCallback((perm: string): boolean => {
+    if (!state.user) return false
+    if (state.user.role === 'owner') return true
+    if (state.user.permissions?.includes('*')) return true
+    return state.user.permissions?.includes(perm) ?? false
+  }, [state.user])
+
   return (
     <AuthContext.Provider value={{
       ...state,
       login,
       logout,
       switchTenant,
+      refreshUser,
+      hasPermission,
       isOwner: state.user?.role === 'owner',
       isAuthenticated: !!state.token && !!state.user,
     }}>
       {children}
     </AuthContext.Provider>
   )
+
 }
 
 export function useAuth() {
