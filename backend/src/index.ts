@@ -60,8 +60,15 @@ async function runMigrations() {
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'os_orders' AND COLUMN_NAME = 'venda_controle'`
   );
   if (Number(cntVendaCol) === 0) {
-    await pool.query('ALTER TABLE os_orders ADD COLUMN venda_controle VARCHAR(50) NULL DEFAULT NULL');
+    await pool.query('ALTER TABLE os_orders ADD COLUMN venda_controle VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL');
     console.log('[migration] os_orders.venda_controle adicionada');
+  } else {
+    try {
+      await pool.query('ALTER TABLE os_orders MODIFY COLUMN venda_controle VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL');
+      console.log('[migration] os_orders.venda_controle padronizada para utf8mb4_unicode_ci');
+    } catch (err: any) {
+      console.warn('[migration] aviso ao alterar os_orders.venda_controle:', err?.message || err);
+    }
   }
 
   // discount_amount em os_orders (desconto faturado no PDV)
@@ -173,7 +180,7 @@ async function runMigrations() {
     // Sincroniza total_amount e discount_amount de OSs que foram faturadas anteriormente no PDV
     await pool.query(`
       UPDATE os_orders o
-      JOIN mv_vendas v ON v.controle = CONVERT(o.venda_controle USING latin1)
+      JOIN mv_vendas v ON CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
       SET o.total_amount = v.vr_total,
           o.discount_amount = COALESCE(ABS(v.vr_adicional), o.discount_amount, 0)
       WHERE o.venda_controle IS NOT NULL AND o.total_amount = 0
@@ -341,7 +348,7 @@ async function runMigrations() {
   try {
     await pool.query(`
       UPDATE mv_vendas v
-      JOIN os_orders o ON o.venda_controle = v.controle
+      JOIN os_orders o ON CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
       SET v.tenant_id = o.tenant_id
       WHERE o.tenant_id IS NOT NULL AND v.tenant_id = 1
     `);

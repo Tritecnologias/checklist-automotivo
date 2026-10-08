@@ -1058,7 +1058,7 @@ router.get('/vendas', async (req, res) => {
       const [[cnt]] = await pool.query<any>(
         `SELECT COUNT(DISTINCT v.id) as total FROM mv_vendas v
          LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-         LEFT JOIN os_orders o ON o.venda_controle = CONVERT(v.controle USING utf8mb4)
+         LEFT JOIN os_orders o ON CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
          WHERE v.data_venda = ? ${tenantClause} ${where}`,
         baseParams
       );
@@ -1081,7 +1081,7 @@ router.get('/vendas', async (req, res) => {
                 o.id as os_id
          FROM mv_vendas v
          LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-         LEFT JOIN os_orders o ON o.venda_controle = CONVERT(v.controle USING utf8mb4)
+         LEFT JOIN os_orders o ON CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
          WHERE v.data_venda = ? ${tenantClause} ${where}
          ORDER BY v.id DESC LIMIT ? OFFSET ?`,
         [...baseParams, limit, offset]
@@ -1113,7 +1113,7 @@ router.get('/vendas', async (req, res) => {
                 o.id as os_id
          FROM mv_vendas v
          LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-         LEFT JOIN os_orders o ON o.venda_controle = CONVERT(v.controle USING utf8mb4)
+         LEFT JOIN os_orders o ON CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
          WHERE v.data_venda = ? ${tenantClause}
          ORDER BY v.id DESC LIMIT ? OFFSET ?`,
         [...baseParams, limit, offset]
@@ -1162,7 +1162,7 @@ router.get('/vendas/:controle', async (req, res) => {
               o.total_amount as os_total_amount
        FROM mv_vendas v
        LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-       LEFT JOIN os_orders o ON o.venda_controle = CONVERT(v.controle USING utf8mb4)
+       LEFT JOIN os_orders o ON CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
        WHERE v.controle = ?
        LIMIT 1`,
       [req.params.controle]
@@ -4870,7 +4870,7 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
       JOIN cad_produtos p ON p.id = m.id_produto
       WHERE v.tenant_id = ?
         AND v.data_venda >= ? AND v.data_venda <= ?
-        AND NOT EXISTS (SELECT 1 FROM os_orders o WHERE o.venda_controle = v.controle AND o.tenant_id = ?)
+        AND NOT EXISTS (SELECT 1 FROM os_orders o WHERE CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci AND o.tenant_id = ?)
         ${prodFilterM}
 
       ORDER BY data_hora DESC
