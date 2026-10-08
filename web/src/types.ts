@@ -337,9 +337,14 @@ export interface ClienteHistorico {
     model: string
     mileage: number
     status: string
+    partsAmount?: number
     total: number
     laborAmount: number
     createdAt: string
+    clientName?: string | null
+    clientPhone?: string | null
+    clientDocument?: string | null
+    clientAddress?: string | null
   }[]
 }
 

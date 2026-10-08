@@ -2622,23 +2622,86 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
   }
 
   if (search.length >= 2) {
-    whereParts.push('(c.nome_cliente LIKE ? OR c.telefone LIKE ? OR c.celular LIKE ? OR c.cpf_cnpj LIKE ?)');
-    baseParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    const cleanPlateSearch = search.replace(/[-\s]/g, '').toUpperCase();
+    whereParts.push(`(
+      c.nome_cliente LIKE ?
+      OR c.telefone LIKE ?
+      OR c.celular LIKE ?
+      OR c.cpf_cnpj LIKE ?
+      OR c.inf_adicional LIKE ?
+      OR c.email LIKE ?
+      OR EXISTS (
+        SELECT 1 FROM os_orders _o
+        WHERE (_o.client_id = c.id
+               OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND _o.client_document = c.cpf_cnpj)
+               OR (c.telefone IS NOT NULL AND c.telefone != '' AND _o.client_phone = c.telefone)
+               OR (c.celular IS NOT NULL AND c.celular != '' AND _o.client_phone = c.celular)
+               OR (c.nome_cliente LIKE CONCAT('%', REPLACE(_o.plate, '-', ''), '%')))
+          AND (
+            REPLACE(REPLACE(UPPER(_o.plate), '-', ''), ' ', '') LIKE ?
+            OR UPPER(_o.model) LIKE ?
+            OR UPPER(_o.client_name) LIKE ?
+          )
+      )
+    )`);
+    baseParams.push(
+      `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`,
+      `%${search}%`, `%${search}%`,
+      `%${cleanPlateSearch}%`, `%${search.toUpperCase()}%`, `%${search.toUpperCase()}%`
+    );
   }
 
   const where = whereParts.length > 0 ? 'WHERE ' + whereParts.join(' AND ') : '';
 
   const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total FROM cad_clientes c ${tenantJoin} ${where}`,
+    `SELECT COUNT(DISTINCT c.id) as total FROM cad_clientes c ${tenantJoin} ${where}`,
     baseParams
   );
 
   const [rows] = await pool.query<any>(
     `SELECT c.id, c.nome_cliente, c.telefone, c.celular, c.inf_adicional,
             c.cpf_cnpj, c.email, c.cep, c.endereco, c.bairro, c.cidade, c.uf, c.inativo,
-            MAX(v.data_venda) as ultima_compra,
-            COALESCE(SUM(v.vr_total),0) as total_gasto,
-            COUNT(v.id) as qtd_compras,
+            GREATEST(
+              COALESCE(MAX(v.data_venda), '1970-01-01'),
+              COALESCE((
+                SELECT MAX(DATE(o.created_at)) FROM os_orders o
+                WHERE o.client_id = c.id
+                   OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
+                   OR (o.plate IS NOT NULL AND o.plate != '' AND c.nome_cliente LIKE CONCAT('%', REPLACE(o.plate, '-', ''), '%'))
+              ), '1970-01-01')
+            ) as ultima_compra,
+            (
+              COALESCE(SUM(v.vr_total), 0) +
+              COALESCE((
+                SELECT SUM(o.total_amount) FROM os_orders o
+                WHERE (o.client_id = c.id
+                   OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
+                   OR (o.plate IS NOT NULL AND o.plate != '' AND c.nome_cliente LIKE CONCAT('%', REPLACE(o.plate, '-', ''), '%')))
+                  AND (o.venda_controle IS NULL OR NOT EXISTS (SELECT 1 FROM mv_vendas mv WHERE mv.id_cliente = c.id AND mv.controle = o.venda_controle))
+              ), 0)
+            ) as total_gasto,
+            (
+              COUNT(DISTINCT v.id) +
+              COALESCE((
+                SELECT COUNT(DISTINCT o.id) FROM os_orders o
+                WHERE (o.client_id = c.id
+                   OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
+                   OR (o.plate IS NOT NULL AND o.plate != '' AND c.nome_cliente LIKE CONCAT('%', REPLACE(o.plate, '-', ''), '%')))
+                  AND (o.venda_controle IS NULL OR NOT EXISTS (SELECT 1 FROM mv_vendas mv WHERE mv.id_cliente = c.id AND mv.controle = o.venda_controle))
+              ), 0)
+            ) as qtd_compras,
+            (
+              SELECT o.plate FROM os_orders o
+              WHERE o.client_id = c.id
+                 OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
+              ORDER BY o.created_at DESC LIMIT 1
+            ) as os_ultima_placa,
+            (
+              SELECT o.model FROM os_orders o
+              WHERE o.client_id = c.id
+                 OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
+              ORDER BY o.created_at DESC LIMIT 1
+            ) as os_ultimo_modelo,
             (SELECT GROUP_CONCAT(t2.nome ORDER BY t2.nome SEPARATOR ', ')
              FROM cliente_tenant ct2
              JOIN tenants t2 ON t2.id = ct2.tenant_id
@@ -2648,7 +2711,7 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
      LEFT JOIN mv_vendas v ON v.id_cliente = c.id
      ${where}
      GROUP BY c.id
-     ORDER BY ultima_compra IS NULL, ultima_compra DESC
+     ORDER BY ultima_compra = '1970-01-01', ultima_compra DESC
      LIMIT ? OFFSET ?`,
     [...baseParams, limit, offset]
   );
@@ -2658,8 +2721,8 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
       id: r.id,
       nome: stripPlate(r.nome_cliente),
       nome_original: r.nome_cliente,
-      placa: extractPlate(r.nome_cliente),
-      modelo: r.inf_adicional || null,
+      placa: extractPlate(r.nome_cliente) || (r.os_ultima_placa ? String(r.os_ultima_placa).toUpperCase().replace(/[-\s]/g, '') : null),
+      modelo: r.inf_adicional || r.os_ultimo_modelo || null,
       telefone: r.telefone || r.celular || null,
       celular: r.celular || null,
       cpf_cnpj: r.cpf_cnpj || null,
@@ -2670,9 +2733,9 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
       cidade: r.cidade || null,
       uf: r.uf || null,
       inativo: Number(r.inativo || 0),
-      ultima_compra: r.ultima_compra,
-      total_gasto: Number(r.total_gasto),
-      qtd_compras: Number(r.qtd_compras),
+      ultima_compra: r.ultima_compra && r.ultima_compra !== '1970-01-01' ? r.ultima_compra : null,
+      total_gasto: Number(r.total_gasto || 0),
+      qtd_compras: Number(r.qtd_compras || 0),
       lojas: r.lojas || null,
     })),
     total: Number(total),
@@ -2694,12 +2757,24 @@ router.get('/clientes/:id', requireManagerUp, async (req, res) => {
       'SELECT tenant_id FROM cliente_tenant WHERE cliente_id = ?',
       [req.params.id]
     );
+    let placa = extractPlate(cliente.nome_cliente);
+    let modelo = cliente.inf_adicional || '';
+    if (!placa) {
+      const [[lastOs]] = await pool.query<any>(
+        `SELECT plate, model FROM os_orders
+         WHERE client_id = ? OR (client_document IS NOT NULL AND client_document != '' AND client_document = ?)
+         ORDER BY created_at DESC LIMIT 1`,
+        [cliente.id, cliente.cpf_cnpj]
+      );
+      if (lastOs?.plate) placa = lastOs.plate;
+      if (!modelo && lastOs?.model) modelo = lastOs.model;
+    }
     res.json({
       id: cliente.id,
       nome: stripPlate(cliente.nome_cliente),
       nome_original: cliente.nome_cliente,
-      placa: extractPlate(cliente.nome_cliente),
-      modelo: cliente.inf_adicional || '',
+      placa: placa || '',
+      modelo,
       telefone: cliente.telefone || '',
       celular: cliente.celular || '',
       cpf_cnpj: cliente.cpf_cnpj || '',
@@ -2920,7 +2995,7 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
   );
   if (!cliente) { res.status(404).json({ message: 'Cliente não encontrado' }); return; }
 
-  const placa = extractPlate(cliente.nome_cliente);
+  let placa = extractPlate(cliente.nome_cliente);
 
   const [vendas] = await pool.query<any>(
     `SELECT v.controle, v.data_venda, v.vr_total, v.vr_dinheiro,
@@ -2932,27 +3007,55 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
     [req.params.id]
   );
 
-  let os: any[] = [];
-  if (placa) {
-    const clean = placa.replace(/[-\s]/g, '');
-    const [osRows] = await pool.query<any>(
-      `SELECT id, plate, model, mileage, status, total_amount, labor_amount, created_at
-       FROM os_orders
-       WHERE REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') = ?
-       ORDER BY created_at DESC`,
-      [clean]
-    );
-    os = (osRows as any[]).map((o: any) => ({
+  // Busca OS vinculadas por ID do cliente, documento (CPF/CNPJ) ou placa
+  const cleanPlaca = placa ? placa.replace(/[-\s]/g, '') : '';
+  const osWhereParts: string[] = ['o.client_id = ?'];
+  const osParams: any[] = [cliente.id];
+
+  if (cliente.cpf_cnpj && String(cliente.cpf_cnpj).trim().length >= 8) {
+    osWhereParts.push('o.client_document = ?');
+    osParams.push(cliente.cpf_cnpj);
+  }
+  if (cleanPlaca) {
+    osWhereParts.push("REPLACE(REPLACE(UPPER(o.plate), '-', ''), ' ', '') = ?");
+    osParams.push(cleanPlaca);
+  }
+
+  const [osRows] = await pool.query<any>(
+    `SELECT o.id, o.plate, o.model, o.mileage, o.status, o.total_amount, o.labor_amount, o.created_at,
+            o.client_name, o.client_phone, o.client_document, o.client_address
+     FROM os_orders o
+     WHERE ${osWhereParts.join(' OR ')}
+     ORDER BY o.created_at DESC`,
+    osParams
+  );
+
+  const os = (osRows as any[]).map((o: any) => {
+    const totalAmount = Number(o.total_amount || 0);
+    const laborAmount = Number(o.labor_amount ?? 0);
+    const partsAmount = Math.max(0, totalAmount - laborAmount);
+    return {
       id: o.id,
       plate: o.plate,
       model: o.model,
-      mileage: Number(o.mileage),
+      mileage: Number(o.mileage || 0),
       status: o.status,
-      total: Number(o.total_amount),
-      laborAmount: Number(o.labor_amount ?? 0),
+      partsAmount,
+      laborAmount,
+      total: totalAmount,
       createdAt: o.created_at,
-    }));
+      clientName: o.client_name || null,
+      clientPhone: o.client_phone || null,
+      clientDocument: o.client_document || null,
+      clientAddress: o.client_address || null,
+    };
+  });
+
+  if (!placa && os.length > 0 && os[0].plate) {
+    placa = String(os[0].plate).toUpperCase().replace(/[-\s]/g, '');
   }
+
+  const lastOs = os[0];
 
   res.json({
     cliente: {
@@ -2960,13 +3063,13 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
       nome: stripPlate(cliente.nome_cliente),
       nome_original: cliente.nome_cliente,
       placa,
-      modelo: cliente.inf_adicional || null,
-      telefone: cliente.telefone || cliente.celular || null,
+      modelo: cliente.inf_adicional || lastOs?.model || null,
+      telefone: cliente.telefone || cliente.celular || lastOs?.clientPhone || null,
       celular: cliente.celular || null,
-      cpf_cnpj: cliente.cpf_cnpj || null,
+      cpf_cnpj: cliente.cpf_cnpj || lastOs?.clientDocument || null,
       email: cliente.email || null,
       cep: cliente.cep || null,
-      endereco: cliente.endereco || null,
+      endereco: cliente.endereco || lastOs?.clientAddress || null,
       bairro: cliente.bairro || null,
       cidade: cliente.cidade || null,
       uf: cliente.uf || null,

@@ -37,7 +37,7 @@ function buildPrintHtml(
   })
 
   const totalCompras = vendas.reduce((s, v) => s + v.total, 0)
-  const totalOs      = os.reduce((s, o) => s + o.total + o.laborAmount, 0)
+  const totalOs      = os.reduce((s, o) => s + o.total, 0)
 
   const vendasHtml = vendas.map(v => {
     const det = detalhesPorControle[v.controle]
@@ -78,27 +78,27 @@ function buildPrintHtml(
   const osHtml = os.length
     ? `<h2>Ordens de Serviço — App (${os.length})</h2>
        <table>
-         <thead><tr>
-           <th style="text-align:left">OS / Placa</th>
-           <th style="text-align:left">Modelo</th>
-           <th style="text-align:left">Data</th>
-           <th style="text-align:left">Status</th>
-           <th style="text-align:right">Peças</th>
-           <th style="text-align:right">M.O.</th>
-           <th style="text-align:right">Total</th>
-         </tr></thead>
-         <tbody>
-           ${os.map(o => `<tr>
-             <td><span class="mono">#${o.id.split('-')[0].toUpperCase()}</span><br><span class="placa">${o.plate}</span></td>
-             <td>${o.model || '—'}</td>
-             <td>${formatDate(o.createdAt)}</td>
-             <td>${STATUS_LABEL[o.status] ?? o.status}</td>
-             <td style="text-align:right">${currency(o.total)}</td>
-             <td style="text-align:right">${currency(o.laborAmount)}</td>
-             <td style="text-align:right;font-weight:600">${currency(o.total + o.laborAmount)}</td>
-           </tr>`).join('')}
-         </tbody>
-       </table>`
+          <thead><tr>
+            <th style="text-align:left">OS / Placa</th>
+            <th style="text-align:left">Modelo</th>
+            <th style="text-align:left">Data</th>
+            <th style="text-align:left">Status</th>
+            <th style="text-align:right">Peças</th>
+            <th style="text-align:right">M.O.</th>
+            <th style="text-align:right">Total</th>
+          </tr></thead>
+          <tbody>
+            ${os.map(o => `<tr>
+              <td><span class="mono">#${o.id.split('-')[0].toUpperCase()}</span><br><span class="placa">${o.plate}</span>${o.clientName && o.clientName.toLowerCase() !== cliente.nome.toLowerCase() ? `<br><small style="color:#666">OS: ${o.clientName}</small>` : ''}</td>
+              <td>${o.model || '—'}</td>
+              <td>${formatDate(o.createdAt)}</td>
+              <td>${STATUS_LABEL[o.status] ?? o.status}</td>
+              <td style="text-align:right">${currency(o.partsAmount ?? Math.max(0, o.total - o.laborAmount))}</td>
+              <td style="text-align:right">${currency(o.laborAmount)}</td>
+              <td style="text-align:right;font-weight:600">${currency(o.total)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`
     : `<h2>Ordens de Serviço — App</h2>
        <p style="color:#555">${cliente.placa
          ? `Nenhuma OS encontrada para a placa ${cliente.placa}.`
@@ -479,7 +479,7 @@ export default function ClienteHistorico() {
             <div>
               <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Total em OS</p>
               <p className="text-2xl font-bold text-blue-400">
-                {currency(os.reduce((s, o) => s + o.total + o.laborAmount, 0))}
+                {currency(os.reduce((s, o) => s + o.total, 0))}
               </p>
               <p className="text-xs text-slate-500 mt-0.5">{os.length} ordem{os.length !== 1 ? 's' : ''}</p>
             </div>
@@ -555,6 +555,11 @@ export default function ClienteHistorico() {
                         #{o.id.split('-')[0].toUpperCase()}
                       </p>
                       <p className="text-xs text-amber-400 font-mono mt-0.5">{o.plate}</p>
+                      {o.clientName && o.clientName.trim() && o.clientName.toLowerCase() !== cliente.nome.toLowerCase() && (
+                        <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1 font-medium bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700/60 w-fit" title="Cliente registrado nesta OS">
+                          👤 {o.clientName}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-slate-400 text-xs">{o.model || '—'}</td>
                     <td className="px-4 py-3 text-slate-400 text-xs">{formatDate(o.createdAt)}</td>
@@ -563,10 +568,14 @@ export default function ClienteHistorico() {
                         {STATUS_LABEL[o.status] ?? o.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-slate-300 text-xs">{currency(o.total)}</td>
-                    <td className="px-4 py-3 text-right text-blue-400 text-xs">{currency(o.laborAmount)}</td>
+                    <td className="px-4 py-3 text-right text-slate-300 text-xs">
+                      {currency(o.partsAmount ?? Math.max(0, o.total - o.laborAmount))}
+                    </td>
+                    <td className="px-4 py-3 text-right text-blue-400 text-xs">
+                      {currency(o.laborAmount)}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold text-green-400">
-                      {currency(o.total + o.laborAmount)}
+                      {currency(o.total)}
                     </td>
                   </tr>
                 ))}
