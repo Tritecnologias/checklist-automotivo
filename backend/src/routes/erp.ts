@@ -1038,183 +1038,225 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
 // ── VENDAS ───────────────────────────────────────────────────────────────────
 
 router.get('/vendas', async (req, res) => {
-  const page  = Math.max(1, Number(req.query.page ?? 1));
-  const limit = 30;
-  const offset = (page - 1) * limit;
-  const data  = String(req.query.data ?? new Date().toISOString().slice(0, 10));
-  const search = String(req.query.search ?? '').trim();
+  try {
+    const page  = Math.max(1, Number(req.query.page ?? 1));
+    const limit = 30;
+    const offset = (page - 1) * limit;
+    const data  = String(req.query.data ?? new Date().toISOString().slice(0, 10));
+    const search = String(req.query.search ?? '').trim();
 
-  const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true, 'v.tenant_id');
+    const { clause: tenantClause, params: tenantParams } = getErpTenantFilter(req, true, 'v.tenant_id');
 
-  const where = search.length >= 2
-    ? 'AND (c.nome_cliente LIKE ? OR v.controle LIKE ? OR o.client_name LIKE ? OR o.plate LIKE ? OR o.model LIKE ?)'
-    : '';
-  const searchParams: any[] = search.length >= 2
-    ? [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`]
-    : [];
+    let total = 0;
+    let rows: any[] = [];
 
-  const baseParams = [data, ...tenantParams, ...searchParams];
+    if (search.length >= 2) {
+      const where = 'AND (c.nome_cliente LIKE ? OR v.controle LIKE ? OR o.client_name LIKE ? OR o.plate LIKE ? OR o.model LIKE ?)';
+      const searchParams = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
+      const baseParams = [data, ...tenantParams, ...searchParams];
 
-  const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(DISTINCT v.id) as total FROM mv_vendas v
-     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-     LEFT JOIN os_orders o ON (o.venda_controle = CONVERT(v.controle USING utf8mb4) OR CONVERT(o.venda_controle USING latin1) = v.controle)
-     WHERE v.data_venda = ? ${tenantClause} ${where}`,
-    baseParams
-  );
+      const [[cnt]] = await pool.query<any>(
+        `SELECT COUNT(DISTINCT v.id) as total FROM mv_vendas v
+         LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+         LEFT JOIN os_orders o ON o.venda_controle = CONVERT(v.controle USING utf8mb4)
+         WHERE v.data_venda = ? ${tenantClause} ${where}`,
+        baseParams
+      );
+      total = Number(cnt?.total ?? 0);
 
-  const [rows] = await pool.query<any>(
-    `SELECT v.id, v.controle, v.data_venda,
-            COALESCE(NULLIF(v.vr_total, 0), o.total_amount, 0) as vr_total,
-            v.vr_adicional,
-            v.vr_dinheiro, v.vr_cheque, v.vr_cartao, v.vr_carne, v.vr_ticket,
-            COALESCE(v.vr_pix, 0) as vr_pix, COALESCE(v.vr_nota, 0) as vr_nota,
-            v.em_aberto, v.parcelas, v.id_cliente,
-            COALESCE(
-              NULLIF(TRIM(o.client_name), ''),
-              NULLIF(TRIM(c.nome_cliente), ''),
-              'Consumidor final'
-            ) as nome_cliente,
-            o.plate as os_plate,
-            o.model as os_model,
-            o.id as os_id
-     FROM mv_vendas v
-     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-     LEFT JOIN os_orders o ON (o.venda_controle = CONVERT(v.controle USING utf8mb4) OR CONVERT(o.venda_controle USING latin1) = v.controle)
-     WHERE v.data_venda = ? ${tenantClause} ${where}
-     GROUP BY v.id
-     ORDER BY v.id DESC LIMIT ? OFFSET ?`,
-    [...baseParams, limit, offset]
-  );
+      [rows] = await pool.query<any>(
+        `SELECT v.id, v.controle, v.data_venda,
+                COALESCE(NULLIF(v.vr_total, 0), o.total_amount, 0) as vr_total,
+                v.vr_adicional,
+                v.vr_dinheiro, v.vr_cheque, v.vr_cartao, v.vr_carne, v.vr_ticket,
+                COALESCE(v.vr_pix, 0) as vr_pix, COALESCE(v.vr_nota, 0) as vr_nota,
+                v.em_aberto, v.parcelas, v.id_cliente,
+                COALESCE(
+                  NULLIF(TRIM(o.client_name), ''),
+                  NULLIF(TRIM(c.nome_cliente), ''),
+                  'Consumidor final'
+                ) as nome_cliente,
+                o.plate as os_plate,
+                o.model as os_model,
+                o.id as os_id
+         FROM mv_vendas v
+         LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+         LEFT JOIN os_orders o ON o.venda_controle = CONVERT(v.controle USING utf8mb4)
+         WHERE v.data_venda = ? ${tenantClause} ${where}
+         ORDER BY v.id DESC LIMIT ? OFFSET ?`,
+        [...baseParams, limit, offset]
+      );
+    } else {
+      const baseParams = [data, ...tenantParams];
 
-  res.json({
-    data: rows.map((r: any) => ({
-      ...r,
-      hora_venda: String(r.controle).slice(8, 10) + ':' + String(r.controle).slice(10, 12),
-      vr_total: Number(r.vr_total),
-      vr_adicional: Number(r.vr_adicional),
-      vr_dinheiro: Number(r.vr_dinheiro),
-      vr_cheque: Number(r.vr_cheque),
-      vr_cartao: Number(r.vr_cartao),
-      vr_carne: Number(r.vr_carne),
-      vr_ticket: Number(r.vr_ticket),
-      vr_pix: Number(r.vr_pix ?? 0),
-      vr_nota: Number(r.vr_nota ?? 0),
-      nome_cliente: r.nome_cliente ? stripPlate(r.nome_cliente) || r.nome_cliente : 'Consumidor final',
-    })),
-    total: Number(total),
-    pages: Math.ceil(total / limit),
-  });
+      const [[cnt]] = await pool.query<any>(
+        `SELECT COUNT(*) as total FROM mv_vendas v
+         WHERE v.data_venda = ? ${tenantClause}`,
+        baseParams
+      );
+      total = Number(cnt?.total ?? 0);
+
+      [rows] = await pool.query<any>(
+        `SELECT v.id, v.controle, v.data_venda,
+                COALESCE(NULLIF(v.vr_total, 0), o.total_amount, 0) as vr_total,
+                v.vr_adicional,
+                v.vr_dinheiro, v.vr_cheque, v.vr_cartao, v.vr_carne, v.vr_ticket,
+                COALESCE(v.vr_pix, 0) as vr_pix, COALESCE(v.vr_nota, 0) as vr_nota,
+                v.em_aberto, v.parcelas, v.id_cliente,
+                COALESCE(
+                  NULLIF(TRIM(o.client_name), ''),
+                  NULLIF(TRIM(c.nome_cliente), ''),
+                  'Consumidor final'
+                ) as nome_cliente,
+                o.plate as os_plate,
+                o.model as os_model,
+                o.id as os_id
+         FROM mv_vendas v
+         LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+         LEFT JOIN os_orders o ON o.venda_controle = CONVERT(v.controle USING utf8mb4)
+         WHERE v.data_venda = ? ${tenantClause}
+         ORDER BY v.id DESC LIMIT ? OFFSET ?`,
+        [...baseParams, limit, offset]
+      );
+    }
+
+    res.json({
+      data: rows.map((r: any) => ({
+        ...r,
+        hora_venda: String(r.controle).slice(8, 10) + ':' + String(r.controle).slice(10, 12),
+        vr_total: Number(r.vr_total),
+        vr_adicional: Number(r.vr_adicional),
+        vr_dinheiro: Number(r.vr_dinheiro),
+        vr_cheque: Number(r.vr_cheque),
+        vr_cartao: Number(r.vr_cartao),
+        vr_carne: Number(r.vr_carne),
+        vr_ticket: Number(r.vr_ticket),
+        vr_pix: Number(r.vr_pix ?? 0),
+        vr_nota: Number(r.vr_nota ?? 0),
+        nome_cliente: r.nome_cliente ? stripPlate(r.nome_cliente) || r.nome_cliente : 'Consumidor final',
+      })),
+      total: Number(total),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err: any) {
+    console.error('Erro em GET /vendas:', err);
+    res.status(500).json({ message: 'Erro ao carregar vendas', error: err?.message, data: [], total: 0, pages: 0 });
+  }
 });
 
 router.get('/vendas/:controle', async (req, res) => {
-  const [[venda]] = await pool.query<any>(
-    `SELECT v.*,
-            COALESCE(
-              NULLIF(TRIM(o.client_name), ''),
-              NULLIF(TRIM(c.nome_cliente), ''),
-              'Consumidor final'
-            ) as nome_cliente,
-            COALESCE(NULLIF(TRIM(c.cpf_cnpj), ''), o.client_document, '') as cpf_cnpj,
-            COALESCE(NULLIF(TRIM(c.telefone), ''), NULLIF(TRIM(c.celular), ''), o.client_phone, '') as telefone,
-            COALESCE(NULLIF(TRIM(c.celular), ''), o.client_phone, '') as celular,
-            o.plate as os_plate,
-            o.model as os_model,
-            o.id as os_id,
-            o.total_amount as os_total_amount
-     FROM mv_vendas v
-     LEFT JOIN cad_clientes c ON c.id = v.id_cliente
-     LEFT JOIN os_orders o ON (o.venda_controle = CONVERT(v.controle USING utf8mb4) OR CONVERT(o.venda_controle USING latin1) = v.controle)
-     WHERE v.controle = ?
-     LIMIT 1`,
-    [req.params.controle]
-  );
-  if (!venda) { res.status(404).json({ message: 'Venda não encontrada' }); return; }
-
-  // 1. Busca itens registrados no movimento da venda (LEFT JOIN para não descartar itens sem cad_produtos ou de mão de obra)
-  const [movItens] = await pool.query<any>(
-    `SELECT m.id, m.id_produto,
-            COALESCE(NULLIF(TRIM(p.nome_produto), ''), CONCAT('Item #', m.id_produto)) as nome_produto,
-            m.valor, m.quant, m.vr_total
-     FROM mv_vendas_movimento m
-     LEFT JOIN cad_produtos p ON p.id = m.id_produto
-     WHERE m.controle = ? ORDER BY m.id`,
-    [req.params.controle]
-  );
-
-  let finalItens = movItens ? [...movItens] : [];
-
-  // 2. Se a venda veio de uma OS vinculada, busca os itens da OS para enriquecer nomes de serviços ou restaurar itens
-  let osItems: any[] = [];
-  if (venda.os_id) {
-    const [oiRows] = await pool.query<any>(
-      `SELECT oi.id, oi.product_id, oi.code, oi.description, oi.type,
-              oi.quantity, oi.unit_price, oi.labor_price, oi.total
-       FROM os_order_items oi
-       WHERE oi.order_id = ?
-       ORDER BY oi.created_at`,
-      [venda.os_id]
+  try {
+    const [[venda]] = await pool.query<any>(
+      `SELECT v.*,
+              COALESCE(
+                NULLIF(TRIM(o.client_name), ''),
+                NULLIF(TRIM(c.nome_cliente), ''),
+                'Consumidor final'
+              ) as nome_cliente,
+              COALESCE(NULLIF(TRIM(c.cpf_cnpj), ''), o.client_document, '') as cpf_cnpj,
+              COALESCE(NULLIF(TRIM(c.telefone), ''), NULLIF(TRIM(c.celular), ''), o.client_phone, '') as telefone,
+              COALESCE(NULLIF(TRIM(c.celular), ''), o.client_phone, '') as celular,
+              o.plate as os_plate,
+              o.model as os_model,
+              o.id as os_id,
+              o.total_amount as os_total_amount
+       FROM mv_vendas v
+       LEFT JOIN cad_clientes c ON c.id = v.id_cliente
+       LEFT JOIN os_orders o ON o.venda_controle = CONVERT(v.controle USING utf8mb4)
+       WHERE v.controle = ?
+       LIMIT 1`,
+      [req.params.controle]
     );
-    osItems = oiRows || [];
-  }
+    if (!venda) { res.status(404).json({ message: 'Venda não encontrada' }); return; }
 
-  // Se o movimento da venda não tiver itens mas a OS tiver itens
-  if (finalItens.length === 0 && osItems.length > 0) {
-    finalItens = osItems.map((oi: any) => ({
-      id: oi.id,
-      id_produto: Number(oi.product_id || 0),
-      nome_produto: oi.description || (oi.code ? `Item ${oi.code}` : 'Item de OS'),
-      valor: Number(oi.unit_price),
-      quant: Number(oi.quantity),
-      vr_total: Number(oi.total),
-    }));
-  } else if (osItems.length > 0) {
-    // Enriquece itens cujo nome_produto ficou genérico ("Item #0" ou "Item #...")
-    finalItens = finalItens.map((it: any) => {
-      if (!it.nome_produto || it.nome_produto.startsWith('Item #')) {
-        const match = osItems.find(
-          (oi: any) =>
-            (it.id_produto > 0 && Number(oi.product_id) === Number(it.id_produto)) ||
-            Math.abs(Number(oi.total) - Number(it.vr_total)) < 0.01 ||
-            Math.abs(Number(oi.unit_price) - Number(it.valor)) < 0.01
-        );
-        if (match?.description) {
-          return { ...it, nome_produto: match.description };
+    // 1. Busca itens registrados no movimento da venda (LEFT JOIN para não descartar itens sem cad_produtos ou de mão de obra)
+    const [movItens] = await pool.query<any>(
+      `SELECT m.id, m.id_produto,
+              COALESCE(NULLIF(TRIM(p.nome_produto), ''), CONCAT('Item #', m.id_produto)) as nome_produto,
+              m.valor, m.quant, m.vr_total
+       FROM mv_vendas_movimento m
+       LEFT JOIN cad_produtos p ON p.id = m.id_produto
+       WHERE m.controle = ? ORDER BY m.id`,
+      [req.params.controle]
+    );
+
+    let finalItens = movItens ? [...movItens] : [];
+
+    // 2. Se a venda veio de uma OS vinculada, busca os itens da OS para enriquecer nomes de serviços ou restaurar itens
+    let osItems: any[] = [];
+    if (venda.os_id) {
+      const [oiRows] = await pool.query<any>(
+        `SELECT oi.id, oi.product_id, oi.code, oi.description, oi.type,
+                oi.quantity, oi.unit_price, oi.labor_price, oi.total
+         FROM os_order_items oi
+         WHERE oi.order_id = ?
+         ORDER BY oi.created_at`,
+        [venda.os_id]
+      );
+      osItems = oiRows || [];
+    }
+
+    // Se o movimento da venda não tiver itens mas a OS tiver itens
+    if (finalItens.length === 0 && osItems.length > 0) {
+      finalItens = osItems.map((oi: any) => ({
+        id: oi.id,
+        id_produto: Number(oi.product_id || 0),
+        nome_produto: oi.description || (oi.code ? `Item ${oi.code}` : 'Item de OS'),
+        valor: Number(oi.unit_price),
+        quant: Number(oi.quantity),
+        vr_total: Number(oi.total),
+      }));
+    } else if (osItems.length > 0) {
+      // Enriquece itens cujo nome_produto ficou genérico ("Item #0" ou "Item #...")
+      finalItens = finalItens.map((it: any) => {
+        if (!it.nome_produto || it.nome_produto.startsWith('Item #')) {
+          const match = osItems.find(
+            (oi: any) =>
+              (it.id_produto > 0 && Number(oi.product_id) === Number(it.id_produto)) ||
+              Math.abs(Number(oi.total) - Number(it.vr_total)) < 0.01 ||
+              Math.abs(Number(oi.unit_price) - Number(it.valor)) < 0.01
+          );
+          if (match?.description) {
+            return { ...it, nome_produto: match.description };
+          }
         }
-      }
-      return it;
-    });
-  }
+        return it;
+      });
+    }
 
-  // 3. Fallback para venda avulsa direta sem itens
-  const totalVal = Number(venda.vr_total > 0 ? venda.vr_total : (venda.os_total_amount || 0));
-  if (finalItens.length === 0 && totalVal > 0) {
-    finalItens = [{
-      id: 0,
-      id_produto: 0,
-      nome_produto: 'LANÇAMENTO AVULSO / PDV',
-      valor: totalVal,
-      quant: 1,
+    // 3. Fallback para venda avulsa direta sem itens
+    const totalVal = Number(venda.vr_total > 0 ? venda.vr_total : (venda.os_total_amount || 0));
+    if (finalItens.length === 0 && totalVal > 0) {
+      finalItens = [{
+        id: 0,
+        id_produto: 0,
+        nome_produto: 'LANÇAMENTO AVULSO / PDV',
+        valor: totalVal,
+        quant: 1,
+        vr_total: totalVal,
+      }];
+    }
+
+    const cleanNomeCliente = venda.nome_cliente ? stripPlate(venda.nome_cliente) || venda.nome_cliente : 'Consumidor final';
+
+    res.json({
+      ...venda,
+      nome_cliente: cleanNomeCliente,
+      hora_venda: String(venda.controle).slice(8, 10) + ':' + String(venda.controle).slice(10, 12),
       vr_total: totalVal,
-    }];
+      vr_pix: Number(venda.vr_pix ?? 0),
+      vr_nota: Number(venda.vr_nota ?? 0),
+      itens: finalItens.map((i: any) => ({
+        ...i,
+        valor: Number(i.valor),
+        quant: Number(i.quant),
+        vr_total: Number(i.vr_total),
+      })),
+    });
+  } catch (err: any) {
+    console.error('Erro em GET /vendas/:controle:', err);
+    res.status(500).json({ message: 'Erro ao carregar detalhes da venda' });
   }
-
-  const cleanNomeCliente = venda.nome_cliente ? stripPlate(venda.nome_cliente) || venda.nome_cliente : 'Consumidor final';
-
-  res.json({
-    ...venda,
-    nome_cliente: cleanNomeCliente,
-    hora_venda: String(venda.controle).slice(8, 10) + ':' + String(venda.controle).slice(10, 12),
-    vr_total: totalVal,
-    vr_pix: Number(venda.vr_pix ?? 0),
-    vr_nota: Number(venda.vr_nota ?? 0),
-    itens: finalItens.map((i: any) => ({
-      ...i,
-      valor: Number(i.valor),
-      quant: Number(i.quant),
-      vr_total: Number(i.vr_total),
-    })),
-  });
 });
 
 router.post('/vendas', async (req, res) => {

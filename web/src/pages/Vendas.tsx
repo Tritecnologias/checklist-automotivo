@@ -16,7 +16,7 @@ export default function Vendas() {
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Venda | null>(null)
 
-  const { data: res, isLoading } = useQuery({
+  const { data: res, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['vendas', tid, data, search, page],
     queryFn: () => erpApi.vendas({ data, search, page }),
   })
@@ -59,7 +59,20 @@ export default function Vendas() {
 
         <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
           {isLoading ? (
-            <div className="py-12 text-center text-slate-500 text-sm">Carregando…</div>
+            <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-500 text-sm">
+              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <span>Carregando vendas…</span>
+            </div>
+          ) : isError ? (
+            <div className="py-12 text-center text-red-400 text-sm space-y-2">
+              <p>Erro ao carregar vendas. {(error as any)?.message || 'Tente novamente.'}</p>
+              <button
+                onClick={() => refetch()}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-white rounded-lg transition-colors border border-slate-700"
+              >
+                Tentar novamente
+              </button>
+            </div>
           ) : vendas.length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-sm">Nenhuma venda encontrada</div>
           ) : (
