@@ -37,7 +37,8 @@ export default function Login() {
         tenants: Tenant[]
       }
 
-      const destination = user.role === 'operator' ? '/' : '/erp'
+      const hasErpAccess = user.role !== 'operator' || Boolean(user.permissions?.some((p: string) => p !== 'os_orders' && p !== 'quotes'))
+      const destination = hasErpAccess ? '/erp' : '/'
 
       // Owner sem nenhum tenant cadastrado: entra direto no ERP sem filtro de loja
       if (user.role === 'owner' && tenants.length === 0) {
@@ -68,7 +69,8 @@ export default function Login() {
     if (!pendingToken || !pendingUser) return
     login(pendingToken, pendingUser, pendingTenants)
     localStorage.setItem('erp_current_tenant', JSON.stringify(tenant))
-    navigate(pendingUser.role === 'operator' ? '/' : '/erp')
+    const hasErpAccess = pendingUser.role !== 'operator' || Boolean(pendingUser.permissions?.some((p: string) => p !== 'os_orders' && p !== 'quotes'))
+    navigate(hasErpAccess ? '/erp' : '/')
   }
 
   // ── Seletor de tenant ────────────────────────────────────────────────────────

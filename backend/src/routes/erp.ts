@@ -49,7 +49,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (authHeader?.startsWith('Bearer ')) {
     try {
       const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as JwtPayload;
-      if (['owner', 'manager', 'operator', 'caixa'].includes(payload.role)) {
+      if (payload && payload.userId) {
         req.user = payload;
         next();
         return;

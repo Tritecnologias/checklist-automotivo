@@ -180,7 +180,20 @@ router.get('/me', requireAuth, async (req, res) => {
     const [tenants] = await pool.query<any>(tenantsQuery, tenantsParams);
     const permissions = await getUserPermissions(user.id, user.role);
 
+    const newPayload: JwtPayload = {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      tenantId: req.user!.tenantId,
+      tenantIds: req.user!.tenantIds,
+      mecanicoId,
+      mecanicoNome,
+      permissions,
+    };
+    const token = jwt.sign(newPayload, JWT_SECRET, { expiresIn: '7d' });
+
     res.json({
+      token,
       user: {
         id: user.id,
         nome: user.nome,

@@ -24,8 +24,23 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction) {
       const perms = await getUserPermissions(payload.userId, payload.role);
       const path = req.path;
       let needed = 'produtos';
-      if (path.includes('product-types')) needed = 'config_tipos';
-      else if (path.includes('instalacoes')) needed = 'config_instalacoes';
+      if (path.includes('clients')) {
+        needed = 'clientes';
+      } else if (path.includes('product-types')) {
+        // Leitura de tipos para seleção em produtos é liberada com 'produtos' ou 'config_tipos'
+        if (req.method === 'GET' && userHasPermission(perms, 'produtos', payload.role)) {
+          needed = 'produtos';
+        } else {
+          needed = 'config_tipos';
+        }
+      } else if (path.includes('instalacoes')) {
+        // Leitura de instalações ou vínculo ao produto é liberada com 'produtos' ou 'config_instalacoes'
+        if ((req.method === 'GET' || path.includes('/products/')) && userHasPermission(perms, 'produtos', payload.role)) {
+          needed = 'produtos';
+        } else {
+          needed = 'config_instalacoes';
+        }
+      }
 
       if (userHasPermission(perms, needed, payload.role)) {
         next();

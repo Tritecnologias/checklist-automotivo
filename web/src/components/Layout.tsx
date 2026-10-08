@@ -2,24 +2,60 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { LayoutDashboard, ClipboardList, FileText, Store, Shield, LogOut, Wrench, type LucideIcon } from 'lucide-react'
 
-const nav: { to: string; label: string; icon: LucideIcon; end?: boolean; roles?: string[] }[] = [
+type NavItem = {
+  to: string
+  label: string
+  icon: LucideIcon
+  end?: boolean
+  check?: (ctx: { user: any; hasPermission: (p: string) => boolean; isOwner: boolean }) => boolean
+}
+
+const nav: NavItem[] = [
   { to: '/',             label: 'Dashboard',         icon: LayoutDashboard, end: true },
-  { to: '/orders',       label: 'Ordens de Serviço', icon: ClipboardList,   end: false },
-  { to: '/quotes',       label: 'Orçamentos',        icon: FileText,        end: false },
-  { to: '/erp',          label: 'ERP',               icon: Store,           end: false, roles: ['owner', 'manager', 'caixa'] },
-  { to: '/erp/produtos', label: 'Admin',             icon: Shield,          end: false, roles: ['owner', 'manager'] },
+  {
+    to: '/orders',
+    label: 'Ordens de Serviço',
+    icon: ClipboardList,
+    end: false,
+    check: ({ user, hasPermission }) =>
+      !user ? false : user.role === 'owner' || user.role === 'manager' || user.role === 'operator' || user.role === 'mecanico' || hasPermission('os_orders')
+  },
+  {
+    to: '/quotes',
+    label: 'Orçamentos',
+    icon: FileText,
+    end: false,
+    check: ({ user, hasPermission }) =>
+      !user ? false : user.role === 'owner' || user.role === 'manager' || user.role === 'operator' || hasPermission('quotes')
+  },
+  {
+    to: '/erp',
+    label: 'ERP',
+    icon: Store,
+    end: false,
+    check: ({ user, hasPermission }) =>
+      !user ? false : user.role === 'owner' || user.role === 'manager' || user.role === 'caixa' || Boolean(user.permissions?.some((p: string) => p !== 'os_orders' && p !== 'quotes')) || hasPermission('pdv') || hasPermission('produtos') || hasPermission('clientes')
+  },
+  {
+    to: '/erp/produtos',
+    label: 'Produtos',
+    icon: Shield,
+    end: false,
+    check: ({ user, hasPermission }) =>
+      !user ? false : user.role === 'owner' || user.role === 'manager' || hasPermission('produtos')
+  },
 ]
 
 export default function Layout() {
   const navigate = useNavigate()
-  const { user, currentTenant, logout } = useAuth()
+  const { user, currentTenant, logout, hasPermission, isOwner } = useAuth()
 
   function handleLogout() {
     logout()
     navigate('/login')
   }
 
-  const visibleNav = nav.filter(item => !item.roles || item.roles.includes(user?.role ?? ''))
+  const visibleNav = nav.filter(item => !item.check || item.check({ user, hasPermission, isOwner }))
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">

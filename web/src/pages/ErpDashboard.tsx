@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { erpApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -6,8 +6,24 @@ import { useAuth } from '../contexts/AuthContext'
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export default function ErpDashboard() {
-  const { currentTenant } = useAuth()
+  const { currentTenant, hasPermission, isOwner } = useAuth()
   const tid = currentTenant?.id ?? null
+
+  // Se o usuário não tem permissão de dashboard financeiro, redireciona para sua primeira tela permitida
+  if (!isOwner && !hasPermission('dashboard')) {
+    if (hasPermission('pdv')) return <Navigate to="/erp/pdv" replace />
+    if (hasPermission('caixa')) return <Navigate to="/erp/caixa" replace />
+    if (hasPermission('produtos')) return <Navigate to="/erp/produtos" replace />
+    if (hasPermission('clientes')) return <Navigate to="/erp/clientes" replace />
+    if (hasPermission('estoque')) return <Navigate to="/erp/estoque" replace />
+    if (hasPermission('vendas')) return <Navigate to="/erp/vendas" replace />
+    if (hasPermission('oficina')) return <Navigate to="/erp/oficina" replace />
+    if (hasPermission('contas_receber')) return <Navigate to="/erp/contas" replace />
+    if (hasPermission('contas_pagar')) return <Navigate to="/erp/contas-pagar" replace />
+    if (hasPermission('crm')) return <Navigate to="/erp/crm" replace />
+    if (hasPermission('dre')) return <Navigate to="/erp/dre" replace />
+    return <Navigate to="/" replace />
+  }
 
   const { data, isLoading } = useQuery({
     queryKey: ['erp-dashboard', tid],
