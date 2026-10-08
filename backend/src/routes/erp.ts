@@ -2592,155 +2592,246 @@ function getClienteTenantId(req: Request): number | null {
 }
 
 router.get('/clientes', requireManagerUp, async (req, res) => {
-  const page   = Math.max(1, Number(req.query.page ?? 1));
-  const limit  = 30;
-  const offset = (page - 1) * limit;
-  const search = String(req.query.search ?? '').trim();
-  const status = String(req.query.status ?? 'ativos');
+  try {
+    const page   = Math.max(1, Number(req.query.page ?? 1));
+    const limit  = 30;
+    const offset = (page - 1) * limit;
+    const search = String(req.query.search ?? '').trim();
+    const status = String(req.query.status ?? 'ativos');
 
-  const filterTenantId = getClienteTenantId(req);
-  let tenantJoin = '';
-  const baseParams: any[] = [];
+    const filterTenantId = getClienteTenantId(req);
+    let tenantJoin = '';
+    const tenantParams: any[] = [];
 
-  const whereParts: string[] = [];
-  if (status === 'inativos') {
-    whereParts.push('c.inativo = 1');
-  } else if (status === 'todos') {
-    // sem filtro de inativo
-  } else {
-    whereParts.push('c.inativo = 0');
-  }
-
-  if (filterTenantId !== null) {
-    if (filterTenantId === 1) {
-      tenantJoin = 'LEFT JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id';
-      whereParts.push('(_ctf.tenant_id = 1 OR _ctf.tenant_id IS NULL)');
+    const whereParts: string[] = [];
+    if (status === 'inativos') {
+      whereParts.push('c.inativo = 1');
+    } else if (status === 'todos') {
+      // sem filtro de inativo
     } else {
-      tenantJoin = 'INNER JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id AND _ctf.tenant_id = ?';
-      baseParams.push(filterTenantId);
+      whereParts.push('c.inativo = 0');
     }
-  }
 
-  if (search.length >= 2) {
-    const cleanPlateSearch = search.replace(/[-\s]/g, '').toUpperCase();
-    whereParts.push(`(
-      c.nome_cliente LIKE ?
-      OR c.telefone LIKE ?
-      OR c.celular LIKE ?
-      OR c.cpf_cnpj LIKE ?
-      OR c.inf_adicional LIKE ?
-      OR c.email LIKE ?
-      OR EXISTS (
-        SELECT 1 FROM os_orders _o
-        WHERE (_o.client_id = c.id
-               OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND _o.client_document = c.cpf_cnpj)
-               OR (c.telefone IS NOT NULL AND c.telefone != '' AND _o.client_phone = c.telefone)
-               OR (c.celular IS NOT NULL AND c.celular != '' AND _o.client_phone = c.celular)
-               OR (c.nome_cliente LIKE CONCAT('%', REPLACE(_o.plate, '-', ''), '%')))
-          AND (
-            REPLACE(REPLACE(UPPER(_o.plate), '-', ''), ' ', '') LIKE ?
-            OR UPPER(_o.model) LIKE ?
-            OR UPPER(_o.client_name) LIKE ?
-          )
-      )
-    )`);
-    baseParams.push(
-      `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`,
-      `%${search}%`, `%${search}%`,
-      `%${cleanPlateSearch}%`, `%${search.toUpperCase()}%`, `%${search.toUpperCase()}%`
+    if (filterTenantId !== null) {
+      if (filterTenantId === 1) {
+        tenantJoin = 'LEFT JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id';
+        whereParts.push('(_ctf.tenant_id = 1 OR _ctf.tenant_id IS NULL)');
+      } else {
+        tenantJoin = 'INNER JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id AND _ctf.tenant_id = ?';
+        tenantParams.push(filterTenantId);
+      }
+    }
+
+    const searchParams: any[] = [];
+    if (search.length >= 2) {
+      const cleanPlate = search.replace(/[-\s]/g, '').toUpperCase();
+      let matchedClientIds: number[] = [];
+      let matchedDocs: string[] = [];
+
+      try {
+        const [osHits] = await pool.query<any>(
+          `SELECT DISTINCT client_id, client_document FROM os_orders
+           WHERE (REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') = ?
+                  OR UPPER(plate) LIKE ?
+                  OR UPPER(model) LIKE ?)
+           LIMIT 100`,
+          [cleanPlate, `%${cleanPlate}%`, `%${search.toUpperCase()}%`]
+        );
+        matchedClientIds = (osHits as any[]).map(h => Number(h.client_id)).filter(id => id > 0);
+        matchedDocs = (osHits as any[]).map(h => String(h.client_document || '').trim()).filter(d => d.length >= 5);
+      } catch (err) {
+        console.error('Erro ao buscar placa em os_orders:', err);
+      }
+
+      const orClauses: string[] = [
+        'c.nome_cliente LIKE ?',
+        'c.telefone LIKE ?',
+        'c.celular LIKE ?',
+        'c.cpf_cnpj LIKE ?',
+        'c.inf_adicional LIKE ?',
+        'c.email LIKE ?',
+      ];
+      searchParams.push(
+        `%${search}%`, `%${search}%`, `%${search}%`,
+        `%${search}%`, `%${search}%`, `%${search}%`
+      );
+
+      if (matchedClientIds.length > 0) {
+        orClauses.push(`c.id IN (${matchedClientIds.map(() => '?').join(',')})`);
+        searchParams.push(...matchedClientIds);
+      }
+      if (matchedDocs.length > 0) {
+        orClauses.push(`c.cpf_cnpj IN (${matchedDocs.map(() => '?').join(',')})`);
+        searchParams.push(...matchedDocs);
+      }
+
+      whereParts.push(`(${orClauses.join(' OR ')})`);
+    }
+
+    const where = whereParts.length > 0 ? 'WHERE ' + whereParts.join(' AND ') : '';
+    const baseParams = [...tenantParams, ...searchParams];
+
+    const [[{ total }]] = await pool.query<any>(
+      `SELECT COUNT(DISTINCT c.id) as total FROM cad_clientes c ${tenantJoin} ${where}`,
+      baseParams
     );
+
+    const [rows] = await pool.query<any>(
+      `SELECT c.id, c.nome_cliente, c.telefone, c.celular, c.inf_adicional,
+              c.cpf_cnpj, c.email, c.cep, c.endereco, c.bairro, c.cidade, c.uf, c.inativo
+       FROM cad_clientes c
+       ${tenantJoin}
+       ${where}
+       ORDER BY c.id DESC
+       LIMIT ? OFFSET ?`,
+      [...baseParams, limit, offset]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.json({
+        data: [],
+        total: Number(total || 0),
+        pages: Math.ceil(Number(total || 0) / limit),
+      });
+    }
+
+    const clientIds: number[] = rows.map((r: any) => Number(r.id));
+    const clientDocs: string[] = rows.map((r: any) => String(r.cpf_cnpj || '').trim()).filter((d: string) => d.length >= 8);
+
+    // Consultas em lote ultra-rápidas para as 30 linhas retornadas
+    const [lojasRows, vendasRows, osRows] = await Promise.all([
+      pool.query<any>(
+        `SELECT ct.cliente_id, t.nome
+         FROM cliente_tenant ct
+         JOIN tenants t ON t.id = ct.tenant_id
+         WHERE ct.cliente_id IN (?)
+         ORDER BY t.nome`,
+        [clientIds]
+      ).then(([r]) => r as any[]).catch(() => []),
+
+      pool.query<any>(
+        `SELECT v.id_cliente,
+                MAX(v.data_venda) as ultima_compra,
+                COALESCE(SUM(v.vr_total), 0) as total_gasto,
+                COUNT(v.id) as qtd_compras
+         FROM mv_vendas v
+         WHERE v.id_cliente IN (?)
+         GROUP BY v.id_cliente`,
+        [clientIds]
+      ).then(([r]) => r as any[]).catch(() => []),
+
+      pool.query<any>(
+        `SELECT o.id, o.client_id, o.client_document, o.plate, o.model, o.total_amount, o.created_at, o.venda_controle
+         FROM os_orders o
+         WHERE o.client_id IN (?)
+            ${clientDocs.length > 0 ? 'OR (o.client_document IN (?) AND o.client_document IS NOT NULL AND o.client_document != "")' : ''}
+         ORDER BY o.created_at DESC`,
+        clientDocs.length > 0 ? [clientIds, clientDocs] : [clientIds]
+      ).then(([r]) => r as any[]).catch(() => []),
+    ]);
+
+    // Mapeamento em memória
+    const lojasMap = new Map<number, string[]>();
+    for (const lr of lojasRows) {
+      const cid = Number(lr.cliente_id);
+      if (!lojasMap.has(cid)) lojasMap.set(cid, []);
+      lojasMap.get(cid)!.push(lr.nome);
+    }
+
+    const vendasMap = new Map<number, { ultima_compra: string | null; total_gasto: number; qtd_compras: number }>();
+    for (const vr of vendasRows) {
+      const cid = Number(vr.id_cliente);
+      vendasMap.set(cid, {
+        ultima_compra: vr.ultima_compra ? String(vr.ultima_compra) : null,
+        total_gasto: Number(vr.total_gasto || 0),
+        qtd_compras: Number(vr.qtd_compras || 0),
+      });
+    }
+
+    const osMap = new Map<number, any[]>();
+    for (const osItem of osRows) {
+      const cid = Number(osItem.client_id);
+      if (cid && clientIds.includes(cid)) {
+        if (!osMap.has(cid)) osMap.set(cid, []);
+        osMap.get(cid)!.push(osItem);
+      } else if (osItem.client_document) {
+        const found = rows.find((r: any) => r.cpf_cnpj && String(r.cpf_cnpj).trim() === String(osItem.client_document).trim());
+        if (found) {
+          const fid = Number(found.id);
+          if (!osMap.has(fid)) osMap.set(fid, []);
+          osMap.get(fid)!.push(osItem);
+        }
+      }
+    }
+
+    const data = rows.map((r: any) => {
+      const cid = Number(r.id);
+      const lojaNomes = lojasMap.get(cid);
+      const venda = vendasMap.get(cid) || { ultima_compra: null, total_gasto: 0, qtd_compras: 0 };
+      const clientOrders = osMap.get(cid) || [];
+
+      let osUltimaPlaca: string | null = null;
+      let osUltimoModelo: string | null = null;
+      let osUltimaData: string | null = null;
+      let osTotalGasto = 0;
+      let osQtd = 0;
+
+      for (const o of clientOrders) {
+        if (!osUltimaPlaca && o.plate) {
+          osUltimaPlaca = String(o.plate).toUpperCase().replace(/[-\s]/g, '');
+        }
+        if (!osUltimoModelo && o.model) {
+          osUltimoModelo = String(o.model).trim();
+        }
+        if (!osUltimaData && o.created_at) {
+          try {
+            osUltimaData = new Date(o.created_at).toISOString().split('T')[0];
+          } catch {}
+        }
+        osTotalGasto += Number(o.total_amount || 0);
+        osQtd += 1;
+      }
+
+      // Maior data de compra
+      let finalUltimaCompra = venda.ultima_compra;
+      if (osUltimaData) {
+        if (!finalUltimaCompra || osUltimaData > finalUltimaCompra) {
+          finalUltimaCompra = osUltimaData;
+        }
+      }
+
+      return {
+        id: r.id,
+        nome: stripPlate(r.nome_cliente),
+        nome_original: r.nome_cliente,
+        placa: extractPlate(r.nome_cliente) || osUltimaPlaca || null,
+        modelo: r.inf_adicional || osUltimoModelo || null,
+        telefone: r.telefone || r.celular || null,
+        celular: r.celular || null,
+        cpf_cnpj: r.cpf_cnpj || null,
+        email: r.email || null,
+        cep: r.cep || null,
+        endereco: r.endereco || null,
+        bairro: r.bairro || null,
+        cidade: r.cidade || null,
+        uf: r.uf || null,
+        inativo: Number(r.inativo || 0),
+        ultima_compra: finalUltimaCompra && finalUltimaCompra !== '1970-01-01' ? finalUltimaCompra : null,
+        total_gasto: Number((venda.total_gasto + osTotalGasto).toFixed(2)),
+        qtd_compras: Number(venda.qtd_compras + osQtd),
+        lojas: lojaNomes && lojaNomes.length > 0 ? lojaNomes.join(', ') : null,
+      };
+    });
+
+    res.json({
+      data,
+      total: Number(total || 0),
+      pages: Math.ceil(Number(total || 0) / limit),
+    });
+  } catch (err: any) {
+    console.error('Erro em GET /clientes:', err);
+    res.status(500).json({ message: 'Erro ao carregar clientes', error: err?.message });
   }
-
-  const where = whereParts.length > 0 ? 'WHERE ' + whereParts.join(' AND ') : '';
-
-  const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(DISTINCT c.id) as total FROM cad_clientes c ${tenantJoin} ${where}`,
-    baseParams
-  );
-
-  const [rows] = await pool.query<any>(
-    `SELECT c.id, c.nome_cliente, c.telefone, c.celular, c.inf_adicional,
-            c.cpf_cnpj, c.email, c.cep, c.endereco, c.bairro, c.cidade, c.uf, c.inativo,
-            GREATEST(
-              COALESCE(MAX(v.data_venda), '1970-01-01'),
-              COALESCE((
-                SELECT MAX(DATE(o.created_at)) FROM os_orders o
-                WHERE o.client_id = c.id
-                   OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
-                   OR (o.plate IS NOT NULL AND o.plate != '' AND c.nome_cliente LIKE CONCAT('%', REPLACE(o.plate, '-', ''), '%'))
-              ), '1970-01-01')
-            ) as ultima_compra,
-            (
-              COALESCE(SUM(v.vr_total), 0) +
-              COALESCE((
-                SELECT SUM(o.total_amount) FROM os_orders o
-                WHERE (o.client_id = c.id
-                   OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
-                   OR (o.plate IS NOT NULL AND o.plate != '' AND c.nome_cliente LIKE CONCAT('%', REPLACE(o.plate, '-', ''), '%')))
-                  AND (o.venda_controle IS NULL OR NOT EXISTS (SELECT 1 FROM mv_vendas mv WHERE mv.id_cliente = c.id AND mv.controle = o.venda_controle))
-              ), 0)
-            ) as total_gasto,
-            (
-              COUNT(DISTINCT v.id) +
-              COALESCE((
-                SELECT COUNT(DISTINCT o.id) FROM os_orders o
-                WHERE (o.client_id = c.id
-                   OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
-                   OR (o.plate IS NOT NULL AND o.plate != '' AND c.nome_cliente LIKE CONCAT('%', REPLACE(o.plate, '-', ''), '%')))
-                  AND (o.venda_controle IS NULL OR NOT EXISTS (SELECT 1 FROM mv_vendas mv WHERE mv.id_cliente = c.id AND mv.controle = o.venda_controle))
-              ), 0)
-            ) as qtd_compras,
-            (
-              SELECT o.plate FROM os_orders o
-              WHERE o.client_id = c.id
-                 OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
-              ORDER BY o.created_at DESC LIMIT 1
-            ) as os_ultima_placa,
-            (
-              SELECT o.model FROM os_orders o
-              WHERE o.client_id = c.id
-                 OR (c.cpf_cnpj IS NOT NULL AND c.cpf_cnpj != '' AND o.client_document = c.cpf_cnpj)
-              ORDER BY o.created_at DESC LIMIT 1
-            ) as os_ultimo_modelo,
-            (SELECT GROUP_CONCAT(t2.nome ORDER BY t2.nome SEPARATOR ', ')
-             FROM cliente_tenant ct2
-             JOIN tenants t2 ON t2.id = ct2.tenant_id
-             WHERE ct2.cliente_id = c.id) AS lojas
-     FROM cad_clientes c
-     ${tenantJoin}
-     LEFT JOIN mv_vendas v ON v.id_cliente = c.id
-     ${where}
-     GROUP BY c.id
-     ORDER BY ultima_compra = '1970-01-01', ultima_compra DESC
-     LIMIT ? OFFSET ?`,
-    [...baseParams, limit, offset]
-  );
-
-  res.json({
-    data: rows.map((r: any) => ({
-      id: r.id,
-      nome: stripPlate(r.nome_cliente),
-      nome_original: r.nome_cliente,
-      placa: extractPlate(r.nome_cliente) || (r.os_ultima_placa ? String(r.os_ultima_placa).toUpperCase().replace(/[-\s]/g, '') : null),
-      modelo: r.inf_adicional || r.os_ultimo_modelo || null,
-      telefone: r.telefone || r.celular || null,
-      celular: r.celular || null,
-      cpf_cnpj: r.cpf_cnpj || null,
-      email: r.email || null,
-      cep: r.cep || null,
-      endereco: r.endereco || null,
-      bairro: r.bairro || null,
-      cidade: r.cidade || null,
-      uf: r.uf || null,
-      inativo: Number(r.inativo || 0),
-      ultima_compra: r.ultima_compra && r.ultima_compra !== '1970-01-01' ? r.ultima_compra : null,
-      total_gasto: Number(r.total_gasto || 0),
-      qtd_compras: Number(r.qtd_compras || 0),
-      lojas: r.lojas || null,
-    })),
-    total: Number(total),
-    pages: Math.ceil(Number(total) / limit),
-  });
 });
 
 router.get('/clientes/:id', requireManagerUp, async (req, res) => {

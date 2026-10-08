@@ -261,8 +261,15 @@ export default function Clientes() {
             <span className="ml-3 text-slate-400 text-sm font-medium">Carregando clientes…</span>
           </div>
         ) : isError ? (
-          <div className="text-center py-20 text-red-400">
-            Erro ao carregar lista de clientes. Verifique a conexão com o servidor.
+          <div className="text-center py-20 text-red-400 space-y-3">
+            <p>Erro ao carregar lista de clientes. Verifique a conexão com o servidor.</p>
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 rounded-lg transition-colors border border-slate-700 inline-flex items-center gap-2"
+            >
+              Tentar novamente
+            </button>
           </div>
         ) : clientes.length === 0 ? (
           <div className="text-center py-20 text-slate-500">
