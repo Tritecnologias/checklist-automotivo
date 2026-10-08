@@ -1749,13 +1749,22 @@ router.get('/contas', requireManagerUp, async (req, res) => {
     const [rows] = await pool.query<any>(
       `SELECT l.id, l.controle, l.historico, l.data_vencimento, l.data_confirmacao,
               l.vr_parcela, l.vr_abatimentos, l.status_lancamento,
-              l.id_cliente, COALESCE(c.nome_cliente,'Consumidor') as nome_cliente,
+              l.id_cliente,
+              COALESCE(
+                NULLIF(TRIM(o.client_name), ''),
+                NULLIF(TRIM(c.nome_cliente), ''),
+                'Consumidor Final'
+              ) as nome_cliente,
+              o.plate as os_plate,
+              o.model as os_model,
               l.id_modo_lancamento,
-              m.modo_lancamento
+              m.modo_lancamento,
+              l.id_venda
        FROM cad_lancamentos l
        LEFT JOIN cad_clientes c ON c.id = l.id_cliente
        LEFT JOIN cad_modo_lancamento m ON m.id = l.id_modo_lancamento
        LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
+       LEFT JOIN os_orders o ON CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(l.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
        ${whereList}
        ORDER BY l.id DESC LIMIT ? OFFSET ?`,
       [...paramsList, limit, offset]
@@ -1780,8 +1789,14 @@ router.get('/contas', requireManagerUp, async (req, res) => {
       data: rows.map((r: any) => {
         const modoId = Number(r.id_modo_lancamento);
         const modoNome = FORMAS_MAP[modoId] || r.modo_lancamento || '—';
+        const rawNome = r.nome_cliente || 'Consumidor Final';
+        const cleanNome = stripPlate(rawNome) || rawNome;
+
         return {
           ...r,
+          nome_cliente: cleanNome,
+          os_plate: r.os_plate || extractPlate(r.nome_cliente) || null,
+          os_model: r.os_model || null,
           status: Number(r.status_lancamento),
           data_lancamento: r.data_vencimento,
           valor: Number(r.vr_parcela) - Number(r.vr_abatimentos),
@@ -1814,14 +1829,135 @@ router.get('/contas', requireManagerUp, async (req, res) => {
 });
 
 router.patch('/contas/:id/receber', requireManagerUp, async (req, res) => {
-  const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
-  const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
-  const data_confirmacao = new Date().toISOString().slice(0, 10);
-  await pool.query(
-    `UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=? WHERE id=?${whereTenant}`,
-    [data_confirmacao, req.params.id, ...tenantParams]
-  );
-  res.json({ ok: true });
+  try {
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
+    const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
+    const data_confirmacao = req.body.data_confirmacao || new Date().toISOString().slice(0, 10);
+    const modoId = req.body.id_modo_lancamento ? Number(req.body.id_modo_lancamento) : null;
+
+    let updateSql = 'UPDATE cad_lancamentos SET status_lancamento=1, data_confirmacao=?';
+    const updateParams: any[] = [data_confirmacao];
+    if (modoId) {
+      updateSql += ', id_modo_lancamento=?';
+      updateParams.push(modoId);
+    }
+    updateSql += ` WHERE id=?${whereTenant}`;
+    updateParams.push(req.params.id, ...tenantParams);
+
+    await pool.query(updateSql, updateParams);
+
+    // Se estiver vinculado a uma venda, marca como não em aberto
+    const [[lanc]] = await pool.query<any>(
+      `SELECT id_venda, controle FROM cad_lancamentos WHERE id=?${whereTenant}`,
+      [req.params.id, ...tenantParams]
+    );
+    if (lanc?.id_venda) {
+      await pool.query('UPDATE mv_vendas SET em_aberto=0 WHERE id=?', [lanc.id_venda]);
+    } else if (lanc?.controle) {
+      await pool.query('UPDATE mv_vendas SET em_aberto=0 WHERE controle=?', [lanc.controle]);
+    }
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('PATCH /erp/contas/:id/receber error:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao receber conta' });
+  }
+});
+
+router.patch('/contas/:id/estornar', requireManagerUp, async (req, res) => {
+  try {
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
+    const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
+    await pool.query(
+      `UPDATE cad_lancamentos SET status_lancamento=0, data_confirmacao=NULL WHERE id=?${whereTenant}`,
+      [req.params.id, ...tenantParams]
+    );
+
+    // Se estiver vinculado a uma venda, restaura status em aberto
+    const [[lanc]] = await pool.query<any>(
+      `SELECT id_venda, controle FROM cad_lancamentos WHERE id=?${whereTenant}`,
+      [req.params.id, ...tenantParams]
+    );
+    if (lanc?.id_venda) {
+      await pool.query('UPDATE mv_vendas SET em_aberto=1 WHERE id=?', [lanc.id_venda]);
+    } else if (lanc?.controle) {
+      await pool.query('UPDATE mv_vendas SET em_aberto=1 WHERE controle=?', [lanc.controle]);
+    }
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('PATCH /erp/contas/:id/estornar error:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao estornar conta' });
+  }
+});
+
+router.put('/contas/:id', requireManagerUp, async (req, res) => {
+  try {
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
+    const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
+    const {
+      historico,
+      valor,
+      data_vencimento,
+      id_modo_lancamento,
+    } = req.body;
+
+    await pool.query(
+      `UPDATE cad_lancamentos SET
+         historico = COALESCE(?, historico),
+         vr_parcela = COALESCE(?, vr_parcela),
+         data_vencimento = COALESCE(?, data_vencimento),
+         id_modo_lancamento = COALESCE(?, id_modo_lancamento)
+       WHERE id = ?${whereTenant}`,
+      [
+        historico,
+        valor !== undefined && valor !== null ? Number(valor) : null,
+        data_vencimento,
+        id_modo_lancamento ? Number(id_modo_lancamento) : null,
+        req.params.id,
+        ...tenantParams
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('PUT /erp/contas/:id error:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao atualizar conta' });
+  }
+});
+
+router.delete('/contas/:id', requireManagerUp, async (req, res) => {
+  try {
+    const { condition: tenantCond, params: tenantParams } = getErpTenantCondition(req, 'tenant_id');
+    const whereTenant = tenantCond ? ` AND ${tenantCond}` : '';
+
+    const [[lanc]] = await pool.query<any>(
+      `SELECT id, id_venda, controle FROM cad_lancamentos WHERE id = ?${whereTenant}`,
+      [req.params.id, ...tenantParams]
+    );
+
+    if (!lanc) {
+      return res.status(404).json({ message: 'Lançamento não encontrado' });
+    }
+
+    // Se estiver vinculado a uma venda no ERP, remove a pendência da venda
+    if (lanc.id_venda) {
+      await pool.query(
+        'UPDATE mv_vendas SET em_aberto = 0, vr_nota = 0 WHERE id = ?',
+        [lanc.id_venda]
+      );
+    } else if (lanc.controle) {
+      await pool.query(
+        'UPDATE mv_vendas SET em_aberto = 0, vr_nota = 0 WHERE controle = ?',
+        [lanc.controle]
+      );
+    }
+
+    await pool.query(`DELETE FROM cad_lancamentos WHERE id = ?${whereTenant}`, [req.params.id, ...tenantParams]);
+    res.json({ ok: true, message: 'Conta a receber excluída com sucesso' });
+  } catch (err: any) {
+    console.error('DELETE /erp/contas/:id error:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao excluir conta a receber' });
+  }
 });
 
 // ── CONTAS A PAGAR ───────────────────────────────────────────────────────────

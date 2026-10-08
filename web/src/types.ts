@@ -205,6 +205,8 @@ export interface Lancamento {
   id_cliente: number
   nome_cliente: string
   modo_lancamento: string
+  os_plate?: string | null
+  os_model?: string | null
 }
 
 export interface TotaisContas {

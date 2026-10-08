@@ -326,6 +326,12 @@ export const erpApi = {
   },
   receberConta: (id: number) =>
     adminRequest(`/erp/contas/${id}/receber`, { method: 'PATCH' }),
+  estornarContaReceber: (id: number) =>
+    adminRequest(`/erp/contas/${id}/estornar`, { method: 'PATCH' }),
+  excluirConta: (id: number) =>
+    adminRequest(`/erp/contas/${id}`, { method: 'DELETE' }),
+  editarContaReceber: (id: number, data: { historico?: string; valor?: number; data_vencimento?: string; id_modo_lancamento?: number }) =>
+    adminRequest(`/erp/contas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   contasPagar: (params: {
     status?: string

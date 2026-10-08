@@ -851,18 +851,25 @@ export default function Pdv() {
               dinheiro: '💵 Dinheiro',
               cartao:   '💳 Cartão',
               pix:      '⚡ PIX CNPJ',
-              nota:     '📝 NOTA',
+              nota:     '📝 A Prazo / Fiado',
               outros:   '🔄 Outros',
             }
             return (
-              <div key={key} className="flex items-center justify-between gap-2">
-                <span className="text-xs text-slate-400 w-28 shrink-0">{labels[key]}</span>
-                <input
-                  value={pagamento[key]}
-                  onChange={e => setPagamento(p => ({ ...p, [key]: e.target.value }))}
-                  placeholder="0,00"
-                  className="flex-1 text-right bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-blue-500"
-                />
+              <div key={key} className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-slate-400 w-32 shrink-0">{labels[key]}</span>
+                  <input
+                    value={pagamento[key]}
+                    onChange={e => setPagamento(p => ({ ...p, [key]: e.target.value }))}
+                    placeholder="0,00"
+                    className="flex-1 text-right bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                {key === 'nota' && parseNum(pagamento.nota) > 0 && (
+                  <p className="text-[10px] text-amber-400 pl-1">
+                    ⚠️ Lança pendência em Contas a Receber (venda a prazo/fiado pendente de pagamento)
+                  </p>
+                )}
               </div>
             )
           })}

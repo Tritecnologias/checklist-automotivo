@@ -6,7 +6,8 @@ import type { Lancamento } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import {
   DollarSign, CheckCircle2, Clock, AlertTriangle,
-  CreditCard, Banknote, Zap, FileText, Calendar, Filter, X, TrendingDown
+  CreditCard, Banknote, Zap, FileText, Calendar, Filter, X, TrendingDown,
+  RotateCcw, Trash2
 } from 'lucide-react'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -133,9 +134,32 @@ export default function Contas() {
     refetchInterval: 15_000,
   })
 
+  const [excluirTarget, setExcluirTarget] = useState<Lancamento | null>(null)
+
   const { mutate: receber, isPending: recebendo } = useMutation({
     mutationFn: (id: number) => erpApi.receberConta(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['contas'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contas'] })
+      qc.invalidateQueries({ queryKey: ['erp-dashboard'] })
+    },
+  })
+
+  const { mutate: estornar, isPending: estornando } = useMutation({
+    mutationFn: (id: number) => erpApi.estornarContaReceber(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contas'] })
+      qc.invalidateQueries({ queryKey: ['erp-dashboard'] })
+    },
+  })
+
+  const { mutate: excluir, isPending: excluindo } = useMutation({
+    mutationFn: (id: number) => erpApi.excluirConta(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contas'] })
+      qc.invalidateQueries({ queryKey: ['erp-dashboard'] })
+      qc.invalidateQueries({ queryKey: ['vendas'] })
+      setExcluirTarget(null)
+    },
   })
 
   const lancamentos = res?.data ?? []
@@ -600,8 +624,24 @@ export default function Contas() {
                       {vencido && <span className="ml-1 text-[10px] text-red-500 uppercase font-semibold">(vencido)</span>}
                     </td>
 
-                    <td className="px-5 py-3 text-slate-200 max-w-[200px] truncate font-medium">
-                      {l.nome_cliente || 'Consumidor Final'}
+                    <td className="px-5 py-3 text-slate-200 max-w-[200px] font-medium">
+                      <div className="flex flex-col min-w-0">
+                        <span className="truncate">{l.nome_cliente || 'Consumidor Final'}</span>
+                        {(l.os_plate || l.os_model) && (
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            {l.os_plate && (
+                              <span className="font-mono text-[10px] bg-slate-800 text-amber-400 px-1.5 py-0.5 rounded border border-slate-700 font-bold">
+                                {l.os_plate}
+                              </span>
+                            )}
+                            {l.os_model && (
+                              <span className="text-[11px] text-slate-400 truncate">
+                                {l.os_model}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
 
                     <td className="px-5 py-3 text-slate-400 text-xs max-w-[240px] truncate">
@@ -641,15 +681,34 @@ export default function Contas() {
                     </td>
 
                     <td className="px-5 py-3 text-center">
-                      {l.status === 0 && (
+                      <div className="flex items-center justify-center gap-1.5">
+                        {l.status === 0 ? (
+                          <button
+                            onClick={() => receber(l.id)}
+                            disabled={recebendo}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 text-xs font-semibold border border-emerald-700/60 transition-colors disabled:opacity-50"
+                            title="Confirmar recebimento em caixa"
+                          >
+                            Receber
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => estornar(l.id)}
+                            disabled={estornando}
+                            className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition-colors"
+                            title="Estornar recebimento (retornar a em aberto)"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
-                          onClick={() => receber(l.id)}
-                          disabled={recebendo}
-                          className="px-3 py-1 rounded-lg bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-300 text-xs font-semibold border border-emerald-700/60 transition-colors disabled:opacity-50"
+                          onClick={() => setExcluirTarget(l)}
+                          className="p-1 rounded-lg bg-slate-800 hover:bg-red-900/40 text-slate-400 hover:text-red-300 border border-slate-700 hover:border-red-700/60 transition-colors"
+                          title="Excluir lançamento"
                         >
-                          Receber
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 )
@@ -711,6 +770,60 @@ export default function Contas() {
           </div>
         )}
       </div>
+
+      {/* Modal de Confirmação de Exclusão */}
+      {excluirTarget && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="w-10 h-10 rounded-xl bg-red-950/60 border border-red-800/60 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Excluir Conta a Receber</h3>
+                <p className="text-xs text-slate-400">Remover lançamento do financeiro</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/60 rounded-xl p-3.5 border border-slate-800 text-xs space-y-1.5">
+              <p className="text-slate-300">
+                <strong>Cliente:</strong> {excluirTarget.nome_cliente || 'Consumidor'}
+                {excluirTarget.os_plate && ` (${excluirTarget.os_plate})`}
+              </p>
+              <p className="text-slate-300">
+                <strong>Valor:</strong> <span className="text-emerald-400 font-bold">{R(Number(excluirTarget.valor))}</span>
+              </p>
+              <p className="text-slate-400">
+                <strong>Histórico:</strong> {excluirTarget.historico || '—'}
+              </p>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Tem certeza que deseja excluir esta conta a receber? Se foi gerada por uma venda, a pendência no ERP também será cancelada.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setExcluirTarget(null)}
+                disabled={excluindo}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl border border-slate-700 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => excluir(excluirTarget.id)}
+                disabled={excluindo}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-red-950/50 transition-colors flex items-center gap-2"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{excluindo ? 'Excluindo…' : 'Sim, Excluir'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
