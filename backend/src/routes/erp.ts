@@ -5429,17 +5429,50 @@ router.post('/estoque/movimentacao', requireManagerUp, async (req, res) => {
 // ── GET /erp/mecanicos ────────────────────────────────────────────────────────
 router.get('/mecanicos', async (req: Request, res: Response) => {
   try {
-    const { clause, params } = getErpTenantFilter(req, false, 'm.tenant_id');
-    const { ativo } = req.query as { ativo?: string };
+    const user = req.user as JwtPayload | undefined;
+    const headerTid = Number(req.headers['x-tenant-id']);
+    const queryTid = req.query.tenant_id ? Number(req.query.tenant_id) : undefined;
+    const { ativo, apenasDoTenant } = req.query as { ativo?: string; apenasDoTenant?: string };
 
-    let whereClause = clause ? clause : '';
-    const queryParams: any[] = [...params];
+    // Tenant alvo para filtro de disponibilidade na unidade
+    let targetTid: number | undefined;
+    if (queryTid && queryTid > 0) {
+      targetTid = queryTid;
+    } else if (headerTid && headerTid > 0) {
+      targetTid = headerTid;
+    } else if (user && user.role !== 'owner') {
+      targetTid = user.tenantIds[0] ?? 1;
+    }
+
+    const conditions: string[] = [];
+    const queryParams: any[] = [];
+
+    if (targetTid && targetTid > 0) {
+      if (apenasDoTenant === 'true') {
+        // Filtro estrito: apenas vinculado à unidade
+        conditions.push(`(m.tenant_id = ? OR EXISTS (SELECT 1 FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id AND mt.tenant_id = ?))`);
+        queryParams.push(targetTid, targetTid);
+      } else {
+        // Multi-loja padrão da rede 4 Rodas:
+        // Mecânico que atende Todas as Lojas (todas_lojas = 1), ou é da unidade, ou tem vínculo via mecanico_tenants ou login user_tenants
+        conditions.push(`(
+          COALESCE(m.todas_lojas, 1) = 1
+          OR m.tenant_id = ?
+          OR m.tenant_id IS NULL
+          OR EXISTS (SELECT 1 FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id AND mt.tenant_id = ?)
+          OR (m.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = m.user_id AND ut.tenant_id = ?))
+        )`);
+        queryParams.push(targetTid, targetTid, targetTid);
+      }
+    }
 
     if (ativo !== undefined && ativo !== '') {
       const atv = Number(ativo) === 1 ? 1 : 0;
-      whereClause += (whereClause ? ' AND ' : ' WHERE ') + 'm.ativo = ?';
+      conditions.push('m.ativo = ?');
       queryParams.push(atv);
     }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const sql = `
       SELECT
@@ -5449,7 +5482,8 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
         u.nome AS user_nome,
         u.email AS user_email,
         (SELECT COUNT(DISTINCT o.id) FROM os_orders o WHERE o.mecanico_id = m.id OR o.auxiliar_id = m.id OR EXISTS (SELECT 1 FROM os_order_items oi WHERE oi.order_id = o.id AND oi.mecanico_id = m.id)) AS total_os,
-        (SELECT COUNT(oi.id) FROM os_order_items oi WHERE oi.mecanico_id = m.id AND oi.type = 'service') AS total_servicos
+        (SELECT COUNT(oi.id) FROM os_order_items oi WHERE oi.mecanico_id = m.id AND oi.type = 'service') AS total_servicos,
+        (SELECT GROUP_CONCAT(mt.tenant_id) FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id) AS tenant_ids_str
       FROM cad_mecanicos m
       LEFT JOIN tenants t ON t.id = m.tenant_id
       LEFT JOIN users u ON u.id = m.user_id
@@ -5474,6 +5508,8 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
       comissao_peca_pct: Number(r.comissao_peca_pct || 0),
       ativo: Boolean(r.ativo),
       is_auxiliar: Boolean(r.is_auxiliar),
+      todas_lojas: r.todas_lojas === null || r.todas_lojas === undefined ? true : Boolean(r.todas_lojas),
+      tenant_ids: r.tenant_ids_str ? r.tenant_ids_str.split(',').map(Number) : (r.tenant_id ? [Number(r.tenant_id)] : []),
       total_os: Number(r.total_os || 0),
       total_servicos: Number(r.total_servicos || 0),
       created_at: r.created_at,
@@ -5513,7 +5549,12 @@ router.get('/mecanicos/usuarios-sistema', requireManagerUp, async (req: Request,
 // ── POST /erp/mecanicos ───────────────────────────────────────────────────────
 router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) => {
   try {
-    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, tenant_id, user_id, is_auxiliar } = req.body;
+    const {
+      nome, apelido, cpf, telefone, chave_pix,
+      comissao_servico_pct, comissao_peca_pct,
+      tenant_id, user_id, is_auxiliar,
+      todas_lojas, tenant_ids,
+    } = req.body;
     if (!nome || !String(nome).trim()) {
       res.status(400).json({ message: 'Nome do mecânico / técnico é obrigatório' });
       return;
@@ -5524,11 +5565,12 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
     const pecaPct = Math.max(0, parseFloat(String(comissao_peca_pct ?? 0)) || 0);
     const linkedUserId = user_id && Number(user_id) > 0 ? Number(user_id) : null;
     const isAux = is_auxiliar ? 1 : 0;
+    const todasLojasVal = todas_lojas === false || todas_lojas === 0 ? 0 : 1;
 
     const [result] = await pool.query<any>(
       `INSERT INTO cad_mecanicos
-         (tenant_id, user_id, nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+         (tenant_id, user_id, nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, todas_lojas)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       [
         tId,
         linkedUserId,
@@ -5540,15 +5582,31 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
         servPct,
         pecaPct,
         isAux,
+        todasLojasVal,
       ]
     );
 
+    const insertedId = result.insertId;
+
+    // Se fornecido tenant_ids (lojas específicas), sincroniza em mecanico_tenants
+    if (Array.isArray(tenant_ids) && tenant_ids.length > 0) {
+      const mtRows = tenant_ids.map((idVal: any) => [insertedId, Number(idVal)]);
+      await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES ?', [mtRows]).catch(() => {});
+    } else if (todasLojasVal === 1) {
+      // Associa a todos os tenants ativos por redundância defensiva
+      await pool.query(`
+        INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
+        SELECT ?, id FROM tenants WHERE ativo = 1
+      `, [insertedId]).catch(() => {});
+    }
+
     const [[created]] = await pool.query<any>(
-      `SELECT m.*, u.nome as user_nome, u.email as user_email
+      `SELECT m.*, u.nome as user_nome, u.email as user_email,
+              (SELECT GROUP_CONCAT(mt.tenant_id) FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id) AS tenant_ids_str
        FROM cad_mecanicos m
        LEFT JOIN users u ON u.id = m.user_id
        WHERE m.id = ?`,
-      [result.insertId]
+      [insertedId]
     );
     res.status(201).json({
       id: Number(created.id),
@@ -5565,6 +5623,8 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
       comissao_peca_pct: Number(created.comissao_peca_pct),
       ativo: Boolean(created.ativo),
       is_auxiliar: Boolean(created.is_auxiliar),
+      todas_lojas: created.todas_lojas === null || created.todas_lojas === undefined ? true : Boolean(created.todas_lojas),
+      tenant_ids: created.tenant_ids_str ? created.tenant_ids_str.split(',').map(Number) : [tId],
     });
   } catch (err: any) {
     console.error('[mecanicos] POST erro:', err);
@@ -5576,7 +5636,12 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
 router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
-    const { nome, apelido, cpf, telefone, chave_pix, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, tenant_id, user_id } = req.body;
+    const {
+      nome, apelido, cpf, telefone, chave_pix,
+      comissao_servico_pct, comissao_peca_pct,
+      ativo, is_auxiliar, tenant_id, user_id,
+      todas_lojas, tenant_ids,
+    } = req.body;
 
     const [[existing]] = await pool.query<any>('SELECT * FROM cad_mecanicos WHERE id = ?', [id]);
     if (!existing) {
@@ -5588,13 +5653,15 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
     const pecaPct = comissao_peca_pct !== undefined ? Math.max(0, parseFloat(String(comissao_peca_pct)) || 0) : Number(existing.comissao_peca_pct);
     const isAtivo = ativo !== undefined ? (Boolean(ativo) ? 1 : 0) : existing.ativo;
     const isAux = is_auxiliar !== undefined ? (Boolean(is_auxiliar) ? 1 : 0) : (existing.is_auxiliar ?? 0);
+    const todasLojasVal = todas_lojas !== undefined ? (todas_lojas ? 1 : 0) : (existing.todas_lojas ?? 1);
     const finalTenant = tenant_id ? Number(tenant_id) : existing.tenant_id;
     const linkedUserId = user_id !== undefined ? (user_id && Number(user_id) > 0 ? Number(user_id) : null) : existing.user_id;
 
     await pool.query(
       `UPDATE cad_mecanicos
        SET user_id = ?, nome = ?, apelido = ?, cpf = ?, telefone = ?, chave_pix = ?,
-           comissao_servico_pct = ?, comissao_peca_pct = ?, ativo = ?, is_auxiliar = ?, tenant_id = ?, updated_at = NOW()
+           comissao_servico_pct = ?, comissao_peca_pct = ?, ativo = ?, is_auxiliar = ?,
+           todas_lojas = ?, tenant_id = ?, updated_at = NOW()
        WHERE id = ?`,
       [
         linkedUserId,
@@ -5607,10 +5674,30 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
         pecaPct,
         isAtivo,
         isAux,
+        todasLojasVal,
         finalTenant,
         id,
       ]
     );
+
+    // Sincronizar mecanico_tenants se tenant_ids foi enviado
+    if (tenant_ids !== undefined) {
+      await pool.query('DELETE FROM mecanico_tenants WHERE mecanico_id = ?', [id]).catch(() => {});
+      if (Array.isArray(tenant_ids) && tenant_ids.length > 0) {
+        const mtRows = tenant_ids.map((tid: any) => [id, Number(tid)]);
+        await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES ?', [mtRows]).catch(() => {});
+      } else if (todasLojasVal === 1) {
+        await pool.query(`
+          INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
+          SELECT ?, id FROM tenants WHERE ativo = 1
+        `, [id]).catch(() => {});
+      }
+    } else if (todasLojasVal === 1) {
+      await pool.query(`
+        INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
+        SELECT ?, id FROM tenants WHERE ativo = 1
+      `, [id]).catch(() => {});
+    }
 
     // Se o nome foi alterado, atualiza também a desnormalização de nome nas OSs e Itens
     if (nome && String(nome).trim() !== existing.nome) {
@@ -5620,7 +5707,8 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
     }
 
     const [[updated]] = await pool.query<any>(
-      `SELECT m.*, u.nome as user_nome, u.email as user_email
+      `SELECT m.*, u.nome as user_nome, u.email as user_email,
+              (SELECT GROUP_CONCAT(mt.tenant_id) FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id) AS tenant_ids_str
        FROM cad_mecanicos m
        LEFT JOIN users u ON u.id = m.user_id
        WHERE m.id = ?`,
@@ -5641,6 +5729,8 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
       comissao_peca_pct: Number(updated.comissao_peca_pct),
       ativo: Boolean(updated.ativo),
       is_auxiliar: Boolean(updated.is_auxiliar),
+      todas_lojas: updated.todas_lojas === null || updated.todas_lojas === undefined ? true : Boolean(updated.todas_lojas),
+      tenant_ids: updated.tenant_ids_str ? updated.tenant_ids_str.split(',').map(Number) : (updated.tenant_id ? [Number(updated.tenant_id)] : []),
     });
   } catch (err: any) {
     console.error('[mecanicos] PUT erro:', err);
@@ -5666,6 +5756,7 @@ router.delete('/mecanicos/:id', requireManagerUp, async (req: Request, res: Resp
       return;
     }
 
+    await pool.query('DELETE FROM mecanico_tenants WHERE mecanico_id = ?', [id]).catch(() => {});
     await pool.query('DELETE FROM cad_mecanicos WHERE id = ?', [id]);
     res.json({ message: 'Mecânico excluído com sucesso' });
   } catch (err: any) {
@@ -5768,8 +5859,24 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
 
     const [itemRows] = await pool.query<any>(itemsSql, [dtInicio, dtFim, ...tenantParams, ...mecParams]);
 
-    // 2. Busca lista de mecânicos cadastrados no tenant (para garantir que mesmo os sem OS apareçam no ranking)
-    const { clause: mecTenantClause, params: mecTenantParams } = getErpTenantFilter(req, false, 'tenant_id');
+    // 2. Busca lista de mecânicos que atendem este tenant (para garantir que mesmo os sem OS apareçam no ranking)
+    let mecTenantClause = '';
+    const mecTenantParams: any[] = [];
+    const prodHeaderTid = Number(req.headers['x-tenant-id']);
+    const targetProdTid = prodHeaderTid && prodHeaderTid > 0
+      ? prodHeaderTid
+      : (req.user && req.user.role !== 'owner' ? (req.user.tenantIds[0] ?? 1) : undefined);
+
+    if (targetProdTid && targetProdTid > 0) {
+      mecTenantClause = `WHERE (
+        COALESCE(todas_lojas, 1) = 1
+        OR tenant_id = ?
+        OR tenant_id IS NULL
+        OR EXISTS (SELECT 1 FROM mecanico_tenants mt WHERE mt.mecanico_id = cad_mecanicos.id AND mt.tenant_id = ?)
+        OR (user_id IS NOT NULL AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = cad_mecanicos.user_id AND ut.tenant_id = ?))
+      )`;
+      mecTenantParams.push(targetProdTid, targetProdTid, targetProdTid);
+    }
     const [allMecanicos] = await pool.query<any>(
       `SELECT * FROM cad_mecanicos ${mecTenantClause} ORDER BY ativo DESC, nome ASC`,
       mecTenantParams

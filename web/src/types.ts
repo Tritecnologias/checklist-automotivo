@@ -903,6 +903,8 @@ export interface Mecanico {
   comissao_peca_pct: number
   ativo: boolean
   is_auxiliar?: boolean
+  todas_lojas?: boolean
+  tenant_ids?: number[]
   total_os?: number
   total_servicos?: number
   created_at?: string

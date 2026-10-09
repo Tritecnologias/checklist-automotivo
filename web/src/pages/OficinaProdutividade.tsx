@@ -88,7 +88,7 @@ function getPresetDates(preset: PeriodoPreset): { inicio: string; fim: string } 
 
 export default function OficinaProdutividade() {
   const qc = useQueryClient()
-  const { currentTenant } = useAuth()
+  const { currentTenant, tenants } = useAuth()
   const tid = currentTenant?.id ?? null
 
   // Abas: 'ranking' | 'extrato' | 'mecanicos'
@@ -116,6 +116,8 @@ export default function OficinaProdutividade() {
     comissao_peca_pct: number
     ativo: boolean
     is_auxiliar: boolean
+    todas_lojas: boolean
+    tenant_ids: number[]
     user_id: string | number
   }>({
     nome: '',
@@ -127,6 +129,8 @@ export default function OficinaProdutividade() {
     comissao_peca_pct: 0,
     ativo: true,
     is_auxiliar: false,
+    todas_lojas: true,
+    tenant_ids: [],
     user_id: '',
   })
   const [mecanicoFormError, setMecanicoFormError] = useState('')
@@ -503,6 +507,8 @@ export default function OficinaProdutividade() {
                 comissao_peca_pct: 0,
                 ativo: true,
                 is_auxiliar: false,
+                todas_lojas: true,
+                tenant_ids: tenants?.map((t) => t.id) ?? [],
                 user_id: '',
               })
               setMecanicoFormError('')
@@ -1380,6 +1386,8 @@ export default function OficinaProdutividade() {
                   comissao_peca_pct: 0,
                   ativo: true,
                   is_auxiliar: false,
+                  todas_lojas: true,
+                  tenant_ids: tenants?.map((t) => t.id) ?? [],
                   user_id: '',
                 })
                 setMecanicoFormError('')
@@ -1417,6 +1425,15 @@ export default function OficinaProdutividade() {
                           ) : (
                             <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded font-semibold">
                               Titular
+                            </span>
+                          )}
+                          {m.todas_lojas ? (
+                            <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded font-semibold" title="Atende Todas as Lojas da rede">
+                              🌐 Todas as Lojas
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-slate-800 text-slate-300 border border-slate-700 px-1.5 py-0.5 rounded font-medium" title={m.tenant_nome || 'Loja Específica'}>
+                              🏪 {m.tenant_nome || 'Loja Fixa'}
                             </span>
                           )}
                         </h3>
@@ -1518,10 +1535,12 @@ export default function OficinaProdutividade() {
                           cpf: m.cpf || '',
                           telefone: m.telefone || '',
                           chave_pix: m.chave_pix || '',
-                          comissao_servico_pct: 0,
-                          comissao_peca_pct: 0,
+                          comissao_servico_pct: Number(m.comissao_servico_pct || 0),
+                          comissao_peca_pct: Number(m.comissao_peca_pct || 0),
                           ativo: m.ativo,
                           is_auxiliar: Boolean(m.is_auxiliar),
+                          todas_lojas: m.todas_lojas !== false,
+                          tenant_ids: m.tenant_ids && m.tenant_ids.length > 0 ? m.tenant_ids : (m.tenant_id ? [m.tenant_id] : (tenants?.map((t) => t.id) ?? [])),
                           user_id: m.user_id || '',
                         })
                         setMecanicoFormError('')
@@ -1681,6 +1700,72 @@ export default function OficinaProdutividade() {
                 </select>
                 <p className="text-[11px] text-slate-400">
                   💡 Quando o técnico fizer login no app com esta conta, suas Ordens de Serviço serão vinculadas automaticamente para acompanhamento de produtividade e comissão.
+                </p>
+              </div>
+
+              {/* Lojas de Atuação (Rede 4 Rodas) */}
+              <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <span>🏪</span>
+                    <span>Lojas de Atuação (Rede 4 Rodas)</span>
+                  </label>
+                  <label className="text-[11px] text-blue-400 font-medium flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={mecanicoForm.todas_lojas}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        setMecanicoForm({
+                          ...mecanicoForm,
+                          todas_lojas: checked,
+                          tenant_ids: checked ? (tenants?.map((t) => t.id) ?? []) : (tid ? [tid] : []),
+                        })
+                      }}
+                      className="w-3.5 h-3.5 rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span>Atende Todas as Lojas</span>
+                  </label>
+                </div>
+
+                {!mecanicoForm.todas_lojas && (
+                  <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                    <p className="text-[11px] text-slate-400">Selecione as lojas onde este profissional poderá atuar:</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {tenants?.map((t) => {
+                        const isSelected = mecanicoForm.tenant_ids.includes(t.id)
+                        return (
+                          <label
+                            key={t.id}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-all ${
+                              isSelected
+                                ? 'bg-blue-950/40 border-blue-600 text-white font-medium'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                const nextIds = e.target.checked
+                                  ? [...mecanicoForm.tenant_ids, t.id]
+                                  : mecanicoForm.tenant_ids.filter((id) => id !== t.id)
+                                setMecanicoForm({ ...mecanicoForm, tenant_ids: nextIds })
+                              }}
+                              className="w-3.5 h-3.5 rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                            />
+                            <span className="truncate">{t.nome}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-slate-400">
+                  {mecanicoForm.todas_lojas
+                    ? '🌐 Disponível para seleção em Ordens de Serviço de todas as unidades (Veneza, São Pedro, Melo Viana, etc).'
+                    : `Restrito a ${mecanicoForm.tenant_ids.length} loja(s) selecionada(s).`}
                 </p>
               </div>
 

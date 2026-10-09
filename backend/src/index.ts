@@ -848,6 +848,41 @@ async function runMigrations() {
     console.log('[migration] Mecânicos padrão iniciais semeados com sucesso');
   }
 
+  // todas_lojas em cad_mecanicos (permite que mecânicos atendam todas as lojas da rede)
+  const [[{ cntMecTodasLojas }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntMecTodasLojas FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_mecanicos' AND COLUMN_NAME = 'todas_lojas'`
+  );
+  if (Number(cntMecTodasLojas) === 0) {
+    await pool.query(`
+      ALTER TABLE cad_mecanicos
+      ADD COLUMN todas_lojas TINYINT(1) NOT NULL DEFAULT 1,
+      ADD INDEX idx_cad_mecanicos_todas_lojas (todas_lojas)
+    `);
+    console.log('[migration] cad_mecanicos.todas_lojas adicionada');
+  }
+
+  // Tabela mecanico_tenants (vínculo multi-loja por mecânico)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS \`mecanico_tenants\` (
+      \`mecanico_id\` INT NOT NULL,
+      \`tenant_id\` INT NOT NULL,
+      PRIMARY KEY (\`mecanico_id\`, \`tenant_id\`),
+      KEY \`idx_mecanico_tenants_tenant\` (\`tenant_id\`),
+      KEY \`idx_mecanico_tenants_mecanico\` (\`mecanico_id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Garante que mecânicos existentes estejam habilitados para todas as lojas e sincronizados
+  await pool.query(`
+    UPDATE cad_mecanicos SET todas_lojas = 1 WHERE todas_lojas IS NULL OR todas_lojas = 0
+  `).catch(() => {});
+  await pool.query(`
+    INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
+    SELECT m.id, t.id FROM cad_mecanicos m CROSS JOIN tenants t WHERE t.ativo = 1
+  `).catch(() => {});
+
+
   // Índices para otimização extrema de relatórios, Curva ABC, DRE e vendas
   try {
     const [[{ cntIdxVendasData }]] = await pool.query<any>(
