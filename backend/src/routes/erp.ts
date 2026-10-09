@@ -239,9 +239,11 @@ router.get('/caixa', async (req, res) => {
 
     const [rows] = await pool.query<any>(
       `SELECT c.*,
-              COALESCE(u.nome, 'Operador') as nome_operador
+              COALESCE(u.nome, 'Operador') as nome_operador,
+              COALESCE(c.fechado_por, uf.nome, u.nome, 'Operador') as fechado_por
        FROM mv_caixa c
        LEFT JOIN users u ON u.id = c.id_login
+       LEFT JOIN users uf ON uf.id = c.id_usuario_fechamento
        ${whereSql}
        ORDER BY c.id DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset]
@@ -579,19 +581,45 @@ router.get('/caixa/status', async (req, res) => {
   );
 
   const [[ultimoCaixa]] = await pool.query<any>(
-    `SELECT id, data_fechamento, hora_fechamento, vr_fechamento, vr_fechado_turno
-     FROM mv_caixa
-     WHERE status_caixa = 'F' ${tf}
-     ORDER BY id DESC LIMIT 1`,
+    `SELECT c.id, c.data_fechamento, c.hora_fechamento, c.vr_fechamento, c.vr_fechado_turno,
+            c.fechado_por, c.id_usuario_fechamento, c.id_login,
+            COALESCE(c.fechado_por, uf.nome, u.nome, 'Operador') as nome_fechador
+     FROM mv_caixa c
+     LEFT JOIN users uf ON uf.id = c.id_usuario_fechamento
+     LEFT JOIN users u ON u.id = c.id_login
+     WHERE c.status_caixa = 'F' ${tf.replace(/tenant_id/g, 'c.tenant_id')}
+     ORDER BY c.id DESC LIMIT 1`,
     tp
   );
 
+  let dataFechamentoStr = '';
+  if (ultimoCaixa?.data_fechamento) {
+    if (ultimoCaixa.data_fechamento instanceof Date) {
+      dataFechamentoStr = ultimoCaixa.data_fechamento.toISOString().slice(0, 10);
+    } else {
+      dataFechamentoStr = String(ultimoCaixa.data_fechamento).trim().slice(0, 10);
+    }
+  }
+
+  let horaFechamentoStr = '';
+  if (ultimoCaixa?.hora_fechamento) {
+    let h = String(ultimoCaixa.hora_fechamento).trim();
+    if (h.includes(':') && h.indexOf(':') === 1) {
+      h = '0' + h;
+    }
+    horaFechamentoStr = h.slice(0, 8);
+  }
+
+  const fechadoPorNome = ultimoCaixa?.fechado_por || ultimoCaixa?.nome_fechador || 'Operador';
+
   const ultimoFechamento = ultimoCaixa ? {
     id: Number(ultimoCaixa.id),
-    data_fechamento: ultimoCaixa.data_fechamento,
-    hora_fechamento: ultimoCaixa.hora_fechamento,
+    data_fechamento: dataFechamentoStr,
+    hora_fechamento: horaFechamentoStr,
     vr_fechamento: Number(ultimoCaixa.vr_fechamento || 0),
     vr_fechado_turno: Number(ultimoCaixa.vr_fechado_turno || 0),
+    fechado_por: fechadoPorNome,
+    nome_operador: fechadoPorNome,
   } : null;
 
   if (!row) {
@@ -731,9 +759,12 @@ router.get('/caixa/status', async (req, res) => {
 router.get('/caixa/:id/detalhes', async (req, res) => {
   const { clause: tf, params: tp } = getErpTenantFilter(req, true);
   const [[caixa]] = await pool.query<any>(
-    `SELECT c.*, COALESCE(u.nome, 'Operador') as nome_operador
+    `SELECT c.*,
+            COALESCE(u.nome, 'Operador') as nome_operador,
+            COALESCE(c.fechado_por, uf.nome, u.nome, 'Operador') as fechado_por
      FROM mv_caixa c
      LEFT JOIN users u ON u.id = c.id_login
+     LEFT JOIN users uf ON uf.id = c.id_usuario_fechamento
      WHERE c.id = ?${tf.replace(/tenant_id/g, 'c.tenant_id')} LIMIT 1`,
     [req.params.id, ...tp]
   );
@@ -918,7 +949,7 @@ router.post('/caixa/abrir', async (req, res) => {
 });
 
 router.patch('/caixa/:id/fechar', async (req, res) => {
-  const { vr_fechamento = 0 } = req.body;
+  const { vr_fechamento = 0, fechado_por } = req.body;
   const { clause: tf, params: tp } = getErpTenantFilter(req, true);
 
   // garante que o caixa pertence ao tenant do usuário logado
@@ -934,6 +965,21 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
   const now = new Date();
   const hora = now.toTimeString().slice(0, 8);
   const data = now.toISOString().slice(0, 10);
+
+  // Identifica o usuário que está encerrando/fechando o caixa
+  let nomeUsuarioFechamento = 'Operador';
+  let idUsuarioFechamento: number | null = null;
+  const authPayload = req.user as JwtPayload | undefined;
+  if (authPayload?.userId) {
+    idUsuarioFechamento = Number(authPayload.userId);
+    const [[uRow]] = await pool.query<any>('SELECT nome FROM users WHERE id = ?', [idUsuarioFechamento]);
+    if (uRow?.nome) {
+      nomeUsuarioFechamento = uRow.nome;
+    }
+  }
+  if ((!nomeUsuarioFechamento || nomeUsuarioFechamento === 'Operador') && fechado_por) {
+    nomeUsuarioFechamento = String(fechado_por).trim();
+  }
 
   // Associa vendas pendentes desta sessão que ainda não tinham id_caixa gravado
   await pool.query(
@@ -1015,8 +1061,8 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
 
   await pool.query(
     `UPDATE mv_caixa SET status_caixa='F', hora_fechamento=?, data_fechamento=?,
-      vr_fechamento=?, vr_fechado_turno=? WHERE id=? AND tenant_id=?`,
-    [hora, data, vr_fechamento, totalVendas, req.params.id, caixaRow.tenant_id]
+      vr_fechamento=?, vr_fechado_turno=?, fechado_por=?, id_usuario_fechamento=? WHERE id=? AND tenant_id=?`,
+    [hora, data, vr_fechamento, totalVendas, nomeUsuarioFechamento, idUsuarioFechamento, req.params.id, caixaRow.tenant_id]
   );
   res.json({
     ok: true,
@@ -1025,6 +1071,7 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
     despesas_dinheiro: despesasDinheiro,
     saldo_liquido: saldoLiquido,
     saldo_esperado_dinheiro: saldoEsperado,
+    fechado_por: nomeUsuarioFechamento,
     totais: {
       ...totals,
       total_despesas: totalDespesas,

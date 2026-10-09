@@ -267,7 +267,7 @@ export const erpApi = {
   }>(`/erp/caixa/${id}/detalhes`),
   caixaAbrir: (data: { vr_abertura?: number }) =>
     adminRequest<{ id: number }>('/erp/caixa/abrir', { method: 'POST', body: JSON.stringify(data) }),
-  caixaFechar: (id: number, data: { vr_fechamento?: number }) =>
+  caixaFechar: (id: number, data: { vr_fechamento?: number; fechado_por?: string }) =>
     adminRequest('/erp/caixa/' + id + '/fechar', { method: 'PATCH', body: JSON.stringify(data) }),
 
   vendas: (params: { data?: string; page?: number; search?: string }) => {

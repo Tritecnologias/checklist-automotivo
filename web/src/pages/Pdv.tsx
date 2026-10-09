@@ -10,11 +10,57 @@ import { printThermalReceipt, type ThermalReceiptData } from '../lib/thermalPrin
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 const fmtDate = (iso?: string | null) => {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: '2-digit',
-    hour: '2-digit', minute: '2-digit',
-  })
+  if (!iso || iso === '0000-00-00') return '—'
+  let cleanIso = String(iso).trim()
+  if (cleanIso.includes('T') && cleanIso.lastIndexOf('T') !== cleanIso.indexOf('T')) {
+    const parts = cleanIso.split('T')
+    cleanIso = `${parts[0]}T${parts[parts.length - 1]}`
+  }
+  const parsed = new Date(cleanIso)
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString('pt-BR', {
+      day: '2-digit', month: '2-digit', year: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    })
+  }
+  return '—'
+}
+
+const fmtDateSessao = (data?: string | null, hora?: string | null) => {
+  if (!data || data === '0000-00-00') return '—'
+
+  let datePart = String(data).trim()
+  if (datePart.includes('T')) {
+    datePart = datePart.split('T')[0]
+  }
+
+  let horaPart = String(hora || '00:00:00').trim()
+  if (horaPart.includes(':') && horaPart.indexOf(':') === 1) {
+    horaPart = '0' + horaPart
+  }
+  const horaMin = horaPart.length >= 5 ? horaPart.slice(0, 5) : horaPart
+
+  const m = datePart.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) {
+    const [, ano, mes, dia] = m
+    if (ano === '0000') return '—'
+    return `${dia}/${mes}/${ano} às ${horaMin}`
+  }
+
+  const mBr = datePart.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
+  if (mBr) {
+    return `${datePart} às ${horaMin}`
+  }
+
+  const dt = new Date(datePart)
+  if (!isNaN(dt.getTime())) {
+    const dia = String(dt.getDate()).padStart(2, '0')
+    const mes = String(dt.getMonth() + 1).padStart(2, '0')
+    const ano = String(dt.getFullYear())
+    return `${dia}/${mes}/${ano} às ${horaMin}`
+  }
+
+  return '—'
 }
 
 interface CartItem {
@@ -392,13 +438,19 @@ export default function Pdv() {
               <div className="flex justify-between items-center text-xs">
                 <span className="text-slate-400">Data e Hora:</span>
                 <span className="text-slate-200 font-mono font-medium">
-                  {fmtDate(`${ultimo.data_fechamento}T${ultimo.hora_fechamento || '00:00:00'}`)}
+                  {fmtDateSessao(ultimo.data_fechamento, ultimo.hora_fechamento)}
                 </span>
               </div>
               <div className="flex justify-between items-center text-xs">
                 <span className="text-slate-400">Total Fechado:</span>
                 <span className="text-emerald-400 font-bold font-mono">
                   {R(ultimo.vr_fechamento || ultimo.vr_fechado_turno || 0)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-400">Fechado por:</span>
+                <span className="text-slate-200 font-medium">
+                  {ultimo.fechado_por || ultimo.nome_operador || 'Operador'}
                 </span>
               </div>
             </div>

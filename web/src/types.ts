@@ -26,6 +26,8 @@ export interface CaixaSession {
   aberto?: boolean
   nome_login?: string
   nome_operador?: string
+  fechado_por?: string | null
+  id_usuario_fechamento?: number | null
   saldo_esperado_dinheiro?: number
   diferenca_caixa?: number
   total_despesas?: number
@@ -37,6 +39,8 @@ export interface CaixaSession {
     hora_fechamento: string
     vr_fechamento: number
     vr_fechado_turno: number
+    fechado_por?: string | null
+    nome_operador?: string | null
   } | null
   lista_pix?: {
     controle: string
@@ -78,6 +82,7 @@ export interface CaixaStatusResponse {
   status_caixa?: 'A' | 'F'
   nome_login?: string
   nome_operador?: string
+  fechado_por?: string | null
   saldo_esperado_dinheiro?: number
   diferenca_caixa?: number
   total_despesas?: number
@@ -89,6 +94,8 @@ export interface CaixaStatusResponse {
     hora_fechamento: string
     vr_fechamento: number
     vr_fechado_turno: number
+    fechado_por?: string | null
+    nome_operador?: string | null
   } | null
   lista_pix?: {
     controle: string

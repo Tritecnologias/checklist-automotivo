@@ -305,6 +305,38 @@ async function runMigrations() {
     console.log('[migration] mv_caixa.tenant_id adicionada (registros existentes → tenant 1)');
   }
 
+  // fechado_por em mv_caixa
+  const [[{ cntFechadoPor }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntFechadoPor FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_caixa' AND COLUMN_NAME = 'fechado_por'`
+  );
+  if (Number(cntFechadoPor) === 0) {
+    await pool.query('ALTER TABLE mv_caixa ADD COLUMN fechado_por VARCHAR(100) NULL DEFAULT NULL');
+    console.log('[migration] mv_caixa.fechado_por adicionada');
+  }
+
+  // id_usuario_fechamento em mv_caixa
+  const [[{ cntIdUsuarioFechamento }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntIdUsuarioFechamento FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mv_caixa' AND COLUMN_NAME = 'id_usuario_fechamento'`
+  );
+  if (Number(cntIdUsuarioFechamento) === 0) {
+    await pool.query('ALTER TABLE mv_caixa ADD COLUMN id_usuario_fechamento INT NULL DEFAULT NULL');
+    console.log('[migration] mv_caixa.id_usuario_fechamento adicionada');
+  }
+
+  // Popula fechado_por retroativo para caixas fechados que ainda estão sem responsável
+  try {
+    await pool.query(`
+      UPDATE mv_caixa c
+      LEFT JOIN users u ON u.id = c.id_login
+      SET c.fechado_por = COALESCE(u.nome, 'Operador')
+      WHERE c.status_caixa = 'F' AND (c.fechado_por IS NULL OR c.fechado_por = '')
+    `);
+  } catch (retroErr) {
+    console.warn('[migration] Aviso ao atualizar fechado_por retroativo:', retroErr);
+  }
+
   // vr_pix e vr_nota em mv_vendas
   const [[{ cntPix }]] = await pool.query<any>(
     `SELECT COUNT(*) as cntPix FROM information_schema.COLUMNS

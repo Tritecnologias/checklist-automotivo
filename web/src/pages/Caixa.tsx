@@ -72,7 +72,7 @@ const getDatesPreset = (preset: string) => {
 }
 
 export default function Caixa() {
-  const { currentTenant } = useAuth()
+  const { currentTenant, user } = useAuth()
   const tid = currentTenant?.id ?? null
   const qc = useQueryClient()
 
@@ -185,7 +185,10 @@ export default function Caixa() {
   })
 
   const { mutate: fechar, isPending: fechando } = useMutation({
-    mutationFn: (id: number) => erpApi.caixaFechar(id, { vr_fechamento: parseFloat(vrFechamento.replace(',', '.')) || 0 }),
+    mutationFn: (id: number) => erpApi.caixaFechar(id, {
+      vr_fechamento: parseFloat(vrFechamento.replace(',', '.')) || 0,
+      fechado_por: user?.nome || undefined,
+    }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['caixa-status'] })
       qc.invalidateQueries({ queryKey: ['caixa-hist'] })
