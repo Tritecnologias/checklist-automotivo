@@ -384,6 +384,7 @@ export interface UserAdmin {
   tenant_id: number | null
   tenant_nome: string | null
   tenant_count: number
+  tenant_ids?: number[]
   ativo: number
   custom_permissions?: number
   mecanico_id?: number | null

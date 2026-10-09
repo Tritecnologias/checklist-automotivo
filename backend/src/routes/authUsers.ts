@@ -266,12 +266,19 @@ router.get('/users', requireAuth, requireRole('owner', 'manager'), async (req, r
       `SELECT u.id, u.nome, u.email, u.role, u.tenant_id, u.ativo,
               COALESCE(u.custom_permissions, 0) AS custom_permissions,
               t.nome AS tenant_nome,
-              (SELECT COUNT(*) FROM user_tenants ut WHERE ut.user_id = u.id) AS tenant_count
+              (SELECT COUNT(*) FROM user_tenants ut WHERE ut.user_id = u.id) AS tenant_count,
+              (SELECT GROUP_CONCAT(ut.tenant_id) FROM user_tenants ut WHERE ut.user_id = u.id) AS tenant_ids_str
        FROM users u
        LEFT JOIN tenants t ON t.id = u.tenant_id
        ORDER BY u.nome`
     );
-    res.json(rows);
+    const mapped = rows.map((r: any) => ({
+      ...r,
+      tenant_ids: r.tenant_ids_str
+        ? String(r.tenant_ids_str).split(',').map(Number).filter(Boolean)
+        : (r.tenant_id ? [Number(r.tenant_id)] : []),
+    }));
+    res.json(mapped);
 
   } catch (err) {
     res.status(500).json({ message: 'Erro interno' });

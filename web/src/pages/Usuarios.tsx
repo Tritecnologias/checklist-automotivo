@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RotateCw, ShieldCheck, UserCheck } from 'lucide-react'
+import { 
+  RotateCw, ShieldCheck, UserCheck, Search, Building2, 
+  X, RotateCcw, Filter, UserX, CheckCircle2, Shield
+} from 'lucide-react'
 import { tenantsApi, usersApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import type { UserAdmin } from '../types'
@@ -32,14 +35,21 @@ const EMPTY_FORM = {
 
 export default function Usuarios() {
   const navigate = useNavigate()
-  const { isOwner } = useAuth()
+  const { isOwner, tenants: authTenants } = useAuth()
   const qc = useQueryClient()
 
   const { data: users = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ['users'],
     queryFn: usersApi.list,
   })
-  const { data: lojas = [] } = useQuery({ queryKey: ['tenants'], queryFn: tenantsApi.list, enabled: isOwner })
+  const { data: lojasApi = [] } = useQuery({ queryKey: ['tenants'], queryFn: tenantsApi.list })
+  const listaLojas = lojasApi.length > 0 ? lojasApi : (authTenants || [])
+
+  // ── Filtros ───────────────────────────────────────────────────────────────
+  const [busca, setBusca] = useState('')
+  const [filtroLoja, setFiltroLoja] = useState('')
+  const [filtroPerfil, setFiltroPerfil] = useState('')
+  const [filtroStatus, setFiltroStatus] = useState<'todos' | 'ativos' | 'inativos'>('todos')
 
   const [showNew, setShowNew] = useState(false)
   const [form, setForm] = useState({ ...EMPTY_FORM })
@@ -118,8 +128,73 @@ export default function Usuarios() {
     updateMut.mutate({ id: u.id, data: { ativo: !u.ativo } })
   }
 
+  // ── Estatísticas e Filtros em Tempo Real ──────────────────────────────────
+  const stats = useMemo(() => {
+    const total = users.length
+    const ativos = users.filter(u => Boolean(u.ativo)).length
+    const inativos = total - ativos
+    const personalizados = users.filter(u => Boolean(u.custom_permissions)).length
+    return { total, ativos, inativos, personalizados }
+  }, [users])
+
+  const usuariosFiltrados = useMemo(() => {
+    return users.filter(u => {
+      // 1. Busca textual (nome ou e-mail)
+      if (busca.trim()) {
+        const q = busca.toLowerCase().trim()
+        const matchNome = (u.nome || '').toLowerCase().includes(q)
+        const matchEmail = (u.email || '').toLowerCase().includes(q)
+        if (!matchNome && !matchEmail) return false
+      }
+
+      // 2. Filtro por Loja
+      if (filtroLoja) {
+        if (filtroLoja === 'owner') {
+          if (u.role !== 'owner') return false
+        } else if (filtroLoja === 'sem_loja') {
+          const hasStore = u.tenant_id || (u.tenant_ids && u.tenant_ids.length > 0)
+          if (hasStore || u.role === 'owner') return false
+        } else {
+          const lid = Number(filtroLoja)
+          const isDirect = u.tenant_id === lid
+          const isMulti = Array.isArray(u.tenant_ids) && u.tenant_ids.includes(lid)
+          if (!isDirect && !isMulti) return false
+        }
+      }
+
+      // 3. Filtro por Perfil / Cargo
+      if (filtroPerfil) {
+        if (filtroPerfil === 'personalizado') {
+          if (!u.custom_permissions) return false
+        } else if (u.role !== filtroPerfil) {
+          return false
+        }
+      }
+
+      // 4. Filtro por Status
+      if (filtroStatus === 'ativos' && !u.ativo) return false
+      if (filtroStatus === 'inativos' && u.ativo) return false
+
+      return true
+    })
+  }, [users, busca, filtroLoja, filtroPerfil, filtroStatus])
+
+  const hasFiltrosAtivos = Boolean(
+    busca.trim() !== '' ||
+    filtroLoja !== '' ||
+    filtroPerfil !== '' ||
+    filtroStatus !== 'todos'
+  )
+
+  function limparFiltros() {
+    setBusca('')
+    setFiltroLoja('')
+    setFiltroPerfil('')
+    setFiltroStatus('todos')
+  }
+
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-6xl w-full">
       {/* Abas Superiores */}
       <div className="flex items-center gap-2 mb-6 border-b border-slate-800 pb-3">
         <button
@@ -211,14 +286,14 @@ export default function Usuarios() {
             </div>
 
             {/* Loja(s) — para todos os perfis exceto owner */}
-            {MULTI_TENANT_ROLES.includes(form.role) && isOwner && lojas.length > 0 && (
+            {MULTI_TENANT_ROLES.includes(form.role) && isOwner && listaLojas.length > 0 && (
               <div className="col-span-2">
                 <label className="block text-xs text-slate-400 mb-2">
                   Lojas com acesso
                   <span className="ml-1 text-slate-500">(marque uma ou mais)</span>
                 </label>
                 <div className="flex flex-wrap gap-3">
-                  {lojas.map(l => (
+                  {listaLojas.map(l => (
                     <label key={l.id} className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
@@ -288,14 +363,14 @@ export default function Usuarios() {
                 </select>
               </div>
             )}
-            {isOwner && MULTI_TENANT_ROLES.includes(editData.role) && lojas.length > 0 && (
+            {isOwner && MULTI_TENANT_ROLES.includes(editData.role) && listaLojas.length > 0 && (
               <div className="col-span-2">
                 <label className="block text-xs text-slate-400 mb-2">
                   Lojas com acesso
                   <span className="ml-1 text-slate-500">(marque uma ou mais)</span>
                 </label>
                 <div className="flex flex-wrap gap-3">
-                  {lojas.map(l => (
+                  {listaLojas.map(l => (
                     <label key={l.id} className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
@@ -357,97 +432,303 @@ export default function Usuarios() {
         </div>
       )}
 
+      {/* ── BARRA DE FILTROS ── */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 mb-6 space-y-4 shadow-xl backdrop-blur-md">
+        
+        {/* Linha 1: Status rápidos e Contagem */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={() => setFiltroStatus('todos')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                filtroStatus === 'todos'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                  : 'bg-slate-800/70 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+              }`}
+            >
+              <span>Todos</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                filtroStatus === 'todos' ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-300'
+              }`}>
+                {stats.total}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFiltroStatus('ativos')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                filtroStatus === 'ativos'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                  : 'bg-slate-800/70 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span>Ativos</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                filtroStatus === 'ativos' ? 'bg-emerald-700 text-white' : 'bg-slate-700 text-slate-300'
+              }`}>
+                {stats.ativos}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFiltroStatus('inativos')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                filtroStatus === 'inativos'
+                  ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
+                  : 'bg-slate-800/70 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-rose-400" />
+              <span>Inativos</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                filtroStatus === 'inativos' ? 'bg-rose-700 text-white' : 'bg-slate-700 text-slate-300'
+              }`}>
+                {stats.inativos}
+              </span>
+            </button>
+
+            {stats.personalizados > 0 && (
+              <button
+                type="button"
+                onClick={() => setFiltroPerfil(filtroPerfil === 'personalizado' ? '' : 'personalizado')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  filtroPerfil === 'personalizado'
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
+                    : 'bg-slate-800/70 hover:bg-slate-800 text-purple-300 hover:text-white border border-purple-500/30'
+                }`}
+              >
+                <span>⚡ Personalizados</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                  filtroPerfil === 'personalizado' ? 'bg-purple-700 text-white' : 'bg-purple-900/50 text-purple-200'
+                }`}>
+                  {stats.personalizados}
+                </span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-400 font-medium">
+              Exibindo <strong className="text-white font-semibold">{usuariosFiltrados.length}</strong> de <strong className="text-slate-300">{stats.total}</strong> colaboradores
+            </span>
+            {hasFiltrosAtivos && (
+              <button
+                type="button"
+                onClick={limparFiltros}
+                className="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors flex items-center gap-1 font-semibold"
+                title="Limpar todos os filtros aplicados"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Limpar filtros</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Linha 2: Busca por texto, Filtro por Loja e Filtro por Perfil */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3">
+          
+          {/* Busca por Nome ou E-mail */}
+          <div className="lg:col-span-5 relative">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={busca}
+              onChange={e => setBusca(e.target.value)}
+              placeholder="Buscar por nome ou e-mail..."
+              className="w-full bg-slate-950/70 border border-slate-700/80 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-9 pr-9 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none transition-all shadow-inner"
+            />
+            {busca && (
+              <button
+                type="button"
+                onClick={() => setBusca('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 rounded transition-colors"
+                title="Limpar texto da busca"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Filtro por Loja */}
+          <div className="lg:col-span-4 relative">
+            <Building2 className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <select
+              value={filtroLoja}
+              onChange={e => setFiltroLoja(e.target.value)}
+              className="w-full bg-slate-950/70 border border-slate-700/80 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-9 pr-8 py-2.5 text-sm text-white focus:outline-none transition-all appearance-none shadow-inner cursor-pointer"
+            >
+              <option value="">🏢 Todas as Lojas</option>
+              {listaLojas.map(l => (
+                <option key={l.id} value={String(l.id)}>
+                  🏪 {l.nome}
+                </option>
+              ))}
+              <option value="owner">⭐ Acesso a Todas (Proprietários)</option>
+              <option value="sem_loja">⚠️ Sem loja vinculada</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+              <span className="text-xs">▼</span>
+            </div>
+          </div>
+
+          {/* Filtro por Perfil / Cargo */}
+          <div className="lg:col-span-3 relative">
+            <ShieldCheck className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <select
+              value={filtroPerfil}
+              onChange={e => setFiltroPerfil(e.target.value)}
+              className="w-full bg-slate-950/70 border border-slate-700/80 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-9 pr-8 py-2.5 text-sm text-white focus:outline-none transition-all appearance-none shadow-inner cursor-pointer"
+            >
+              <option value="">🛡️ Todos os Perfis</option>
+              {ROLE_OPTS.map(r => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+              <option value="personalizado">⚡ Permissões Personalizadas</option>
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+              <span className="text-xs">▼</span>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
       {/* Tabela */}
       {isLoading ? (
-        <p className="text-slate-500 text-sm">Carregando…</p>
+        <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-12 text-center flex flex-col items-center justify-center gap-3">
+          <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-slate-400 text-sm font-medium">Carregando colaboradores...</p>
+        </div>
       ) : (
-        <div className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-700">
-                <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3">Usuário</th>
-                <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3">Perfil</th>
-                <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3">Loja</th>
-                <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3">Status</th>
-                <th className="px-5 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u, i) => (
-                <tr key={u.id} className={i < users.length - 1 ? 'border-b border-slate-700/50' : ''}>
-                  <td className="px-5 py-3.5">
-                    <p className="text-sm font-medium text-white">{u.nome}</p>
-                    <p className="text-xs text-slate-400">{u.email}</p>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className={`inline-block text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${ROLE_COLOR[u.role] ?? 'bg-slate-500/20 text-slate-300'}`}>
-                        {ROLE_OPTS.find(r => r.value === u.role)?.label ?? u.role}
-                      </span>
-                      {Boolean(u.custom_permissions) && (
-                        <span
-                          className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase tracking-wide"
-                          title="Este usuário possui permissões personalizadas exclusivas"
-                        >
-                          Personalizado
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    {u.role === 'owner' ? (
-                      <span className="text-sm text-slate-300">Todas</span>
-                    ) : u.tenant_count > 1 ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300">
-                        🏪 {u.tenant_count} lojas
-                      </span>
-                    ) : (
-                      <span className="text-sm text-slate-300">{u.tenant_nome ?? '—'}</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className={`inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full ${
-                      u.ativo ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
-                    }`}>
-                      {u.ativo ? 'Ativo' : 'Inativo'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <div className="flex items-center justify-end gap-3">
-                      {u.role !== 'owner' && (
-                        <button
-                          onClick={() => navigate(`/erp/permissoes?userId=${u.id}`)}
-                          className="text-xs text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1 font-semibold"
-                          title="Configurar papéis e permissões deste usuário"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>Permissões</span>
-                        </button>
-                      )}
-                      <button
-                        onClick={() => startEdit(u)}
-                        className="text-xs text-slate-400 hover:text-white transition-colors"
-                      >
-                        ✏️ Editar
-                      </button>
-                      {isOwner && (
-                        <button
-                          onClick={() => toggleAtivo(u)}
-                          className={`text-xs transition-colors ${u.ativo ? 'text-red-400 hover:text-red-300' : 'text-emerald-400 hover:text-emerald-300'}`}
-                        >
-                          {u.ativo ? 'Desativar' : 'Ativar'}
-                        </button>
-                      )}
-                    </div>
-                  </td>
-
+        <div className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden shadow-xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-slate-700 bg-slate-850/60">
+                  <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3.5">Usuário</th>
+                  <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3.5">Perfil</th>
+                  <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3.5">Loja</th>
+                  <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-5 py-3.5">Status</th>
+                  <th className="px-5 py-3.5 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider">Ações</th>
                 </tr>
-              ))}
-              {users.length === 0 && (
-                <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-500 text-sm">Nenhum usuário encontrado</td></tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-700/50">
+                {usuariosFiltrados.map((u) => (
+                  <tr key={u.id} className="hover:bg-slate-750/50 transition-colors group">
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-700 to-slate-800 border border-slate-600/50 flex items-center justify-center text-xs font-bold text-slate-200 shadow-sm shrink-0">
+                          {u.nome ? u.nome.slice(0, 2).toUpperCase() : 'US'}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-white tracking-tight truncate">{u.nome}</p>
+                          <p className="text-xs text-slate-400 font-mono truncate">{u.email}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`inline-block text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${ROLE_COLOR[u.role] ?? 'bg-slate-500/20 text-slate-300'}`}>
+                          {ROLE_OPTS.find(r => r.value === u.role)?.label ?? u.role}
+                        </span>
+                        {Boolean(u.custom_permissions) && (
+                          <span
+                            className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase tracking-wide"
+                            title="Este usuário possui permissões personalizadas exclusivas"
+                          >
+                            Personalizado
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      {u.role === 'owner' ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/20">
+                          ⭐ Todas
+                        </span>
+                      ) : u.tenant_count > 1 ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30" title={`Acesso a ${u.tenant_count} lojas`}>
+                          🏪 {u.tenant_count} lojas
+                        </span>
+                      ) : (
+                        <span className="text-sm text-slate-300">{u.tenant_nome ?? '—'}</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+                        u.ativo ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${u.ativo ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                        <span>{u.ativo ? 'Ativo' : 'Inativo'}</span>
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="flex items-center justify-end gap-3">
+                        {u.role !== 'owner' && (
+                          <button
+                            onClick={() => navigate(`/erp/permissoes?userId=${u.id}`)}
+                            className="text-xs text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1 font-semibold"
+                            title="Configurar papéis e permissões deste usuário"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <span>Permissões</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => startEdit(u)}
+                          className="text-xs text-slate-400 hover:text-white transition-colors"
+                        >
+                          ✏️ Editar
+                        </button>
+                        {isOwner && (
+                          <button
+                            onClick={() => toggleAtivo(u)}
+                            className={`text-xs transition-colors font-medium ${u.ativo ? 'text-red-400 hover:text-red-300' : 'text-emerald-400 hover:text-emerald-300'}`}
+                          >
+                            {u.ativo ? 'Desativar' : 'Ativar'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+
+                  </tr>
+                ))}
+                {usuariosFiltrados.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-12 text-center">
+                      <div className="flex flex-col items-center justify-center gap-2 max-w-sm mx-auto">
+                        <Search className="w-8 h-8 text-slate-500 stroke-[1.5]" />
+                        <p className="text-white font-semibold text-sm">Nenhum colaborador encontrado</p>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          {hasFiltrosAtivos
+                            ? 'Nenhum usuário corresponde aos filtros aplicados. Tente ajustar os termos de busca ou filtros.'
+                            : 'Nenhum usuário cadastrado no sistema no momento.'}
+                        </p>
+                        {hasFiltrosAtivos && (
+                          <button
+                            type="button"
+                            onClick={limparFiltros}
+                            className="mt-2 px-3.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Restaurar filtros</span>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

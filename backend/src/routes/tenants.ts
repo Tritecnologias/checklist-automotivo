@@ -3,17 +3,18 @@ import { pool } from '../db';
 import { requireAuth, requireRole } from '../middleware/auth';
 
 const router = Router();
-
-router.use(requireAuth, requireRole('owner'));
+router.use(requireAuth);
 
 // ── GET /tenants ──────────────────────────────────────────────────────────────
 
-router.get('/', async (_req, res) => {
+router.get('/', requireRole('owner', 'manager'), async (_req, res) => {
   const [rows] = await pool.query<any>(
     'SELECT id, nome, slug, ativo, created_at FROM tenants ORDER BY nome'
   );
   res.json(rows);
 });
+
+router.use(requireRole('owner'));
 
 // ── POST /tenants ─────────────────────────────────────────────────────────────
 
