@@ -6,6 +6,7 @@ interface SearchBarProps {
   onChangeText: (text: string) => void;
   loading?: boolean;
   placeholder?: string;
+  onFocus?: () => void;
   /** Quando true, desabilita o campo de busca (OS encerrada) */
   disabled?: boolean;
 }
@@ -15,6 +16,7 @@ export function SearchBar({
   onChangeText,
   loading = false,
   placeholder = 'Buscar peça ou serviço…',
+  onFocus,
   disabled = false,
 }: SearchBarProps) {
   const { colorScheme } = useColorScheme();
@@ -36,6 +38,7 @@ export function SearchBar({
         className="flex-1 text-base text-gray-900 dark:text-white"
         value={value}
         onChangeText={onChangeText}
+        onFocus={onFocus}
         placeholder={disabled ? 'OS encerrada — somente leitura' : placeholder}
         placeholderTextColor={isDark ? '#64748b' : '#9ca3af'}
         autoCapitalize="characters"

@@ -1,0 +1,2608 @@
+// scripts/generate_system_manual.js
+// Gerador do Manual Operacional Completo do Sistema (4Rodas ERP & Checklist Automotivo)
+// Produz MANUAL_DO_SISTEMA.html autônomo com navegação, busca, mockups visuais e estilos de impressão PDF.
+
+const fs = require('fs');
+const path = require('path');
+
+console.log('Iniciando compilação do Manual do Sistema...');
+
+// Montaremos o HTML estruturado com CSS inline de alto padrão visual, SVG icons e conteúdo exaustivo.
+const htmlContent = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manual Operacional Oficial — 4Rodas ERP & Checklist Automotivo</title>
+  <style>
+    :root {
+      --bg-main: #090d16;
+      --bg-card: #111827;
+      --bg-card-sub: #1a2234;
+      --bg-header: #0f172a;
+      --border-color: #243048;
+      --border-focus: #3b82f6;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dark: #64748b;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --primary-glow: rgba(59, 130, 246, 0.25);
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.12);
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.12);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.12);
+      --purple: #8b5cf6;
+      --purple-bg: rgba(139, 92, 246, 0.12);
+      --cyan: #06b6d4;
+      --sidebar-w: 300px;
+    }
+
+    [data-theme="light"] {
+      --bg-main: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-card-sub: #f1f5f9;
+      --bg-header: #ffffff;
+      --border-color: #e2e8f0;
+      --border-focus: #2563eb;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-dark: #64748b;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-glow: rgba(37, 99, 235, 0.15);
+      --success: #059669;
+      --success-bg: rgba(5, 150, 105, 0.1);
+      --warning: #d97706;
+      --warning-bg: rgba(217, 119, 6, 0.1);
+      --danger: #dc2626;
+      --danger-bg: rgba(220, 38, 38, 0.1);
+      --purple: #7c3aed;
+      --purple-bg: rgba(124, 58, 237, 0.1);
+      --cyan: #0891b2;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      line-height: 1.6;
+      display: flex;
+      min-height: 100vh;
+      overflow-x: hidden;
+      font-size: 15px;
+    }
+
+    /* BARRA LATERAL (SIDEBAR DE NAVEGAÇÃO) */
+    aside.sidebar {
+      width: var(--sidebar-w);
+      background-color: var(--bg-card);
+      border-right: 1px solid var(--border-color);
+      height: 100vh;
+      position: sticky;
+      top: 0;
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+      transition: width 0.3s ease;
+    }
+
+    .sidebar-header {
+      padding: 20px 18px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-badge {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 800;
+      font-size: 16px;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+    }
+
+    .brand-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+
+    .brand-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+
+    .sidebar-search-box {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .search-input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .search-input-wrapper input {
+      width: 100%;
+      background-color: var(--bg-card-sub);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 9px 12px 9px 34px;
+      font-size: 13px;
+      color: var(--text-main);
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .search-input-wrapper input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-glow);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      width: 16px;
+      height: 16px;
+      fill: var(--text-dark);
+      pointer-events: none;
+    }
+
+    .role-filter-box {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-main);
+    }
+
+    .role-filter-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-dark);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    .role-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .role-btn {
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid var(--border-color);
+      background-color: var(--bg-card);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .role-btn:hover {
+      background-color: var(--bg-card-sub);
+      color: var(--text-main);
+    }
+
+    .role-btn.active {
+      background-color: var(--primary);
+      color: #ffffff;
+      border-color: var(--primary);
+    }
+
+    .nav-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 8px 30px 8px;
+    }
+
+    .nav-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-dark);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 12px 10px 6px 10px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+      margin-bottom: 2px;
+    }
+
+    .nav-item:hover {
+      background-color: var(--bg-card-sub);
+      color: var(--text-main);
+      transform: translateX(2px);
+    }
+
+    .nav-item.active {
+      background-color: var(--primary-glow);
+      color: var(--primary);
+      font-weight: 600;
+      border-left: 3px solid var(--primary);
+    }
+
+    .nav-badge {
+      margin-left: auto;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-weight: 700;
+    }
+
+    /* CONTEÚDO PRINCIPAL */
+    main.main-content {
+      flex: 1;
+      min-width: 0;
+      overflow-y: auto;
+      padding: 30px 48px 80px 48px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* CABEÇALHO DO MANUAL */
+    .manual-banner {
+      background: linear-gradient(135deg, rgba(30, 58, 138, 0.45) 0%, rgba(17, 24, 39, 0.85) 100%);
+      border: 1px solid #1e3a8a;
+      border-radius: 20px;
+      padding: 36px 40px;
+      margin-bottom: 40px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    .manual-banner::before {
+      content: "";
+      position: absolute;
+      top: -60px;
+      right: -60px;
+      width: 250px;
+      height: 250px;
+      background: radial-gradient(circle, rgba(59, 130, 246, 0.25) 0%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .banner-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(59, 130, 246, 0.2);
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      padding: 4px 12px;
+      border-radius: 20px;
+      color: #93c5fd;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 16px;
+    }
+
+    .banner-title {
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #ffffff;
+      margin-bottom: 12px;
+      line-height: 1.2;
+    }
+
+    .banner-desc {
+      font-size: 16px;
+      color: #cbd5e1;
+      max-width: 850px;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+
+    .banner-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card-sub);
+    }
+
+    /* SEÇÃO E ARTIGO */
+    .manual-section {
+      margin-bottom: 56px;
+      scroll-margin-top: 30px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 2px solid var(--border-color);
+      padding-bottom: 14px;
+      margin-bottom: 26px;
+    }
+
+    .section-header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .section-number {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--primary-glow);
+      color: var(--primary);
+      border: 1px solid var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 15px;
+    }
+
+    .section-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+    }
+
+    .card-topic {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 28px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+      transition: border-color 0.2s;
+    }
+
+    .card-topic:hover {
+      border-color: #3b82f640;
+    }
+
+    .topic-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .topic-title {
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .topic-badges {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .badge-primary { background: var(--primary-glow); color: var(--primary); border: 1px solid var(--primary); }
+    .badge-success { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); }
+    .badge-warning { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning); }
+    .badge-danger  { background: var(--danger-bg);  color: var(--danger);  border: 1px solid var(--danger); }
+    .badge-purple  { background: var(--purple-bg);  color: var(--purple);  border: 1px solid var(--purple); }
+
+    /* CALLOUT BOXES */
+    .callout {
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin: 18px 0;
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      border-left: 4px solid;
+    }
+
+    .callout-icon {
+      font-size: 20px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .callout-body {
+      flex: 1;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .callout-body strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .callout-when {
+      background: rgba(59, 130, 246, 0.08);
+      border-color: #3b82f6;
+      color: #bfdbfe;
+    }
+    .callout-when strong { color: #60a5fa; }
+
+    .callout-warning {
+      background: rgba(245, 158, 11, 0.08);
+      border-color: #f59e0b;
+      color: #fde68a;
+    }
+    .callout-warning strong { color: #fbbf24; }
+
+    .callout-tip {
+      background: rgba(16, 185, 129, 0.08);
+      border-color: #10b981;
+      color: #a7f3d0;
+    }
+    .callout-tip strong { color: #34d399; }
+
+    .callout-danger {
+      background: rgba(239, 68, 68, 0.08);
+      border-color: #ef4444;
+      color: #fecaca;
+    }
+    .callout-danger strong { color: #f87171; }
+
+    /* MOCKUP VISUAL DE TELAS */
+    .screen-mockup {
+      background: #0d121f;
+      border: 1px solid #243048;
+      border-radius: 14px;
+      margin: 22px 0 26px 0;
+      overflow: hidden;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+    }
+
+    .mockup-titlebar {
+      background: #141c2e;
+      border-bottom: 1px solid #243048;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .mockup-controls {
+      display: flex;
+      gap: 6px;
+    }
+
+    .control-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .dot-red   { background-color: #ef4444; }
+    .dot-yellow{ background-color: #f59e0b; }
+    .dot-green { background-color: #10b981; }
+
+    .mockup-address {
+      font-family: monospace;
+      font-size: 11px;
+      background: #090d16;
+      border: 1px solid #243048;
+      border-radius: 6px;
+      padding: 3px 14px;
+      color: #94a3b8;
+    }
+
+    .mockup-view-tag {
+      font-size: 11px;
+      font-weight: 700;
+      color: #60a5fa;
+      background: rgba(59, 130, 246, 0.15);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .mockup-content {
+      padding: 20px;
+      background: #090d16;
+      color: #e2e8f0;
+      font-size: 13px;
+    }
+
+    /* ELEMENTOS DO MOCKUP */
+    .mock-grid {
+      display: grid;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .mock-grid-4 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .mock-grid-3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .mock-grid-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+
+    .mock-card {
+      background: #131b2e;
+      border: 1px solid #222e48;
+      border-radius: 10px;
+      padding: 14px;
+      position: relative;
+    }
+
+    .mock-card-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .mock-card-val {
+      font-size: 22px;
+      font-weight: 800;
+      color: #ffffff;
+      margin-top: 4px;
+    }
+
+    .mock-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 10px;
+    }
+
+    .mock-table th {
+      text-align: left;
+      padding: 8px 10px;
+      background: #141c2e;
+      color: #94a3b8;
+      font-weight: 600;
+      border-bottom: 1px solid #222e48;
+    }
+
+    .mock-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #1a243b;
+      color: #cbd5e1;
+    }
+
+    .mock-table tr:hover td {
+      background: #111827;
+    }
+
+    .mock-tag {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      display: inline-block;
+    }
+
+    .mock-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      border: none;
+      cursor: default;
+    }
+    .mock-btn-blue  { background: #2563eb; color: #fff; }
+    .mock-btn-green { background: #059669; color: #fff; }
+    .mock-btn-red   { background: #dc2626; color: #fff; }
+    .mock-btn-slate { background: #334155; color: #cbd5e1; }
+
+    /* BALÕES EXPLICATIVOS DO MOCKUP */
+    .callout-spot {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #f59e0b;
+      color: #000;
+      font-size: 11px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.8);
+      z-index: 10;
+    }
+
+    /* GUIA PASSO A PASSO */
+    .steps-list {
+      list-style: none;
+      margin: 18px 0;
+      position: relative;
+    }
+
+    .steps-list::before {
+      content: "";
+      position: absolute;
+      left: 17px;
+      top: 15px;
+      bottom: 20px;
+      width: 2px;
+      background: var(--border-color);
+      z-index: 1;
+    }
+
+    .step-item {
+      position: relative;
+      padding-left: 48px;
+      margin-bottom: 20px;
+      z-index: 2;
+    }
+
+    .step-number {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--bg-card);
+      border: 2px solid var(--primary);
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .step-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 4px;
+    }
+
+    .step-desc {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
+
+    /* FLUXOGRAMAS */
+    .workflow-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      background: var(--bg-card-sub);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 18px;
+      margin: 18px 0;
+    }
+
+    .wf-step {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 14px;
+      flex: 1;
+      min-width: 140px;
+      text-align: center;
+    }
+
+    .wf-step-num {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--primary);
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .wf-step-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .wf-arrow {
+      color: var(--text-dark);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    /* TABELA DE MATRIZ RBAC */
+    .rbac-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 13px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+    }
+
+    .rbac-table th {
+      background: var(--bg-card-sub);
+      color: var(--text-main);
+      padding: 12px 14px;
+      text-align: left;
+      font-weight: 700;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .rbac-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-muted);
+    }
+
+    .rbac-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .check-yes { color: var(--success); font-weight: 800; font-size: 15px; }
+    .check-no  { color: var(--danger);  font-weight: 800; font-size: 15px; }
+
+    /* FOOTER */
+    footer.manual-footer {
+      border-top: 1px solid var(--border-color);
+      padding-top: 30px;
+      margin-top: 60px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-dark);
+      font-size: 13px;
+    }
+
+    /* ESTILOS DE IMPRESSÃO PROFISSIONAL (PDF / PRINT) */
+    @media print {
+      @page {
+        size: A4 portrait;
+        margin: 12mm 10mm 15mm 10mm;
+      }
+
+      body {
+        background: #ffffff !important;
+        color: #0f172a !important;
+        font-size: 11pt !important;
+        display: block !important;
+      }
+
+      aside.sidebar,
+      .banner-actions,
+      .role-filter-box,
+      .sidebar-search-box,
+      #btnPrintTop,
+      #themeToggleBtn {
+        display: none !important;
+      }
+
+      main.main-content {
+        padding: 0 !important;
+        max-width: 100% !important;
+      }
+
+      .manual-banner {
+        background: #f1f5f9 !important;
+        border: 2px solid #cbd5e1 !important;
+        color: #0f172a !important;
+        box-shadow: none !important;
+        padding: 20px !important;
+        margin-bottom: 25px !important;
+        page-break-after: avoid;
+      }
+
+      .banner-title {
+        color: #0f172a !important;
+        font-size: 24pt !important;
+      }
+
+      .banner-desc {
+        color: #334155 !important;
+        font-size: 11pt !important;
+      }
+
+      .card-topic {
+        background: #ffffff !important;
+        border: 1px solid #cbd5e1 !important;
+        box-shadow: none !important;
+        padding: 16px !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+        margin-bottom: 22px !important;
+      }
+
+      .screen-mockup {
+        background: #f8fafc !important;
+        border: 1px solid #94a3b8 !important;
+        box-shadow: none !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
+      .mockup-titlebar {
+        background: #e2e8f0 !important;
+        border-bottom: 1px solid #cbd5e1 !important;
+      }
+
+      .mockup-content {
+        background: #ffffff !important;
+        color: #0f172a !important;
+      }
+
+      .mock-card {
+        background: #f8fafc !important;
+        border: 1px solid #cbd5e1 !important;
+      }
+
+      .mock-card-val {
+        color: #0f172a !important;
+      }
+
+      .mock-table th {
+        background: #f1f5f9 !important;
+        color: #334155 !important;
+        border-bottom: 1px solid #cbd5e1 !important;
+      }
+
+      .mock-table td {
+        color: #0f172a !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+      }
+
+      .callout {
+        background: #f8fafc !important;
+        border-width: 1px 1px 1px 4px !important;
+        page-break-inside: avoid;
+      }
+
+      .section-header {
+        page-break-after: avoid;
+        border-bottom: 2px solid #0f172a !important;
+      }
+
+      .section-title {
+        color: #0f172a !important;
+      }
+
+      .topic-title {
+        color: #0f172a !important;
+      }
+
+      .step-desc, .callout-body {
+        color: #334155 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- BARRA LATERAL (SUMÁRIO E FILTROS) -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="brand-badge">4R</div>
+      <div>
+        <h1 class="brand-title">Manual do Sistema</h1>
+        <p class="brand-sub">4Rodas ERP & Pátio</p>
+      </div>
+    </div>
+
+    <!-- BUSCA DINÂMICA -->
+    <div class="sidebar-search-box">
+      <div class="search-input-wrapper">
+        <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <input type="text" id="manualSearch" placeholder="Buscar módulo, tela ou regra..." oninput="handleFilterManual(this.value)">
+      </div>
+    </div>
+
+    <!-- FILTRO POR CARGO -->
+    <div class="role-filter-box">
+      <span class="role-filter-label">Filtrar por Perfil:</span>
+      <div class="role-buttons">
+        <button class="role-btn active" onclick="setRoleFilter('todos', this)">Todos</button>
+        <button class="role-btn" onclick="setRoleFilter('caixa', this)">Caixa</button>
+        <button class="role-btn" onclick="setRoleFilter('mecanico', this)">Mecânico</button>
+        <button class="role-btn" onclick="setRoleFilter('patio', this)">Pátio/OS</button>
+        <button class="role-btn" onclick="setRoleFilter('gerente', this)">Gerente</button>
+        <button class="role-btn" onclick="setRoleFilter('owner', this)">Proprietário</button>
+      </div>
+    </div>
+
+    <!-- ITENS DE NAVEGAÇÃO -->
+    <nav class="nav-container" id="sidebarNav">
+      <div class="nav-section-title">Visão Geral</div>
+      <a href="#sec-arquitetura" class="nav-item">Arquitetura & Fluxo Geral</a>
+
+      <div class="nav-section-title">Recepção & Oficina</div>
+      <a href="#sec-dashboard-os" class="nav-item" data-roles="gerente,owner,patio">1. Dashboard Operacional</a>
+      <a href="#sec-ordens-servico" class="nav-item" data-roles="patio,mecanico,gerente">2. Ordens de Serviço & Checklist</a>
+      <a href="#sec-orcamentos" class="nav-item" data-roles="patio,gerente">3. Orçamentos & Aprovação</a>
+      <a href="#sec-oficina-produtividade" class="nav-item" data-roles="mecanico,gerente,owner">4. Oficina & Comissões</a>
+
+      <div class="nav-section-title">Vendas & Caixa</div>
+      <a href="#sec-caixa" class="nav-item" data-roles="caixa,gerente,owner">5. Frente de Caixa & Fechamento</a>
+      <a href="#sec-pdv" class="nav-item" data-roles="caixa,gerente">6. Ponto de Venda (PDV)</a>
+      <a href="#sec-vendas" class="nav-item" data-roles="caixa,gerente,owner">7. Histórico de Vendas</a>
+
+      <div class="nav-section-title">Estoque Estratégico</div>
+      <a href="#sec-catalogo" class="nav-item" data-roles="gerente,owner">8. Catálogo de Produtos</a>
+      <a href="#sec-estoque-fisico" class="nav-item" data-roles="gerente,owner,patio">9. Ajustes de Estoque Físico</a>
+      <a href="#sec-kardex" class="nav-item" data-roles="gerente,owner">10. Ficha Kardex (Rastreabilidade)</a>
+      <a href="#sec-curva-abc" class="nav-item" data-roles="gerente,owner">11. Curva ABC (Pareto)</a>
+      <a href="#sec-sugestao-compras" class="nav-item" data-roles="gerente,owner">12. Sugestão Inteligente de Compras</a>
+      <a href="#sec-valorizacao" class="nav-item" data-roles="gerente,owner">13. Valorização de Estoque</a>
+      <a href="#sec-importar" class="nav-item" data-roles="gerente,owner">14. Importação em Massa & NFe</a>
+
+      <div class="nav-section-title">Financeiro & Controladoria</div>
+      <a href="#sec-contas-receber" class="nav-item" data-roles="gerente,owner,caixa">15. Contas a Receber</a>
+      <a href="#sec-contas-pagar" class="nav-item" data-roles="gerente,owner">16. Contas a Pagar</a>
+      <a href="#sec-dre" class="nav-item" data-roles="owner,gerente">17. DRE Gerencial de Resultados</a>
+
+      <div class="nav-section-title">Clientes & CRM</div>
+      <a href="#sec-clientes" class="nav-item" data-roles="patio,caixa,gerente">18. Cadastro & Histórico 360°</a>
+      <a href="#sec-crm-preventivo" class="nav-item" data-roles="gerente,patio,owner">19. CRM de Manutenções Preventivas</a>
+
+      <div class="nav-section-title">Governança & Multi-Lojas</div>
+      <a href="#sec-multi-lojas" class="nav-item" data-roles="owner,gerente">20. Multi-Lojas & Filiais</a>
+      <a href="#sec-usuarios-rbac" class="nav-item" data-roles="owner">21. Usuários & Permissões (RBAC)</a>
+      <a href="#sec-parametros" class="nav-item" data-roles="owner,gerente">22. Parâmetros & Instalações</a>
+
+      <div class="nav-section-title">App Mobile Pátio</div>
+      <a href="#sec-app-mobile" class="nav-item" data-roles="patio,mecanico">23. App Mobile no Tablet/Celular</a>
+
+      <div class="nav-section-title">Apêndices</div>
+      <a href="#sec-matriz-responsabilidade" class="nav-item">Matriz de Responsabilidades</a>
+      <a href="#sec-faq" class="nav-item">Perguntas Frequentes & Erros</a>
+    </nav>
+  </aside>
+
+  <!-- ÁREA DE LEITURA DO MANUAL -->
+  <main class="main-content" id="mainContent">
+
+    <!-- BANNER PRINCIPAL -->
+    <header class="manual-banner">
+      <div class="banner-tag">Guia Oficial de Operação e Procedimentos Padrão (SOP)</div>
+      <h1 class="banner-title">Manual Operacional do Sistema Integrado</h1>
+      <p class="banner-desc">
+        Mapeamento completo de telas, fluxos de trabalho da oficina, frente de caixa, estoque preditivo, controle de mecânicos e controladoria financeira para o <strong>4Rodas ERP & Checklist Automotivo</strong>.
+      </p>
+      <div class="banner-actions">
+        <button class="btn btn-primary" id="btnPrintTop" onclick="window.print()">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+          Imprimir / Salvar em PDF (Ctrl+P)
+        </button>
+        <button class="btn btn-secondary" id="themeToggleBtn" onclick="toggleTheme()">
+          🌓 Alternar Tema (Claro / Escuro)
+        </button>
+      </div>
+    </header>
+
+    <!-- ARQUITETURA & FLUXO GERAL -->
+    <section class="manual-section" id="sec-arquitetura" data-roles="todos">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">★</div>
+          <h2 class="section-title">Arquitetura da Solução & Ciclo Completo de Atendimento</h2>
+        </div>
+        <span class="badge badge-primary">Visão Geral</span>
+      </div>
+
+      <div class="card-topic">
+        <h3 class="topic-title">Como o Sistema Funciona de Ponta a Ponta</h3>
+        <p style="margin-bottom: 16px; color: var(--text-muted);">
+          O ecossistema é composto por duas interfaces perfeitamente integradas ao mesmo banco de dados em tempo real:
+          a <strong>Plataforma Web (4Rodas ERP)</strong> — utilizada na recepção, gerência, compras e financeiro — e o
+          <strong>App Mobile de Pátio</strong> — operado em tablets e smartphones pelos consultores de pátio e mecânicos no box de serviço.
+        </p>
+
+        <div class="workflow-container">
+          <div class="wf-step">
+            <div class="wf-step-num">Passo 1</div>
+            <div class="wf-step-title">Chegada no Pátio</div>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Placa Mercosul + Checklist 360° com fotos</p>
+          </div>
+          <div class="wf-arrow">→</div>
+          <div class="wf-step">
+            <div class="wf-step-num">Passo 2</div>
+            <div class="wf-step-title">Orçamento / OS</div>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Peças + Mão de Obra + Assinatura Digital</p>
+          </div>
+          <div class="wf-arrow">→</div>
+          <div class="wf-step">
+            <div class="wf-step-num">Passo 3</div>
+            <div class="wf-step-title">Execução Mecânica</div>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Baixa de Peças + Apontamento de Horas</p>
+          </div>
+          <div class="wf-arrow">→</div>
+          <div class="wf-step">
+            <div class="wf-step-num">Passo 4</div>
+            <div class="wf-step-title">PDV & Faturamento</div>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Recebimento no Caixa + Baixa Financeira</p>
+          </div>
+          <div class="wf-arrow">→</div>
+          <div class="wf-step">
+            <div class="wf-step-num">Passo 5</div>
+            <div class="wf-step-title">Pós-Venda CRM</div>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Alerta de Revisão Preventiva por KM/Tempo</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 1: DASHBOARD OPERACIONAL -->
+    <section class="manual-section" id="sec-dashboard-os" data-roles="gerente,owner,patio">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">01</div>
+          <h2 class="section-title">Dashboard Operacional da Recepção</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Monitoramento de Veículos no Pátio em Tempo Real</h3>
+          <div class="topic-badges">
+            <span class="badge badge-purple">Perfis: Gerente, Dono, Consultor</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">⏱️</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Logo no início do expediente para verificar os carros que pernoitaram na oficina, durante o dia para acompanhar gargalos operacionais e no final da tarde para conferir o volume faturado em serviços.
+          </div>
+        </div>
+
+        <!-- MOCKUP VISUAL -->
+        <div class="screen-mockup">
+          <div class="mockup-titlebar">
+            <div class="mockup-controls">
+              <span class="control-dot dot-red"></span>
+              <span class="control-dot dot-yellow"></span>
+              <span class="control-dot dot-green"></span>
+            </div>
+            <span class="mockup-address">https://sistema.4rodas.com.br/dashboard</span>
+            <span class="mockup-view-tag">Visão: Recepção & Pátio</span>
+          </div>
+          <div class="mockup-content">
+            <div class="mock-grid mock-grid-4">
+              <div class="mock-card">
+                <span class="callout-spot">1</span>
+                <div class="mock-card-label">Orçamentos Pendentes</div>
+                <div class="mock-card-val" style="color: #60a5fa;">04</div>
+                <span style="font-size: 11px; color: #94a3b8;">Aguardando aprovação do cliente</span>
+              </div>
+              <div class="mock-card">
+                <span class="callout-spot">2</span>
+                <div class="mock-card-label">OS em Aberto</div>
+                <div class="mock-card-val" style="color: #34d399;">08</div>
+                <span style="font-size: 11px; color: #94a3b8;">Veículos aguardando box/peças</span>
+              </div>
+              <div class="mock-card">
+                <span class="callout-spot">3</span>
+                <div class="mock-card-label">Em Execução no Box</div>
+                <div class="mock-card-val" style="color: #fbbf24;">06</div>
+                <span style="font-size: 11px; color: #94a3b8;">Mecânicos trabalhando no momento</span>
+              </div>
+              <div class="mock-card">
+                <span class="callout-spot">4</span>
+                <div class="mock-card-label">Faturamento do Dia</div>
+                <div class="mock-card-val" style="color: #f43f5e;">R$ 14.850,00</div>
+                <span style="font-size: 11px; color: #94a3b8;">12 OS finalizadas e pagas</span>
+              </div>
+            </div>
+
+            <!-- TABELA DE ORDENS RECENTES -->
+            <div style="margin-top: 16px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span style="font-weight:700; color:#e2e8f0;">Veículos em Atendimento no Pátio</span>
+                <span class="mock-btn mock-btn-blue">+ Nova Ordem de Serviço</span>
+              </div>
+              <table class="mock-table">
+                <thead>
+                  <tr>
+                    <th>OS #</th>
+                    <th>Placa / Modelo</th>
+                    <th>Cliente</th>
+                    <th>Mecânico</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>#1042</strong></td>
+                    <td><span class="mock-tag" style="background:#1e3a8a; color:#93c5fd;">BRA2E19</span> Honda Civic 2.0</td>
+                    <td>Carlos Eduardo Souza</td>
+                    <td>Marcos Mecânico</td>
+                    <td><span class="mock-tag" style="background:#065f46; color:#6ee7b7;">Em Andamento</span></td>
+                    <td>R$ 1.450,00</td>
+                  </tr>
+                  <tr>
+                    <td><strong>#1041</strong></td>
+                    <td><span class="mock-tag" style="background:#1e3a8a; color:#93c5fd;">RPA9F33</span> Toyota Corolla Cross</td>
+                    <td>Fernanda Lima</td>
+                    <td>Lucas Técnico</td>
+                    <td><span class="mock-tag" style="background:#854d0e; color:#fde047;">Aguardando Peças</span></td>
+                    <td>R$ 890,00</td>
+                  </tr>
+                  <tr>
+                    <td><strong>#1040</strong></td>
+                    <td><span class="mock-tag" style="background:#1e3a8a; color:#93c5fd;">FXT1A44</span> Fiat Strada 1.3</td>
+                    <td>Transportes Veloz Ltda</td>
+                    <td>Marcos Mecânico</td>
+                    <td><span class="mock-tag" style="background:#334155; color:#cbd5e1;">Finalizada</span></td>
+                    <td>R$ 640,00</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <h4 style="margin: 20px 0 10px 0; color: var(--text-main);">Pontos Críticos desta Tela:</h4>
+        <ul class="steps-list">
+          <li class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-title">Card Orçamentos Pendentes</div>
+            <div class="step-desc">Mostra quantos clientes receberam orçamento e ainda não responderam. Clique para abrir a lista e acionar o cliente por WhatsApp.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-title">Alerta de OS Parada</div>
+            <div class="step-desc">Veículos marcados com 'Aguardando Peças' devem ser prioridade do setor de compras para evitar ocupar o box da oficina desnecessariamente.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-title">Atualização Automática (Polling de 10 segundos)</div>
+            <div class="step-desc">A tela atualiza sozinha sem precisar pressionar F5, refletindo novos atendimentos abertos pelos tablets no pátio.</div>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- MÓDULO 2: ORDENS DE SERVIÇO & CHECKLIST 360 -->
+    <section class="manual-section" id="sec-ordens-servico" data-roles="patio,mecanico,gerente">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">02</div>
+          <h2 class="section-title">Ordens de Serviço & Checklist Digital 360°</h2>
+        </div>
+        <span class="badge badge-primary">Rotas: /orders e /orders/:id</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Inspeção de Entrada, Itens de Segurança e Execução Técnica</h3>
+          <div class="topic-badges">
+            <span class="badge badge-success">Proteção Jurídica da Oficina</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">🚗</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Imediatamente quando o veículo encosta no pátio da oficina. Nunca inicie qualquer serviço mecânico sem a abertura prévia da OS e a realização do checklist de entrada com a conferência dos pertences e avarias da lataria.
+          </div>
+        </div>
+
+        <!-- MOCKUP VISUAL DETALHE DA OS -->
+        <div class="screen-mockup">
+          <div class="mockup-titlebar">
+            <div class="mockup-controls">
+              <span class="control-dot dot-red"></span>
+              <span class="control-dot dot-yellow"></span>
+              <span class="control-dot dot-green"></span>
+            </div>
+            <span class="mockup-address">https://sistema.4rodas.com.br/orders/1042</span>
+            <span class="mockup-view-tag">OS #1042 — Honda Civic</span>
+          </div>
+          <div class="mockup-content">
+            <!-- HEADER DA OS -->
+            <div style="background:#131b2e; border:1px solid #222e48; border-radius:10px; padding:16px; margin-bottom:14px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+              <div>
+                <span class="mock-tag" style="background:#2563eb; color:#fff; font-size:12px; font-weight:800;">PLACA: BRA2E19</span>
+                <span style="font-size:16px; font-weight:700; margin-left:8px;">Honda Civic 2.0 EXL 2020</span>
+                <div style="font-size:12px; color:#94a3b8; margin-top:4px;">
+                  Cliente: <strong>Carlos Eduardo Souza</strong> | Tel: (11) 98765-4321 | KM: 78.450 km | Combustível: 1/2 tanque
+                </div>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <span class="mock-btn mock-btn-slate">🖨️ Imprimir Laudo</span>
+                <span class="mock-btn mock-btn-green">✓ Finalizar OS</span>
+              </div>
+            </div>
+
+            <!-- GRID DUPLO: CHECKLIST E PEÇAS -->
+            <div class="mock-grid mock-grid-2">
+              <!-- BLOCO 1: CHECKLIST -->
+              <div class="mock-card">
+                <span class="callout-spot">A</span>
+                <div class="mock-card-label">Checklist de Entrada 360°</div>
+                <div style="margin-top:10px; font-size:12px; line-height:1.8;">
+                  <div>☑ <strong>Estepe:</strong> Presente e calibrado</div>
+                  <div>☑ <strong>Macaco / Chave de Roda:</strong> Presente no porta-malas</div>
+                  <div>⚠ <strong>Avarias Visuais:</strong> Risco no para-choque dianteiro direito (Foto anexada)</div>
+                  <div>⚠ <strong>Nível do Óleo:</strong> Abaixo do mínimo recomendado</div>
+                  <div>☑ <strong>Pastilhas de Freio:</strong> Meia-vida (indicada troca preventiva)</div>
+                </div>
+              </div>
+
+              <!-- BLOCO 2: PEÇAS E SERVIÇOS -->
+              <div class="mock-card">
+                <span class="callout-spot">B</span>
+                <div class="mock-card-label">Peças Requisitadas & Serviços Mecânicos</div>
+                <table class="mock-table">
+                  <thead>
+                    <tr><th>Item</th><th>Qtd</th><th>Unit.</th><th>Total</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Óleo Sintético 5W30 Motul</td><td>4 un</td><td>R$ 65,00</td><td>R$ 260,00</td></tr>
+                    <tr><td>Filtro de Óleo Fram PH5949</td><td>1 un</td><td>R$ 45,00</td><td>R$ 45,00</td></tr>
+                    <tr><td>Pastilha Freio Dianteira Cobreq</td><td>1 un</td><td>R$ 180,00</td><td>R$ 180,00</td></tr>
+                    <tr><td>Mão de Obra: Troca Óleo + Freios</td><td>1 h</td><td>R$ 220,00</td><td>R$ 220,00</td></tr>
+                  </tbody>
+                </table>
+                <div style="text-align:right; margin-top:10px; font-size:14px; font-weight:800; color:#34d399;">
+                  Total da OS: R$ 705,00
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">🔒</div>
+          <div class="callout-body">
+            <strong>Regra de Segurança — Reabertura de OS Fechada:</strong>
+            Uma vez que a OS foi finalizada e encaminhada ao PDV para pagamento, ela entra no status "closed". Caso seja necessário alterar qualquer item ou serviço, o sistema exige obrigatoriamente a digitação do <strong>PIN Gerencial de Supervisor</strong> para evitar fraudes ou desvio de peças.
+          </div>
+        </div>
+
+        <h4 style="margin: 20px 0 10px 0; color: var(--text-main);">Passo a Passo Operacional (Do Início à Conclusão):</h4>
+        <ol class="steps-list">
+          <li class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-title">Abertura e Identificação Veicular</div>
+            <div class="step-desc">Digite a placa do carro (com máscara Mercosul automática). O sistema busca o histórico de visitas anteriores do cliente pelo cadastro central. Preencha o odômetro (KM atual) com precisão.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-title">Inspeção no Checklist Digital</div>
+            <div class="step-desc">Marque os itens obrigatórios (estepe, macaco, rádio, triângulo). Se houver arranhões ou amassados, fotografe pelo app ou registre a observação no campo de texto para garantir a segurança da oficina contra reclamações indevidas.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-title">Lançamento de Peças e Serviços</div>
+            <div class="step-desc">Utilize a barra de pesquisa de catálogo para adicionar as peças. O sistema valida se há saldo em estoque no momento. Atribua o mecânico responsável por cada mão de obra para correta apuração das comissões.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">4</div>
+            <div class="step-title">Finalização e Envio ao PDV</div>
+            <div class="step-desc">Clique no botão "Finalizar OS". O sistema valida o preenchimento do documento do cliente e envia o saldo automaticamente para o terminal de Frente de Caixa / PDV.</div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- MÓDULO 3: ORÇAMENTOS (QUOTES) -->
+    <section class="manual-section" id="sec-orcamentos" data-roles="patio,gerente">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">03</div>
+          <h2 class="section-title">Central de Orçamentos & Aprovação Digital</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /quotes</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Cotação Prévia, Envio por WhatsApp e Conversão em OS</h3>
+          <div class="topic-badges">
+            <span class="badge badge-purple">Perfis: Atendente, Consultor, Gerente</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">💬</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Quando o cliente solicita uma cotação de serviços ou peças por telefone, balcão ou WhatsApp antes de autorizar a realização do trabalho. O orçamento não dá baixa no estoque até ser aprovado.
+          </div>
+        </div>
+
+        <p style="color: var(--text-muted); margin-bottom: 16px;">
+          A tela de orçamentos possui três filtros principais: <strong>Aguardando Aprovação</strong> (clientes em negociação),
+          <strong>Aprovados</strong> (orçamentos que já foram convertidos em Ordem de Serviço) e <strong>Todos</strong>.
+        </p>
+
+        <div class="callout callout-tip">
+          <div class="callout-icon">💡</div>
+          <div class="callout-body">
+            <strong>Disparo para WhatsApp com 1 Clique:</strong>
+            Ao lado de cada orçamento existe o botão do WhatsApp. Ao clicar, o sistema abre diretamente o WhatsApp Web/App com a mensagem formatada contendo o nome do cliente, veículo, relação dos itens cotados, valor total e chave PIX para sinal.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 4: OFICINA & COMISSÕES DE MECÂNICOS -->
+    <section class="manual-section" id="sec-oficina-produtividade" data-roles="mecanico,gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">04</div>
+          <h2 class="section-title">Oficina & Produtividade da Equipe Mecânica</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/oficina</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Apontamento de Horas, Eficiência Operacional e Fechamento de Comissões</h3>
+          <div class="topic-badges">
+            <span class="badge badge-warning">Gestão de Pessoas & Remuneração</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">🔧</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            - <strong>Diariamente:</strong> Para acompanhar a produtividade dos mecânicos em tempo real e distribuir ordens de serviço pendentes.<br>
+            - <strong>Semanalmente ou Mensalmente:</strong> No dia do fechamento da folha de pagamento da oficina para calcular as comissões sobre mão de obra e peças vendidas, abater vales/adiantamentos e imprimir o holerite da oficina.
+          </div>
+        </div>
+
+        <!-- MOCKUP OFICINA -->
+        <div class="screen-mockup">
+          <div class="mockup-titlebar">
+            <div class="mockup-controls">
+              <span class="control-dot dot-red"></span>
+              <span class="control-dot dot-yellow"></span>
+              <span class="control-dot dot-green"></span>
+            </div>
+            <span class="mockup-address">https://sistema.4rodas.com.br/erp/oficina</span>
+            <span class="mockup-view-tag">Produtividade da Oficina</span>
+          </div>
+          <div class="mockup-content">
+            <div class="mock-grid mock-grid-3">
+              <div class="mock-card">
+                <div class="mock-card-label">Horas Faturadas no Mês</div>
+                <div class="mock-card-val" style="color: #60a5fa;">342,5 hrs</div>
+                <span style="font-size: 11px; color: #94a3b8;">Média de 8,2 hrs/dia por técnico</span>
+              </div>
+              <div class="mock-card">
+                <div class="mock-card-label">Eficiência Geral da Oficina</div>
+                <div class="mock-card-val" style="color: #34d399;">94.2%</div>
+                <span style="font-size: 11px; color: #94a3b8;">Horas faturadas vs Horas trabalhadas</span>
+              </div>
+              <div class="mock-card">
+                <div class="mock-card-label">Total de Comissões Apuradas</div>
+                <div class="mock-card-val" style="color: #fbbf24;">R$ 8.940,00</div>
+                <span style="font-size: 11px; color: #94a3b8;">Pronto para fechamento de quinzena</span>
+              </div>
+            </div>
+
+            <!-- TABELA DE MECÂNICOS -->
+            <table class="mock-table">
+              <thead>
+                <tr>
+                  <th>Técnico / Mecânico</th>
+                  <th>OS Executadas</th>
+                  <th>Mão de Obra Faturada</th>
+                  <th>% Comissão</th>
+                  <th>Comissão Bruta</th>
+                  <th>Vales/Adiantamentos</th>
+                  <th>Líquido a Pagar</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Marcos Vinicius (Técnico Líder)</strong></td>
+                  <td>28</td>
+                  <td>R$ 14.800,00</td>
+                  <td>30% M.O. / 2% Peças</td>
+                  <td>R$ 4.740,00</td>
+                  <td>- R$ 500,00</td>
+                  <td style="color:#34d399; font-weight:700;">R$ 4.240,00</td>
+                  <td><span class="mock-btn mock-btn-blue">Extrato / Recibo</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Lucas Santana (Mecânico)</strong></td>
+                  <td>22</td>
+                  <td>R$ 11.200,00</td>
+                  <td>25% M.O.</td>
+                  <td>R$ 2.800,00</td>
+                  <td>- R$ 200,00</td>
+                  <td style="color:#34d399; font-weight:700;">R$ 2.600,00</td>
+                  <td><span class="mock-btn mock-btn-blue">Extrato / Recibo</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h4 style="margin: 20px 0 10px 0; color: var(--text-main);">Procedimento para Pagamento de Comissões:</h4>
+        <ol class="steps-list">
+          <li class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-title">Seleção do Período</div>
+            <div class="step-desc">Selecione o filtro de datas (Ex: 'Quinzena Atual' ou 'Mês Anterior'). O sistema recalcula automaticamente todas as ordens com status encerrado no período selecionado.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-title">Conferência do Extrato Individual</div>
+            <div class="step-desc">Clique no botão "Extrato" do mecânico. É possível visualizar cada OS individualmente com a data, número da OS, cliente, valor cobrado do serviço e o cálculo da comissão atribuída.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-title">Lançamento de Adiantamentos ou Vales</div>
+            <div class="step-desc">Se o mecânico retirou dinheiro como vale durante a semana, registre o valor no campo de deduções. O sistema desconta automaticamente do valor líquido final.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">4</div>
+            <div class="step-title">Efetivação do Pagamento & Impressão do Recibo</div>
+            <div class="step-desc">Clique em "Marcar como Pago". O sistema gera o recibo assinado em duas vias (uma via para o mecânico e outra para o arquivo da empresa) e lança a saída automática no módulo Contas a Pagar.</div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- MÓDULO 5: FRENTE DE CAIXA & CONFERÊNCIA -->
+    <section class="manual-section" id="sec-caixa" data-roles="caixa,gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">05</div>
+          <h2 class="section-title">Frente de Caixa & Fechamento Cego</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/caixa</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Abertura de Turno, Movimentações (Suprimento/Sangria) e Auditoria Térmica</h3>
+          <div class="topic-badges">
+            <span class="badge badge-success">Operação Financeira de Balcão</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">💵</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            - <strong>No início do expediente:</strong> O operador de caixa deve obrigatoriamente abrir o caixa com o valor do fundo de troco.<br>
+            - <strong>Durante o dia:</strong> Para realizar sangrias (retiradas de cédulas para o cofre por segurança) ou suprimentos (entrada de troco adicional).<br>
+            - <strong>Ao encerrar o turno:</strong> Para realizar a contagem física das notas e moedas no fechamento cego e emitir a filipeta térmica de conferência.
+          </div>
+        </div>
+
+        <!-- MOCKUP CAIXA -->
+        <div class="screen-mockup">
+          <div class="mockup-titlebar">
+            <div class="mockup-controls">
+              <span class="control-dot dot-red"></span>
+              <span class="control-dot dot-yellow"></span>
+              <span class="control-dot dot-green"></span>
+            </div>
+            <span class="mockup-address">https://sistema.4rodas.com.br/erp/caixa</span>
+            <span class="mockup-view-tag">Sessão #482 — Operador: Ana Paula</span>
+          </div>
+          <div class="mockup-content">
+            <div style="background:#131b2e; border:1px solid #222e48; border-radius:10px; padding:16px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+              <div>
+                <span class="mock-tag" style="background:#065f46; color:#6ee7b7; font-size:12px; font-weight:800;">CAIXA ABERTO</span>
+                <span style="font-size:15px; font-weight:700; margin-left:8px;">Terminal 01 — Turno Manhã/Tarde</span>
+                <div style="font-size:12px; color:#94a3b8; margin-top:4px;">
+                  Abertura: 10/10/2026 às 07:45 | Fundo Inicial: <strong>R$ 150,00</strong>
+                </div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <span class="mock-btn mock-btn-blue">+ Suprimento</span>
+                <span class="mock-btn mock-btn-red">- Sangria</span>
+                <span class="mock-btn mock-btn-slate">Contador Cédulas</span>
+                <span class="mock-btn mock-btn-red" style="background:#b91c1c;">Encerrar Caixa</span>
+              </div>
+            </div>
+
+            <!-- TOTAIS POR FORMA DE PAGAMENTO -->
+            <div class="mock-grid mock-grid-4">
+              <div class="mock-card">
+                <div class="mock-card-label">Dinheiro em Gaveta</div>
+                <div class="mock-card-val" style="color:#34d399;">R$ 1.240,00</div>
+                <span style="font-size:11px; color:#94a3b8;">Fundo + Vendas em espécie</span>
+              </div>
+              <div class="mock-card">
+                <div class="mock-card-label">Cartão de Crédito / Débito</div>
+                <div class="mock-card-val" style="color:#60a5fa;">R$ 4.890,00</div>
+                <span style="font-size:11px; color:#94a3b8;">24 transações na maquininha</span>
+              </div>
+              <div class="mock-card">
+                <div class="mock-card-label">Recebimentos PIX</div>
+                <div class="mock-card-val" style="color:#fbbf24;">R$ 3.120,00</div>
+                <span style="font-size:11px; color:#94a3b8;">15 transferências confirmadas</span>
+              </div>
+              <div class="mock-card">
+                <div class="mock-card-label">Total Entradas Hoje</div>
+                <div class="mock-card-val" style="color:#f43f5e;">R$ 9.250,00</div>
+                <span style="font-size:11px; color:#94a3b8;">Vendas PDV + Ordens de Serviço</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout callout-danger">
+          <div class="callout-icon">🚨</div>
+          <div class="callout-body">
+            <strong>Bloqueio de Sistema — PDV Travado com Caixa Fechado:</strong>
+            O sistema 4Rodas ERP possui uma trava de segurança intransponível: <strong>o Ponto de Venda (PDV) fica 100% bloqueado</strong> contra novas vendas enquanto o operador não realizar a abertura formal da sua sessão de caixa. Isso impede que ocorram vendas avulsas sem a devida responsabilização do operador.
+          </div>
+        </div>
+
+        <h4 style="margin: 20px 0 10px 0; color: var(--text-main);">Procedimento para o Fechamento Cego de Caixa:</h4>
+        <ol class="steps-list">
+          <li class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-title">Abertura do Contador de Cédulas</div>
+            <div class="step-desc">Clique no botão "Contador de Cédulas". A tela exibirá campos para contagem de cada nota (R$ 200, 100, 50, 20, 10, 5, 2) e moedas. O operador apenas conta o dinheiro físico que está na gaveta e digita a quantidade de cada nota.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-title">Apuração Cega de Diferenças (Quebra de Caixa)</div>
+            <div class="step-desc">O operador não vê o saldo calculado pelo sistema até confirmar a contagem. Isso garante total idoneidade. Após confirmar, o sistema confronta o valor físico contado com as vendas registradas e apura se houve 'Sobra' ou 'Falta'.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-title">Impressão da Filipeta Térmica (80mm / 58mm)</div>
+            <div class="step-desc">O modal exibe a filipeta formatada para impressoras térmicas contendo o resumo por forma de pagamento, lista das transações em PIX, quebra apurada e espaço para assinatura do operador e do gerente.</div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- MÓDULO 6: PONTO DE VENDA (PDV) -->
+    <section class="manual-section" id="sec-pdv" data-roles="caixa,gerente">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">06</div>
+          <h2 class="section-title">Ponto de Venda (PDV) — Vendas Rápidas de Balcão</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/pdv</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Venda Ágil, Leitor de Código de Barras, Descontos e Pagamentos Fracionados</h3>
+          <div class="topic-badges">
+            <span class="badge badge-primary">Frente de Loja</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">🛒</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            No atendimento diário de balcão quando um cliente entra para comprar peças, baterias, lubrificantes ou acessórios sem necessidade de abrir uma ordem de serviço completa na oficina, ou no momento do faturamento de uma OS concluída.
+          </div>
+        </div>
+
+        <p style="color: var(--text-muted); margin-bottom: 16px;">
+          O PDV foi desenvolvido com foco em alta velocidade. Suporta navegação por teclado, leitor de código de barras USB/Bluetooth,
+          seleção rápida de cliente (ou venda avulsa ao consumidor) e divisão de pagamentos (Ex: R$ 50,00 no PIX e R$ 150,00 no Cartão de Crédito).
+        </p>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">🛡️</div>
+          <div class="callout-body">
+            <strong>Teto Máximo de Desconto Parametrizado:</strong>
+            O sistema impede que operadores concedam descontos superiores ao limite cadastrado nos parâmetros gerais (geralmente fixado entre 4% e 5%). Qualquer tentativa de aplicar desconto acima desse percentual requer a senha do gerente.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 7: HISTÓRICO DE VENDAS -->
+    <section class="manual-section" id="sec-vendas" data-roles="caixa,gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">07</div>
+          <h2 class="section-title">Histórico de Vendas & Comprovantes</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/vendas</span>
+      </div>
+
+      <div class="card-topic">
+        <h3 class="topic-title">Consulta de Cupons, Reimpressão e Estornos</h3>
+        <p style="color: var(--text-muted); margin-top: 8px;">
+          Esta tela lista todas as vendas realizadas pelo PDV e pela oficina. Permite filtrar por número de cupom/controle,
+          nome do cliente, forma de pagamento ou intervalo de datas.
+        </p>
+        <div class="callout callout-when">
+          <div class="callout-icon">🧾</div>
+          <div class="callout-body">
+            <strong>Quando usar:</strong>
+            Sempre que um cliente retornar solicitando a 2ª via do comprovante da compra, ou quando for necessário realizar a auditoria de vendas canceladas ou estornadas.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 8: CATÁLOGO DE PRODUTOS -->
+    <section class="manual-section" id="sec-catalogo" data-roles="gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">08</div>
+          <h2 class="section-title">Catálogo de Produtos, Peças & Serviços</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/produtos</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Cadastro Técnico, Precificação, Margem Markup e NCM Fiscal</h3>
+          <div class="topic-badges">
+            <span class="badge badge-primary">Gestão de Portfólio</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">🏷️</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Ao cadastrar novas peças que chegaram de fornecedores, alterar tabelas de preço de venda, reajustar custos de reposição ou cadastrar novos serviços de mão de obra prestados pela oficina.
+          </div>
+        </div>
+
+        <p style="color: var(--text-muted); margin-bottom: 14px;">
+          No cadastro de cada item é possível definir se ele é um <strong>Produto Físico</strong> (que movimenta estoque e exige controle de quantidade)
+          ou um <strong>Serviço Mecânico</strong> (que possui tempo padrão de instalação e comissão de mão de obra associada).
+        </p>
+      </div>
+    </section>
+
+    <!-- MÓDULO 9: AJUSTES DE ESTOQUE FÍSICO -->
+    <section class="manual-section" id="sec-estoque-fisico" data-roles="gerente,owner,patio">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">09</div>
+          <h2 class="section-title">Estoque Físico & Ajustes Rápidos</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/estoque</span>
+      </div>
+
+      <div class="card-topic">
+        <h3 class="topic-title">Balanço Físico, Entrada Manual e Registro de Perdas/Avarias</h3>
+        <p style="color: var(--text-muted); margin-top: 8px;">
+          Permite a consulta rápida do saldo disponível de cada item na prateleira da loja e a execução de ajustes pontuais.
+        </p>
+        <div class="callout callout-tip">
+          <div class="callout-icon">📦</div>
+          <div class="callout-body">
+            <strong>Três Modalidades de Ajuste:</strong>
+            - <strong>Entrada:</strong> Soma unidades ao saldo atual (Ex: devolução de fornecedor sem nota ou doação).<br>
+            - <strong>Saída:</strong> Subtrai unidades do saldo (Ex: peça quebrada na montagem, vencimento de lubrificante ou perda).<br>
+            - <strong>Inventário (Ajuste):</strong> Sobrescreve o saldo exato após contagem física de prateleira.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 10: FICHA KARDEX -->
+    <section class="manual-section" id="sec-kardex" data-roles="gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">10</div>
+          <h2 class="section-title">Ficha Kardex — Rastreabilidade Total do Estoque</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/estoque/kardex</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Auditoria e Linha do Tempo de Movimentação por Item</h3>
+          <div class="topic-badges">
+            <span class="badge badge-warning">Conformidade Contábil & Anti-Furto</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">🔍</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Sempre que houver divergência entre o estoque físico contado e o sistema, ou quando a diretoria precisar auditar o histórico de determinado item nos últimos 30, 90 ou 365 dias (Quem comprou, quem vendeu, em qual OS foi aplicado e quem realizou ajustes manuais).
+          </div>
+        </div>
+
+        <!-- MOCKUP KARDEX -->
+        <div class="screen-mockup">
+          <div class="mockup-titlebar">
+            <div class="mockup-controls">
+              <span class="control-dot dot-red"></span>
+              <span class="control-dot dot-yellow"></span>
+              <span class="control-dot dot-green"></span>
+            </div>
+            <span class="mockup-address">https://sistema.4rodas.com.br/erp/estoque/kardex?produto=1084</span>
+            <span class="mockup-view-tag">Kardex: Óleo Sintético 5W30</span>
+          </div>
+          <div class="mockup-content">
+            <div style="margin-bottom:12px; font-size:13px; font-weight:700; color:#e2e8f0;">
+              Extrato do Item #1084 — Óleo Motor Sintético 5W30 1L (Estoque Atual: 34 un)
+            </div>
+            <table class="mock-table">
+              <thead>
+                <tr>
+                  <th>Data/Hora</th>
+                  <th>Origem / Documento</th>
+                  <th>Tipo</th>
+                  <th>Qtd Mov.</th>
+                  <th>Saldo Resultante</th>
+                  <th>Operador Responsável</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>10/10/2026 11:20</td>
+                  <td>Ordem de Serviço #1042</td>
+                  <td><span class="mock-tag" style="background:#7f1d1d; color:#fca5a5;">Saída OS</span></td>
+                  <td style="color:#f87171; font-weight:700;">- 4 un</td>
+                  <td><strong>34 un</strong></td>
+                  <td>Marcos Mecânico</td>
+                </tr>
+                <tr>
+                  <td>10/10/2026 09:15</td>
+                  <td>Venda Balcão PDV #8412</td>
+                  <td><span class="mock-tag" style="background:#7f1d1d; color:#fca5a5;">Saída PDV</span></td>
+                  <td style="color:#f87171; font-weight:700;">- 2 un</td>
+                  <td><strong>38 un</strong></td>
+                  <td>Ana Paula (Caixa)</td>
+                </tr>
+                <tr>
+                  <td>08/10/2026 14:00</td>
+                  <td>Nota Fiscal Compra NFe 4892</td>
+                  <td><span class="mock-tag" style="background:#065f46; color:#6ee7b7;">Entrada NF</span></td>
+                  <td style="color:#34d399; font-weight:700;">+ 24 un</td>
+                  <td><strong>40 un</strong></td>
+                  <td>Carlos Gerente</td>
+                </tr>
+                <tr>
+                  <td>05/10/2026 18:30</td>
+                  <td>Saldo Anterior (Inventário)</td>
+                  <td><span class="mock-tag" style="background:#1e3a8a; color:#93c5fd;">Balanço</span></td>
+                  <td>—</td>
+                  <td><strong>16 un</strong></td>
+                  <td>Sistema</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 11: CURVA ABC -->
+    <section class="manual-section" id="sec-curva-abc" data-roles="gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">11</div>
+          <h2 class="section-title">Curva ABC de Estoque (Princípio de Pareto)</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/estoque/curva-abc</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Classificação Estratégica 80 / 15 / 5</h3>
+          <div class="topic-badges">
+            <span class="badge badge-primary">Inteligência Financeira</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">📊</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Mensalmente para identificar onde está concentrado o faturamento da loja e evitar comprar peças com baixíssimo giro que empatam capital desnecessariamente no estoque.
+          </div>
+        </div>
+
+        <!-- MOCKUP CURVA ABC -->
+        <div class="screen-mockup">
+          <div class="mockup-titlebar">
+            <div class="mockup-controls">
+              <span class="control-dot dot-red"></span>
+              <span class="control-dot dot-yellow"></span>
+              <span class="control-dot dot-green"></span>
+            </div>
+            <span class="mockup-address">https://sistema.4rodas.com.br/erp/estoque/curva-abc</span>
+            <span class="mockup-view-tag">Classificação ABC — 30 Dias</span>
+          </div>
+          <div class="mockup-content">
+            <div class="mock-grid mock-grid-3">
+              <div class="mock-card" style="border-left: 4px solid #10b981;">
+                <div class="mock-card-label" style="color:#10b981;">Classe A (Alto Impacto)</div>
+                <div class="mock-card-val" style="color:#10b981;">80% Faturamento</div>
+                <p style="font-size:11px; color:#94a3b8; margin-top:4px;">
+                  Composto por <strong>18% dos produtos</strong> (Óleos, Baterias, Pastilhas, Pneus principais). <em>Nunca pode faltar em estoque!</em>
+                </p>
+              </div>
+              <div class="mock-card" style="border-left: 4px solid #f59e0b;">
+                <div class="mock-card-label" style="color:#f59e0b;">Classe B (Impacto Moderado)</div>
+                <div class="mock-card-val" style="color:#f59e0b;">15% Faturamento</div>
+                <p style="font-size:11px; color:#94a3b8; margin-top:4px;">
+                  Composto por <strong>32% dos produtos</strong> (Filtros variados, Velas, Palhetas, Aditivos). Reposição sob demanda regular.
+                </p>
+              </div>
+              <div class="mock-card" style="border-left: 4px solid #64748b;">
+                <div class="mock-card-label" style="color:#94a3b8;">Classe C (Cauda Longa)</div>
+                <div class="mock-card-val" style="color:#94a3b8;">5% Faturamento</div>
+                <p style="font-size:11px; color:#94a3b8; margin-top:4px;">
+                  Composto por <strong>50% dos produtos</strong> (Peças raras, amortecedores especiais). Manter estoque mínimo unitário ou sob encomenda.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 12: SUGESTÃO DE COMPRAS -->
+    <section class="manual-section" id="sec-sugestao-compras" data-roles="gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">12</div>
+          <h2 class="section-title">Sugestão Inteligente de Compras & Reposição</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/estoque/sugestao-compras</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Algoritmo de Ponto de Pedido (ROP) e Prevenção de Ruptura</h3>
+          <div class="topic-badges">
+            <span class="badge badge-success">Automação de Suprimentos</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">📦</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Toda segunda-feira de manhã ou antes de fazer pedidos com os distribuidores de peças. A tela calcula matematicamente a quantidade ideal de compra para garantir a cobertura dos próximos 15 ou 30 dias sem faltar mercadoria.
+          </div>
+        </div>
+
+        <p style="color: var(--text-muted); margin-bottom: 14px;">
+          O cálculo leva em conta três fatores cruciais: <strong>Consumo Médio Diário</strong> (histórico de vendas e OS),
+          <strong>Estoque Atual na Prateleira</strong> e o <strong>Lead Time do Fornecedor</strong> (tempo em dias que o distribuidor demora para entregar).
+        </p>
+      </div>
+    </section>
+
+    <!-- MÓDULO 13: VALORIZAÇÃO DE ESTOQUE -->
+    <section class="manual-section" id="sec-valorizacao" data-roles="gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">13</div>
+          <h2 class="section-title">Valorização Financeira do Estoque</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/estoque/valorizacao</span>
+      </div>
+
+      <div class="card-topic">
+        <h3 class="topic-title">Custo Médio Ponderado (CMP), Preço de Venda e Margem Bruta Total</h3>
+        <p style="color: var(--text-muted); margin-top: 8px;">
+          Permite ao empresário saber exatamente quanto dinheiro está parado nas prateleiras da loja a preço de custo e quanto esse estoque irá gerar de receita quando for vendido a preço de venda.
+        </p>
+      </div>
+    </section>
+
+    <!-- MÓDULO 14: IMPORTAÇÃO EM MASSA -->
+    <section class="manual-section" id="sec-importar" data-roles="gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">14</div>
+          <h2 class="section-title">Importação de Estoque em Massa & NFe</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/importar</span>
+      </div>
+
+      <div class="card-topic">
+        <h3 class="topic-title">Carga de Catálogo via Planilha / SQL e Entrada de XML de Compra</h3>
+        <p style="color: var(--text-muted); margin-top: 8px;">
+          Utilizado na implantação inicial da loja ou na migração de sistemas legados. O parser é executado diretamente no navegador do usuário para suportar arquivos de dezenas de milhares de itens com alta velocidade.
+        </p>
+      </div>
+    </section>
+
+    <!-- MÓDULO 15: CONTAS A RECEBER -->
+    <section class="manual-section" id="sec-contas-receber" data-roles="gerente,owner,caixa">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">15</div>
+          <h2 class="section-title">Financeiro — Contas a Receber</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/contas</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Controle de Inadimplência, Parcelamentos, Faturados e Baixas</h3>
+          <div class="topic-badges">
+            <span class="badge badge-primary">Fluxo de Entradas</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">💳</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Diariamente para verificar parcelas e notas a prazo que vencem no dia, registrar pagamentos de clientes conveniados ou frotas de empresas e enviar cobranças para títulos em atraso.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 16: CONTAS A PAGAR -->
+    <section class="manual-section" id="sec-contas-pagar" data-roles="gerente,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">16</div>
+          <h2 class="section-title">Financeiro — Contas a Pagar</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/contas-pagar</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Despesas Fixas, Compras de Fornecedores, Impostos e Aluguel</h3>
+          <div class="topic-badges">
+            <span class="badge badge-danger">Gestão de Saídas</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">📅</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Sempre que uma nova fatura, boleto de fornecedor de peças, conta de energia, aluguel da oficina ou folha salarial chegar para pagamento.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 17: DRE GERENCIAL -->
+    <section class="manual-section" id="sec-dre" data-roles="owner,gerente">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">17</div>
+          <h2 class="section-title">DRE Gerencial — Demonstrativo de Resultados</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/dre</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Apuração de Lucro Líquido Real, Margem de Contribuição e EBITDA</h3>
+          <div class="topic-badges">
+            <span class="badge badge-purple">Exclusivo para Diretoria</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">📈</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            No fechamento mensal ou trimestral. O DRE é a bússola financeira da empresa, demonstrando se a operação deu lucro ou prejuízo, qual foi o custo exato das peças vendidas (CMV) e o impacto das despesas fixas.
+          </div>
+        </div>
+
+        <!-- MOCKUP DRE -->
+        <div class="screen-mockup">
+          <div class="mockup-titlebar">
+            <div class="mockup-controls">
+              <span class="control-dot dot-red"></span>
+              <span class="control-dot dot-yellow"></span>
+              <span class="control-dot dot-green"></span>
+            </div>
+            <span class="mockup-address">https://sistema.4rodas.com.br/erp/dre</span>
+            <span class="mockup-view-tag">DRE Gerencial — Mês Corrente</span>
+          </div>
+          <div class="mockup-content">
+            <table class="mock-table" style="font-size:13px;">
+              <thead>
+                <tr>
+                  <th>Estrutura do Demonstrativo (DRE)</th>
+                  <th style="text-align:right;">Valor (R$)</th>
+                  <th style="text-align:right;">% Vertical</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="font-weight:700; background:#141c2e;">
+                  <td>(=) RECEITA OPERACIONAL BRUTA</td>
+                  <td style="text-align:right; color:#38bdf8;">R$ 184.500,00</td>
+                  <td style="text-align:right;">100,00%</td>
+                </tr>
+                <tr>
+                  <td style="padding-left:24px;">( - ) Vendas de Peças no PDV & OS</td>
+                  <td style="text-align:right;">R$ 122.300,00</td>
+                  <td style="text-align:right;">66,28%</td>
+                </tr>
+                <tr>
+                  <td style="padding-left:24px;">( - ) Serviços Prestados (Mão de Obra Oficina)</td>
+                  <td style="text-align:right;">R$ 62.200,00</td>
+                  <td style="text-align:right;">33,72%</td>
+                </tr>
+                <tr>
+                  <td>( - ) Deduções de Vendas & Descontos</td>
+                  <td style="text-align:right; color:#f87171;">- R$ 4.250,00</td>
+                  <td style="text-align:right;">2,30%</td>
+                </tr>
+                <tr style="font-weight:700;">
+                  <td>(=) RECEITA OPERACIONAL LÍQUIDA</td>
+                  <td style="text-align:right; color:#38bdf8;">R$ 180.250,00</td>
+                  <td style="text-align:right;">97,70%</td>
+                </tr>
+                <tr>
+                  <td>( - ) Custo das Mercadorias Vendidas (CMV)</td>
+                  <td style="text-align:right; color:#f87171;">- R$ 74.800,00</td>
+                  <td style="text-align:right;">40,54%</td>
+                </tr>
+                <tr style="font-weight:700; background:#141c2e;">
+                  <td>(=) LUCRO BRUTO (MARGEM DE CONTRIBUIÇÃO)</td>
+                  <td style="text-align:right; color:#34d399;">R$ 105.450,00</td>
+                  <td style="text-align:right;">57,16%</td>
+                </tr>
+                <tr>
+                  <td>( - ) Despesas Operacionais (Aluguel, Energia, Comissões)</td>
+                  <td style="text-align:right; color:#f87171;">- R$ 52.400,00</td>
+                  <td style="text-align:right;">28,40%</td>
+                </tr>
+                <tr style="font-weight:800; background:#065f46; color:#ffffff;">
+                  <td>(=) RESULTADO LÍQUIDO DO EXERCÍCIO (LUCRO LÍQUIDO)</td>
+                  <td style="text-align:right; font-size:15px;">R$ 53.050,00</td>
+                  <td style="text-align:right; font-size:15px;">28,75%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 18: CLIENTES & HISTÓRICO 360 -->
+    <section class="manual-section" id="sec-clientes" data-roles="patio,caixa,gerente">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">18</div>
+          <h2 class="section-title">Clientes & Histórico 360° do Veículo</h2>
+        </div>
+        <span class="badge badge-primary">Rotas: /erp/clientes e /erp/clientes/:id</span>
+      </div>
+
+      <div class="card-topic">
+        <h3 class="topic-title">Ficha Completa do Cliente e Linha do Tempo de Atendimentos</h3>
+        <p style="color: var(--text-muted); margin-top: 8px;">
+          Ao abrir o perfil de qualquer cliente, o sistema exibe todos os veículos cadastrados no nome dele, todas as compras já feitas no PDV e todas as Ordens de Serviço realizadas desde o primeiro dia de funcionamento da oficina.
+        </p>
+      </div>
+    </section>
+
+    <!-- MÓDULO 19: CRM DE MANUTENÇÕES PREVENTIVAS -->
+    <section class="manual-section" id="sec-crm-preventivo" data-roles="gerente,patio,owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">19</div>
+          <h2 class="section-title">CRM de Retorno & Manutenções Preventivas</h2>
+        </div>
+        <span class="badge badge-primary">Rota: /erp/crm</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Fidelização Ativa por Quilometragem Estimada e Tempo Decorrido</h3>
+          <div class="topic-badges">
+            <span class="badge badge-success">Geração Ativa de Receita</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">📞</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Todas as manhãs pela equipe de atendimento ou recepcionista. O sistema calcula a rodagem média do cliente e avisa quem está com a troca de óleo vencida (a cada 5.000 ou 10.000 km / 6 meses), pastilhas de freio ou alinhamento periódico para contato preventivo.
+          </div>
+        </div>
+
+        <!-- MOCKUP CRM -->
+        <div class="screen-mockup">
+          <div class="mockup-titlebar">
+            <div class="mockup-controls">
+              <span class="control-dot dot-red"></span>
+              <span class="control-dot dot-yellow"></span>
+              <span class="control-dot dot-green"></span>
+            </div>
+            <span class="mockup-address">https://sistema.4rodas.com.br/erp/crm</span>
+            <span class="mockup-view-tag">CRM Preventivo — Alertas de Retorno</span>
+          </div>
+          <div class="mockup-content">
+            <table class="mock-table">
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>Veículo / Placa</th>
+                  <th>Última Visita</th>
+                  <th>Serviço Previsto</th>
+                  <th>Status de Retorno</th>
+                  <th>Ação WhatsApp</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Carlos Eduardo Souza</strong></td>
+                  <td>Honda Civic (BRA2E19)</td>
+                  <td>Há 185 dias (6 meses)</td>
+                  <td>Troca de Óleo + Filtros</td>
+                  <td><span class="mock-tag" style="background:#7f1d1d; color:#fca5a5;">Vencido há 12 dias</span></td>
+                  <td><span class="mock-btn mock-btn-green">💬 Enviar WhatsApp (1-Clique)</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Mariana Ribeiro</strong></td>
+                  <td>Jeep Renegade (QRA8J11)</td>
+                  <td>Há 170 dias</td>
+                  <td>Alinhamento & Balanceamento</td>
+                  <td><span class="mock-tag" style="background:#854d0e; color:#fde047;">Vence em 10 dias</span></td>
+                  <td><span class="mock-btn mock-btn-green">💬 Enviar WhatsApp (1-Clique)</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÓDULO 20: MULTI-LOJAS -->
+    <section class="manual-section" id="sec-multi-lojas" data-roles="owner,gerente">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">20</div>
+          <h2 class="section-title">Multi-Lojas & Relatórios Consolidados</h2>
+        </div>
+        <span class="badge badge-primary">Rotas: /erp/lojas e /erp/relatorios/multi-lojas</span>
+      </div>
+
+      <div class="card-topic">
+        <h3 class="topic-title">Gestão de Matriz e Filiais com Troca Rápida de Tenant</h3>
+        <p style="color: var(--text-muted); margin-top: 8px;">
+          Permite ao proprietário alternar entre lojas diretamente pelo topo da tela ou visualizar o relatório corporativo que consolida o faturamento de todas as filiais lado a lado.
+        </p>
+      </div>
+    </section>
+
+    <!-- MÓDULO 21: RBAC & USUÁRIOS -->
+    <section class="manual-section" id="sec-usuarios-rbac" data-roles="owner">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">21</div>
+          <h2 class="section-title">Gerenciador de Papéis & Permissões (RBAC)</h2>
+        </div>
+        <span class="badge badge-primary">Rotas: /erp/usuarios e /erp/permissoes</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Controle Granular de Segurança por Cargo e por Usuário</h3>
+          <div class="topic-badges">
+            <span class="badge badge-purple">Segurança da Informação</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">🛡️</div>
+          <div class="callout-body">
+            <strong>Quando usar esta tela:</strong>
+            Ao admitir um novo funcionário, alterar responsabilidades de equipe ou restringir visualização de dados sigilosos (como margens de lucro, DRE ou saldo bancário).
+          </div>
+        </div>
+
+        <table class="rbac-table">
+          <thead>
+            <tr>
+              <th>Funcionalidade / Tela</th>
+              <th>Proprietário</th>
+              <th>Gerente</th>
+              <th>Caixa</th>
+              <th>Mecânico</th>
+              <th>Operador Pátio</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Abrir / Finalizar Ordens de Serviço (OS)</td>
+              <td class="check-yes">✓</td>
+              <td class="check-yes">✓</td>
+              <td class="check-no">✗</td>
+              <td class="check-yes">✓</td>
+              <td class="check-yes">✓</td>
+            </tr>
+            <tr>
+              <td>Operar PDV e Frente de Caixa</td>
+              <td class="check-yes">✓</td>
+              <td class="check-yes">✓</td>
+              <td class="check-yes">✓</td>
+              <td class="check-no">✗</td>
+              <td class="check-no">✗</td>
+            </tr>
+            <tr>
+              <td>Visualizar DRE Gerencial & Lucro</td>
+              <td class="check-yes">✓</td>
+              <td class="check-yes">✓</td>
+              <td class="check-no">✗</td>
+              <td class="check-no">✗</td>
+              <td class="check-no">✗</td>
+            </tr>
+            <tr>
+              <td>Ver Comissões dos Mecânicos</td>
+              <td class="check-yes">✓</td>
+              <td class="check-yes">✓</td>
+              <td class="check-no">✗</td>
+              <td>Apenas Própria</td>
+              <td class="check-no">✗</td>
+            </tr>
+            <tr>
+              <td>Conceder Desconto Acima do Teto</td>
+              <td class="check-yes">✓</td>
+              <td class="check-yes">✓</td>
+              <td class="check-no">✗</td>
+              <td class="check-no">✗</td>
+              <td class="check-no">✗</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- MÓDULO 22: CONFIGURAÇÕES E PARÂMETROS -->
+    <section class="manual-section" id="sec-parametros" data-roles="owner,gerente">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">22</div>
+          <h2 class="section-title">Parâmetros do Sistema & Instalações</h2>
+        </div>
+        <span class="badge badge-primary">Rotas: /erp/config/parametros e /erp/config/instalacoes</span>
+      </div>
+
+      <div class="card-topic">
+        <h3 class="topic-title">Teto de Desconto no PDV e Taxas Fixas de Mão de Obra</h3>
+        <p style="color: var(--text-muted); margin-top: 8px;">
+          Configura regras automáticas do negócio, como o percentual padrão de desconto permitido aos operadores de caixa sem pedir autorização e os tipos de serviços de instalação (ex: Instalação de Bateria, Troca de Pneu, Balanceamento).
+        </p>
+      </div>
+    </section>
+
+    <!-- MÓDULO 23: APP MOBILE DE PÁTIO -->
+    <section class="manual-section" id="sec-app-mobile" data-roles="patio,mecanico">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">23</div>
+          <h2 class="section-title">Aplicativo Mobile de Pátio (Tablet & Smartphone)</h2>
+        </div>
+        <span class="badge badge-primary">Tecnologia: Expo / React Native</span>
+      </div>
+
+      <div class="card-topic">
+        <div class="topic-header">
+          <h3 class="topic-title">Agilidade no Box Mecânico, Fotos de Avarias e Assinatura Touch</h3>
+          <div class="topic-badges">
+            <span class="badge badge-success">Operação Móvel Sem Papel</span>
+          </div>
+        </div>
+
+        <div class="callout callout-when">
+          <div class="callout-icon">📱</div>
+          <div class="callout-body">
+            <strong>Quando usar o App Mobile:</strong>
+            - <strong>No portão/pátio da oficina:</strong> O recepcionista usa o tablet para abordar o cliente no próprio carro, digitar a placa e fazer o checklist fotográfico com a câmera do aparelho.<br>
+            - <strong>No elevador mecânico:</strong> O técnico visualiza os itens da OS, solicita peças ao almoxarifado direto pela tela e marca quando a mão de obra for concluída.
+          </div>
+        </div>
+
+        <ul class="steps-list">
+          <li class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-title">Login Rápido e Seleção de Mecânico</div>
+            <div class="step-desc">O aplicativo memoriza o técnico responsável no tablet do box. Não há necessidade de digitar senha a cada atendimento.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-title">Reconhecimento de Placa com Máscara Mercosul</div>
+            <div class="step-desc">Teclado numérico e alfabético otimizado em tela cheia para digitação com uma só mão mesmo com luvas de oficina.</div>
+          </li>
+          <li class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-title">Coleta de Assinatura do Cliente no Touchscreen</div>
+            <div class="step-desc">O cliente assina a autorização diretamente com o dedo na tela do tablet, gerando o termo jurídico digital com validade legal e carimbo de data/hora.</div>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- APÊNDICE A: MATRIZ DE RESPONSABILIDADES -->
+    <section class="manual-section" id="sec-matriz-responsabilidade" data-roles="todos">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">A</div>
+          <h2 class="section-title">Apêndice A — Matriz de Responsabilidades da Equipe</h2>
+        </div>
+        <span class="badge badge-primary">Organograma Operacional</span>
+      </div>
+
+      <div class="card-topic">
+        <table class="rbac-table">
+          <thead>
+            <tr>
+              <th>Cargo</th>
+              <th>Principais Rotinas no Sistema</th>
+              <th>Telas Obrigatórias de Uso</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Consultor / Pátio</strong></td>
+              <td>Recepcionar carros, preencher checklist 360°, abrir OS e colher assinatura do cliente.</td>
+              <td>App Mobile, Dashboard, Ordens de Serviço, Orçamentos</td>
+            </tr>
+            <tr>
+              <td><strong>Mecânico / Técnico</strong></td>
+              <td>Executar serviços, requisitar peças no box, apontar horas trabalhadas e conferir extrato.</td>
+              <td>App Mobile no Elevador, Oficina & Produtividade</td>
+            </tr>
+            <tr>
+              <td><strong>Operador de Caixa</strong></td>
+              <td>Abrir caixa, operar PDV, receber pagamentos (PIX, Cartão, Dinheiro) e fechamento cego.</td>
+              <td>Caixa, PDV, Histórico de Vendas, Contas a Receber</td>
+            </tr>
+            <tr>
+              <td><strong>Gerente da Loja</strong></td>
+              <td>Supervisionar pátio, autorizar descontos, gerenciar compras pela Curva ABC e comissões.</td>
+              <td>Todas as telas operacionais, Curva ABC, Sugestão de Compras, Oficina</td>
+            </tr>
+            <tr>
+              <td><strong>Proprietário (Owner)</strong></td>
+              <td>Analisar DRE Gerencial, faturamento multi-lojas, gerenciar permissões e cadastros mestres.</td>
+              <td>DRE, Multi-Lojas, Gerenciador de Papéis, Parâmetros, Valorização</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- APÊNDICE B: FAQ & RESOLUÇÃO DE ERROS -->
+    <section class="manual-section" id="sec-faq" data-roles="todos">
+      <div class="section-header">
+        <div class="section-header-left">
+          <div class="section-number">B</div>
+          <h2 class="section-title">Apêndice B — Perguntas Frequentes & Resolução de Problemas</h2>
+        </div>
+        <span class="badge badge-primary">Suporte Operacional</span>
+      </div>
+
+      <div class="card-topic">
+        <div style="margin-bottom: 20px;">
+          <h4 style="color:#60a5fa; margin-bottom:4px;">1. O PDV exibe a mensagem "Caixa Fechado - PDV Bloqueado". Como resolver?</h4>
+          <p style="color:var(--text-muted); font-size:14px;">
+            Essa mensagem indica que o operador ainda não abriu sua sessão de caixa. Acesse o menu <strong>Frente de Caixa (/erp/caixa)</strong>, digite o valor do fundo de troco (suprimento inicial) e clique em "Abrir Caixa". O PDV será liberado imediatamente.
+          </p>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <h4 style="color:#60a5fa; margin-bottom:4px;">2. Preciso alterar uma Ordem de Serviço que já foi finalizada. O que fazer?</h4>
+          <p style="color:var(--text-muted); font-size:14px;">
+            Acesse a OS e clique no botão de reabertura. O sistema solicitará o <strong>PIN Gerencial do Supervisor</strong>. Solicite ao gerente para inserir o código de segurança para liberar a edição de peças e mão de obra.
+          </p>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <h4 style="color:#60a5fa; margin-bottom:4px;">3. Uma peça consta na prateleira física mas o PDV diz "Saldo Insuficiente".</h4>
+          <p style="color:var(--text-muted); font-size:14px;">
+            Vá em <strong>Estoque Físico (/erp/estoque)</strong> ou <strong>Curva ABC</strong>, localize o item e realize um ajuste rápido selecionando a opção 'Entrada' ou 'Ajuste de Inventário' com a devida justificativa para sincronizar o saldo real.
+          </p>
+        </div>
+
+        <div>
+          <h4 style="color:#60a5fa; margin-bottom:4px;">4. Como imprimir este manual em formato PDF para encadernar ou treinar funcionários?</h4>
+          <p style="color:var(--text-muted); font-size:14px;">
+            Pressione as teclas <strong>Ctrl + P</strong> no teclado (ou clique no botão azul no topo da página) e selecione a impressora <em>"Salvar como PDF"</em>. O documento já está pré-formatado com diagramação perfeita para folha A4 e sem fundos poluídos.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER EXECUTIVO -->
+    <footer class="manual-footer">
+      <div>
+        <strong>4Rodas ERP & Checklist Automotivo</strong> — Sistema de Gestão Automotiva Multi-Tenant
+      </div>
+      <div>
+        Documentação Oficial — Versão 2.4 Enterprise | Gerado em 10/10/2026
+      </div>
+    </footer>
+
+  </main>
+
+  <!-- JAVASCRIPT DE INTERATIVIDADE -->
+  <script>
+    // Alternar tema Claro / Escuro
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme');
+      const target = current === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', target);
+      localStorage.setItem('manual_theme', target);
+    }
+
+    const savedTheme = localStorage.getItem('manual_theme');
+    if (savedTheme) {
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    }
+
+    // Filtro por Perfil / Cargo
+    function setRoleFilter(role, btnElement) {
+      document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
+      btnElement.classList.add('active');
+
+      const sections = document.querySelectorAll('.manual-section');
+      const navItems = document.querySelectorAll('.nav-item');
+
+      sections.forEach(sec => {
+        const roles = sec.getAttribute('data-roles') || 'todos';
+        if (role === 'todos' || roles === 'todos' || roles.split(',').includes(role)) {
+          sec.style.display = 'block';
+        } else {
+          sec.style.display = 'none';
+        }
+      });
+
+      navItems.forEach(item => {
+        const roles = item.getAttribute('data-roles');
+        if (!roles || role === 'todos' || roles.split(',').includes(role)) {
+          item.style.display = 'flex';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    }
+
+    // Busca em tempo real por termos
+    function handleFilterManual(query) {
+      const clean = query.trim().toLowerCase();
+      const sections = document.querySelectorAll('.manual-section');
+
+      if (!clean) {
+        sections.forEach(s => s.style.display = 'block');
+        return;
+      }
+
+      sections.forEach(sec => {
+        const text = sec.innerText.toLowerCase();
+        if (text.includes(clean)) {
+          sec.style.display = 'block';
+        } else {
+          sec.style.display = 'none';
+        }
+      });
+    }
+
+    // Realce do item de menu ativo no scroll
+    window.addEventListener('scroll', () => {
+      const sections = document.querySelectorAll('.manual-section');
+      let currentSectionId = '';
+
+      sections.forEach(sec => {
+        const rect = sec.getBoundingClientRect();
+        if (rect.top <= 120 && rect.bottom >= 120) {
+          currentSectionId = sec.getAttribute('id');
+        }
+      });
+
+      if (currentSectionId) {
+        document.querySelectorAll('.nav-item').forEach(item => {
+          if (item.getAttribute('href') === '#' + currentSectionId) {
+            item.classList.add('active');
+          } else {
+            item.classList.remove('active');
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>
+`;
+
+const outputPath = path.resolve(__dirname, '..', 'MANUAL_DO_SISTEMA.html');
+fs.writeFileSync(outputPath, htmlContent, 'utf-8');
+console.log('Manual HTML gerado com sucesso em:', outputPath);

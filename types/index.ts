@@ -29,6 +29,7 @@ export interface Order {
   vendaControle?: string | null;
   laborAmount: number;
   totalAmount: number;
+  discountAmount?: number;
   mecanicoId?: number | null;
   mecanicoNome?: string | null;
   auxiliarId?: number | null;
@@ -80,6 +81,8 @@ export interface OrderItem {
   total: number;
   instalacaoId: number | null;
   instalacaoSigla: string | null;
+  stock?: number | null;
+  controlaEstoque?: boolean;
   mecanicoId?: number | null;
   mecanicoNome?: string | null;
   comissaoPct?: number | null;

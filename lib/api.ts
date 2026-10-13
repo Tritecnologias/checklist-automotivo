@@ -16,26 +16,40 @@ export const AUTH_TOKEN_KEY = '@auth_token';
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY).catch(() => null);
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options?.headers,
-    },
-  });
+  const timeoutMs = options?.timeoutMs ?? 12000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as { message?: string }).message ?? `HTTP ${res.status}`);
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      signal: options?.signal ?? controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { message?: string }).message ?? `HTTP ${res.status}`);
+    }
+
+    if (res.status === 204) return undefined as T;
+
+    return res.json() as Promise<T>;
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error('Tempo limite de conexão esgotado (timeout). Verifique sua rede.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  if (res.status === 204) return undefined as T;
-
-  return res.json() as Promise<T>;
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -53,16 +67,30 @@ export interface LoginResult {
   tenants: { id: number; nome: string; slug: string }[];
 }
 
-async function authRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as { message?: string }).message ?? `HTTP ${res.status}`);
+async function authRequest<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const timeoutMs = options?.timeoutMs ?? 12000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      signal: options?.signal ?? controller.signal,
+      headers: { 'Content-Type': 'application/json', ...options?.headers },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { message?: string }).message ?? `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error('Tempo limite de conexão esgotado (timeout). Verifique sua rede.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return res.json() as Promise<T>;
 }
 
 export const authApi = {
@@ -135,6 +163,12 @@ export const api = {
       body: JSON.stringify({ mecanicoId, aplicarAosItens }),
     }),
 
+  updateOrderAuxiliar: (id: string, auxiliarId: number | null) =>
+    request<Order>(`/orders/${id}/auxiliar`, {
+      method: 'PATCH',
+      body: JSON.stringify({ auxiliarId }),
+    }),
+
   getOrder: (id: string) => request<Order>(`/orders/${id}`),
 
   updateOrderStatus: (
@@ -173,6 +207,12 @@ export const api = {
     request<Order>(`/orders/${orderId}/items/${itemId}/labor`, {
       method: 'PATCH',
       body: JSON.stringify({ laborPrice }),
+    }),
+
+  updateItemMechanic: (orderId: string, itemId: string, mecanicoId: number | null) =>
+    request<Order>(`/orders/${orderId}/items/${itemId}/mecanico`, {
+      method: 'PATCH',
+      body: JSON.stringify({ mecanicoId }),
     }),
 
   // ─── Autenticação (PIN de supervisor) ─────────────────────────────────────

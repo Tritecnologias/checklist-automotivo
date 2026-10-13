@@ -15,7 +15,9 @@ interface ServicePriceModalProps {
   visible: boolean;
   title?: string;
   description?: string;
+  inputLabel?: string;
   initialValue?: number;
+  allowZero?: boolean;
   onConfirm: (price: number) => void;
   onCancel: () => void;
 }
@@ -24,7 +26,9 @@ export function ServicePriceModal({
   visible,
   title = 'Mão de Obra',
   description,
+  inputLabel = 'Valor da Mão de Obra (R$)',
   initialValue = 0,
+  allowZero = true,
   onConfirm,
   onCancel,
 }: ServicePriceModalProps) {
@@ -32,9 +36,9 @@ export function ServicePriceModal({
 
   useEffect(() => {
     if (visible) {
-      setValue(initialValue > 0 ? initialValue.toFixed(2).replace('.', ',') : '');
+      setValue(initialValue > 0 ? initialValue.toFixed(2).replace('.', ',') : (allowZero ? '0,00' : ''));
     }
-  }, [visible, initialValue]);
+  }, [visible, initialValue, allowZero]);
 
   function parsePrice(text: string): number {
     const n = parseFloat(text.replace(',', '.'));
@@ -43,12 +47,12 @@ export function ServicePriceModal({
 
   function handleConfirm() {
     const price = parsePrice(value);
-    if (price <= 0) return;
+    if (!allowZero && price <= 0) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onConfirm(price);
   }
 
-  const valid = parsePrice(value) > 0;
+  const valid = allowZero ? parsePrice(value) >= 0 : parsePrice(value) > 0;
 
   return (
     <Modal

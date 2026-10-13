@@ -144,6 +144,37 @@ export default function OrderDetail() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
+  // Rolagem automática e reposicionamento no tablet / mobile
+  const scrollToSearch = (preferredBlock: ScrollLogicalPosition = 'center') => {
+    if (!searchContainerRef.current) return
+    const isSmallViewport = window.visualViewport
+      ? window.visualViewport.height < window.innerHeight * 0.75
+      : window.innerHeight < 700
+    const targetBlock = isSmallViewport ? 'start' : preferredBlock
+    searchContainerRef.current.scrollIntoView({ behavior: 'smooth', block: targetBlock })
+  }
+
+  // Monitora redimensionamento do viewport (teclado virtual abrindo/fechando no tablet)
+  useEffect(() => {
+    if (!window.visualViewport) return
+    const handleViewportResize = () => {
+      if (searchFocused && searchContainerRef.current) {
+        scrollToSearch('start')
+      }
+    }
+    window.visualViewport.addEventListener('resize', handleViewportResize)
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleViewportResize)
+    }
+  }, [searchFocused])
+
+  // Quando os resultados da busca aparecem, garante visualização no tablet
+  useEffect(() => {
+    if (searchFocused && debouncedQuery.length >= 2) {
+      scrollToSearch('start')
+    }
+  }, [debouncedQuery, searchFocused])
+
   // Fechar dropdown de busca ao clicar fora
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -1209,8 +1240,14 @@ export default function OrderDetail() {
                 onChange={(e) => {
                   setSearchQuery(e.target.value)
                   setSearchFocused(true)
+                  scrollToSearch('center')
                 }}
-                onFocus={() => setSearchFocused(true)}
+                onFocus={() => {
+                  setSearchFocused(true)
+                  scrollToSearch('center')
+                  setTimeout(() => scrollToSearch('center'), 150)
+                  setTimeout(() => scrollToSearch('start'), 350)
+                }}
                 placeholder="Buscar por código de barras, código ou nome (ex: Óleo, Filtro, Pastilha, Revisão)..."
                 className="w-full bg-slate-800/80 border border-slate-700 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-10 pr-10 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all shadow-inner"
               />
@@ -1230,7 +1267,7 @@ export default function OrderDetail() {
 
             {/* Dropdown de Resultados da Busca */}
             {searchFocused && debouncedQuery.length >= 2 && (
-              <div className="absolute left-0 right-0 top-full mt-2 bg-slate-900/98 backdrop-blur-xl border border-slate-700 rounded-2xl shadow-2xl z-40 overflow-hidden max-h-96 overflow-y-auto divide-y divide-slate-800">
+              <div className="absolute left-0 right-0 top-full mt-2 bg-slate-900/98 backdrop-blur-xl border border-slate-700 rounded-2xl shadow-2xl z-40 overflow-hidden max-h-[min(24rem,55vh)] overflow-y-auto divide-y divide-slate-800">
                 {searchingCatalog && (
                   <div className="p-5 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
                     <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />

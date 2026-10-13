@@ -1,9 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Keyboard,
+  Linking,
+  ScrollView,
   Share,
   Text,
   TouchableOpacity,
@@ -18,6 +19,8 @@ import { ItemRow } from '@/components/ItemRow';
 import { PinModal } from '@/components/PinModal';
 import { ServicePriceModal } from '@/components/ServicePriceModal';
 import { InstalacaoModal } from '@/components/InstalacaoModal';
+import { ClientEditModal } from '@/components/ClientEditModal';
+import { MecanicoSelectorModal } from '@/components/MecanicoSelectorModal';
 import {
   useAddItem,
   useRemoveItem,
@@ -27,7 +30,7 @@ import {
 import { useDebounce } from '@/hooks/useDebounce';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/AuthContext';
-import type { CatalogItem, Order, OrderItem, PendingAction } from '@/types';
+import type { CatalogItem, Mecanico, Order, OrderItem, PendingAction } from '@/types';
 
 const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -35,24 +38,41 @@ const currency = (v: number) =>
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return null;
   return new Date(iso).toLocaleDateString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: '2-digit',
-    hour: '2-digit', minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
 export default function OrderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
+  const qc = useQueryClient();
+
+  const scrollViewRef = useRef<ScrollView>(null);
+  const searchCardY = useRef<number>(0);
 
   const [search, setSearch] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [instalacaoTarget, setInstalacaoTarget] = useState<CatalogItem | null>(null);
+  const [clientModalOpen, setClientModalOpen] = useState(false);
+  const [editingLaborItem, setEditingLaborItem] = useState<OrderItem | null>(null);
+  const [mecanicoModalTarget, setMecanicoModalTarget] = useState<
+    | { type: 'titular'; selectedId: number | null }
+    | { type: 'auxiliar'; selectedId: number | null }
+    | { type: 'item'; item: OrderItem; selectedId: number | null }
+    | null
+  >(null);
+
   const [priceModalTarget, setPriceModalTarget] = useState<
     | { mode: 'catalog'; item: CatalogItem; instalacaoId?: number }
     | { mode: 'orderItem'; item: OrderItem }
     | null
   >(null);
-  const debouncedSearch = useDebounce(search, 400);
+
+  const debouncedSearch = useDebounce(search, 350);
 
   // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -67,6 +87,11 @@ export default function OrderScreen() {
     refetchInterval: 15_000,
   });
 
+  const { data: mecanicos = [] } = useQuery({
+    queryKey: ['mecanicos'],
+    queryFn: () => api.listMecanicos(true),
+  });
+
   const {
     data: searchResults,
     isFetching: searching,
@@ -79,15 +104,75 @@ export default function OrderScreen() {
 
   // ─── Flag de OS encerrada ─────────────────────────────────────────────────────
   const isClosed = order?.status === 'closed';
+  const isQuote = order?.status === 'quote';
 
   // ─── Mutações ─────────────────────────────────────────────────────────────────
-
-  const qc = useQueryClient();
 
   const { mutate: addItem, isPending: adding } = useAddItem(id);
   const { mutate: removeItem } = useRemoveItem(id);
   const { mutate: updateQty } = useUpdateQuantity(id);
   const { mutate: updateItemLabor } = useUpdateItemLabor(id);
+
+  const { mutate: updateClient, isPending: savingClient } = useMutation({
+    mutationFn: (clientData: {
+      name: string;
+      phone: string;
+      document?: string;
+      cep?: string;
+      address?: string;
+    }) => api.updateOrderClient(id, clientData),
+    onSuccess: (updated: Order) => {
+      qc.setQueryData(['order', id], updated);
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      setClientModalOpen(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: any) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Erro ao atualizar cliente', err?.message || 'Não foi possível salvar os dados do cliente.');
+    },
+  });
+
+  const { mutate: updateMechanic } = useMutation({
+    mutationFn: (mecanicoId: number | null) =>
+      api.updateOrderMechanic(id, mecanicoId, true),
+    onSuccess: (updated: Order) => {
+      qc.setQueryData(['order', id], updated);
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: any) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Erro', err?.message || 'Não foi possível atualizar o mecânico titular.');
+    },
+  });
+
+  const { mutate: updateAuxiliar } = useMutation({
+    mutationFn: (auxiliarId: number | null) =>
+      api.updateOrderAuxiliar(id, auxiliarId),
+    onSuccess: (updated: Order) => {
+      qc.setQueryData(['order', id], updated);
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: any) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Erro', err?.message || 'Não foi possível atualizar o auxiliar da OS.');
+    },
+  });
+
+  const { mutate: setItemMechanic } = useMutation({
+    mutationFn: ({ itemId, mecanicoId }: { itemId: string; mecanicoId: number | null }) =>
+      api.updateItemMechanic(id, itemId, mecanicoId),
+    onSuccess: (updated: Order) => {
+      qc.setQueryData(['order', id], updated);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (err: any) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Erro', err?.message || 'Não foi possível atribuir o mecânico a este item.');
+    },
+  });
 
   const { mutate: changeOrderStatus, isPending: changingStatus } = useMutation({
     mutationFn: (variables: { status: string; supervisorPin?: string; adminPassword?: string; isBalcao?: boolean } | string) => {
@@ -128,6 +213,7 @@ export default function OrderScreen() {
       qc.setQueryData(['order', id], updated);
       qc.invalidateQueries({ queryKey: ['orders'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Orçamento Aprovado!', 'O orçamento foi aprovado e transformado em Ordem de Serviço.');
     },
     onError: (err: any) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -138,27 +224,17 @@ export default function OrderScreen() {
     },
   });
 
-  const { mutate: assumirOS, isPending: assumindoOS } = useMutation({
-    mutationFn: () => {
-      if (!user?.mecanicoId) throw new Error('Usuário sem perfil de mecânico');
-      return api.updateOrderMechanic(id, user.mecanicoId, true);
-    },
-    onSuccess: (updated: Order) => {
-      qc.setQueryData(['order', id], updated);
-      qc.invalidateQueries({ queryKey: ['orders'] });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    },
-    onError: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    },
-  });
-
-  // ─── Totais ───────────────────────────────────────────────────────────────────
+  // ─── Totais e Agrupamentos ───────────────────────────────────────────────────
 
   const items = order?.items ?? [];
-  const totalParts  = items.reduce((acc, i) => acc + (i.total ?? 0), 0);
-  const totalLabor  = items.reduce((acc, i) => acc + (i.laborPrice ?? 0), 0);
-  const totalGeral  = totalParts + totalLabor;
+  const parts = items.filter((i) => i.type === 'part');
+  const services = items.filter((i) => i.type === 'service');
+  const totalParts = items.reduce((acc, i) => acc + (i.total ?? 0), 0);
+  const totalLabor = items.reduce((acc, i) => acc + (i.laborPrice ?? 0), 0);
+  const discount = Number(order?.discountAmount ?? 0);
+  const totalGeral = order?.vendaControle
+    ? Number(order.totalAmount)
+    : Math.max(0, totalParts + totalLabor - discount);
 
   // ─── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -166,7 +242,7 @@ export default function OrderScreen() {
     (item: CatalogItem) => {
       if (isClosed) return;
       Keyboard.dismiss();
-      if (item.instalacoes.length > 0) {
+      if (item.instalacoes && item.instalacoes.length > 0) {
         setInstalacaoTarget(item);
       } else {
         setPriceModalTarget({ mode: 'catalog', item });
@@ -188,9 +264,25 @@ export default function OrderScreen() {
   const handleLaborRequest = useCallback(
     (item: OrderItem) => {
       if (isClosed) return;
-      setPriceModalTarget({ mode: 'orderItem', item });
+      setEditingLaborItem(item);
     },
     [isClosed],
+  );
+
+  const handleConfirmEditLabor = useCallback(
+    (laborPrice: number) => {
+      if (!editingLaborItem) return;
+      const itemId = editingLaborItem.id;
+      setEditingLaborItem(null);
+      updateItemLabor(
+        { itemId, laborPrice },
+        {
+          onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+          onError: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+        }
+      );
+    },
+    [editingLaborItem, updateItemLabor],
   );
 
   const handlePriceConfirm = useCallback(
@@ -203,7 +295,12 @@ export default function OrderScreen() {
         setPriceModalTarget(null);
         setSearch('');
         addItem(
-          { catalogItemId: item.id, quantity: 1, laborPrice, ...(instalacaoId !== undefined ? { instalacaoId } : {}) },
+          {
+            catalogItemId: item.id,
+            quantity: 1,
+            laborPrice,
+            ...(instalacaoId !== undefined ? { instalacaoId } : {}),
+          },
           {
             onSuccess: () => {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -213,20 +310,9 @@ export default function OrderScreen() {
             },
           },
         );
-      } else {
-        const { item } = priceModalTarget;
-        const laborPrice = Math.max(0, totalServicePrice - (item.total ?? 0));
-        setPriceModalTarget(null);
-        updateItemLabor(
-          { itemId: item.id, laborPrice },
-          {
-            onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
-            onError:   () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
-          },
-        );
       }
     },
-    [priceModalTarget, addItem, updateItemLabor],
+    [priceModalTarget, addItem],
   );
 
   const handleDeleteRequest = useCallback((item: OrderItem) => {
@@ -269,7 +355,7 @@ export default function OrderScreen() {
       return;
     }
 
-    // Para OS normal de oficina (com serviços/mão de obra):
+    // Para OS normal de oficina:
     setPendingAction({
       type: 'close',
       itemId: order.id,
@@ -286,33 +372,69 @@ export default function OrderScreen() {
     });
   }, [order]);
 
-  const handleShare = useCallback(async () => {
+  const handleShareOrPrint = useCallback(async () => {
     if (!order) return;
     const lines: string[] = [
-      `OS #${order.id.split('-')[0].toUpperCase()}`,
-      ...(order.client?.name ? [`Cliente: ${order.client.name}${order.client.phone ? ` (${order.client.phone})` : ''}`] : []),
+      `📋 ${isQuote ? 'ORÇAMENTO' : 'ORDEM DE SERVIÇO'} #${order.id.split('-')[0].toUpperCase()}`,
       `Veículo: ${order.vehicle.plate} — ${order.vehicle.model}`,
       `Quilometragem: ${order.vehicle.mileage.toLocaleString('pt-BR')} km`,
-      ...(order.mecanicoNome ? [`Mecânico: ${order.mecanicoNome}`] : []),
+      ...(order.client?.name ? [`Cliente: ${order.client.name}`] : []),
+      ...(order.client?.phone ? [`Telefone: ${order.client.phone}`] : []),
+      ...(order.client?.address ? [`Endereço: ${order.client.address}`] : []),
+      ...(order.mecanicoNome ? [`Mecânico Titular: ${order.mecanicoNome}`] : []),
       ...(order.auxiliarNome ? [`Auxiliar: ${order.auxiliarNome}`] : []),
       '',
     ];
 
-    if (order.items.length) {
-      lines.push('PEÇAS / SERVIÇOS:');
-      order.items.forEach((i) => {
-        lines.push(`  • ${i.description} x${i.quantity}`);
-        lines.push(`    Peça: ${currency(i.total)}${i.laborPrice > 0 ? `  |  M.O.: ${currency(i.laborPrice)}` : ''}`);
+    if (parts.length > 0) {
+      lines.push(`🔩 PEÇAS (${parts.length}):`);
+      parts.forEach((i) => {
+        lines.push(`  • ${i.description} (x${i.quantity})`);
+        lines.push(`    Valor: ${currency(i.total)}${i.laborPrice > 0 ? ` + M.O.: ${currency(i.laborPrice)}` : ''}`);
       });
       lines.push('');
     }
 
-    lines.push(`Total Peças:  ${currency(totalParts)}`);
-    lines.push(`Total M.O.:   ${currency(totalLabor)}`);
-    lines.push(`TOTAL GERAL:  ${currency(totalGeral)}`);
+    if (services.length > 0) {
+      lines.push(`🔧 MÃO DE OBRA E SERVIÇOS (${services.length}):`);
+      services.forEach((i) => {
+        lines.push(`  • ${i.description} (x${i.quantity})`);
+        lines.push(`    Valor: ${currency(i.total)}${i.laborPrice > 0 ? ` + M.O.: ${currency(i.laborPrice)}` : ''}`);
+      });
+      lines.push('');
+    }
 
-    await Share.share({ message: lines.join('\n'), title: `OS ${order.vehicle.plate}` });
-  }, [order, totalParts, totalLabor, totalGeral]);
+    lines.push(`Subtotal Peças:   ${currency(totalParts)}`);
+    lines.push(`Subtotal M.O.:    ${currency(totalLabor)}`);
+    if (discount > 0) {
+      lines.push(`Desconto:        - ${currency(discount)}`);
+    }
+    lines.push(`TOTAL GERAL:      ${currency(totalGeral)}`);
+
+    await Share.share({
+      message: lines.join('\n'),
+      title: `${isQuote ? 'Orçamento' : 'OS'} ${order.vehicle.plate}`,
+    });
+  }, [order, isQuote, parts, services, totalParts, totalLabor, discount, totalGeral]);
+
+  const handleWhatsApp = (phone?: string | null) => {
+    if (!phone) return;
+    const clean = phone.replace(/\D/g, '');
+    if (clean.length >= 8) {
+      const url = `https://wa.me/55${clean}`;
+      Linking.openURL(url).catch(() => {
+        Alert.alert('Atenção', 'Não foi possível abrir o WhatsApp.');
+      });
+    }
+  };
+
+  const handleCallPhone = (phone?: string | null) => {
+    if (!phone) return;
+    const clean = phone.replace(/\D/g, '');
+    if (clean) {
+      Linking.openURL(`tel:${clean}`).catch(() => {});
+    }
+  };
 
   const handleQuantityChange = useCallback(
     (item: OrderItem, delta: 1 | -1) => {
@@ -368,383 +490,621 @@ export default function OrderScreen() {
 
   if (orderLoading) {
     return (
-      <View className="flex-1 items-center justify-center bg-slate-50 dark:bg-slate-950">
+      <View className="flex-1 items-center justify-center bg-slate-900">
         <ActivityIndicator size="large" color="#3b82f6" />
-        <Text className="mt-3 text-gray-500 dark:text-slate-400">Carregando OS…</Text>
+        <Text className="mt-3 text-slate-400">Carregando OS…</Text>
       </View>
     );
   }
 
   if (orderError || !order) {
     return (
-      <View className="flex-1 items-center justify-center bg-slate-50 dark:bg-slate-950 px-6">
+      <View className="flex-1 items-center justify-center bg-slate-900 px-6">
         <Text className="text-5xl mb-4">⚠️</Text>
-        <Text className="text-lg font-bold text-gray-900 dark:text-white text-center">
+        <Text className="text-lg font-bold text-white text-center">
           Não foi possível carregar a OS
         </Text>
-        <Text className="text-sm text-gray-500 dark:text-slate-400 text-center mt-2">
+        <Text className="text-sm text-slate-400 text-center mt-2">
           Verifique a conexão com o servidor e tente novamente.
         </Text>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          className="mt-5 px-5 py-2.5 rounded-xl bg-blue-600"
+        >
+          <Text className="text-white font-bold text-sm">Voltar</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   const showSearchResults = !isClosed && debouncedSearch.length >= 2;
 
-
+  useEffect(() => {
+    if (showSearchResults && searchCardY.current > 0) {
+      scrollViewRef.current?.scrollTo({
+        y: Math.max(0, searchCardY.current - 15),
+        animated: true,
+      });
+    }
+  }, [showSearchResults]);
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <View className="flex-1 bg-slate-50 dark:bg-slate-950">
+    <View className="flex-1 bg-slate-950">
+      <ScrollView
+        ref={scrollViewRef}
+        className="flex-1"
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: 110 }}
+      >
+        {/* ── CARD PRINCIPAL: VEÍCULO & STATUS ─────────────────────────────────── */}
+        <View className="bg-slate-900 px-5 pt-14 pb-5 border-b border-slate-800 shadow-md">
+          {/* Breadcrumb / OS #ID e Badge Status */}
+          <View className="flex-row items-center justify-between mb-1.5">
+            <Text className="text-xs font-mono text-slate-400 uppercase tracking-wider">
+              {isQuote ? 'ORÇAMENTO' : 'OS'} #{order.id.split('-')[0].toUpperCase()}
+            </Text>
 
-      {/* Cabeçalho da OS */}
-      <View className="bg-white dark:bg-slate-900 px-5 pt-14 pb-4 border-b border-gray-100 dark:border-slate-800">
-        <View className="flex-row items-center justify-between">
-          <View>
-            <Text className="text-xs font-mono text-gray-400 dark:text-slate-500 uppercase tracking-wider">
-              OS #{order.id.split('-')[0].toUpperCase()}
-            </Text>
-            <Text className="text-2xl font-bold text-gray-900 dark:text-white mt-0.5">
-              {order.vehicle.plate}
-            </Text>
-            <Text className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">
-              {order.vehicle.model} · {order.vehicle.mileage.toLocaleString('pt-BR')} km
-            </Text>
-            {order.client?.name ? (
-              <Text className="text-xs font-semibold text-blue-600 dark:text-blue-400 mt-1">
-                👤 {order.client.name} {order.client.phone ? `· 📞 ${order.client.phone}` : ''}
-              </Text>
-            ) : null}
-            <Text className="text-xs text-gray-400 dark:text-slate-500 mt-1">
-              Aberta: {fmtDate(order.createdAt as unknown as string)}
-              {isClosed && order.closedAt
-                ? `  ·  Encerrada: ${fmtDate(order.closedAt)}`
-                : ''}
-            </Text>
-          </View>
-
-          <View
-            className={`px-3 py-1.5 rounded-full ${
-              order.status === 'quote'
-                ? 'bg-purple-100 dark:bg-purple-900/40'
-                : order.status === 'open'
-                ? 'bg-green-100 dark:bg-green-900/30'
-                : order.status === 'in_progress'
-                ? 'bg-amber-100 dark:bg-amber-900/30'
-                : 'bg-gray-100 dark:bg-slate-700'
-            }`}
-          >
-            <Text
-              className={`text-xs font-bold uppercase ${
-                order.status === 'quote'
-                  ? 'text-purple-700 dark:text-purple-300'
+            <View
+              className={`px-3 py-1 rounded-full ${
+                isQuote
+                  ? 'bg-purple-950/80 border border-purple-700/60'
                   : order.status === 'open'
-                  ? 'text-green-700 dark:text-green-400'
+                  ? 'bg-emerald-950/80 border border-emerald-700/60'
                   : order.status === 'in_progress'
-                  ? 'text-amber-700 dark:text-amber-400'
-                  : 'text-gray-500 dark:text-slate-400'
+                  ? 'bg-amber-950/80 border border-amber-700/60'
+                  : 'bg-slate-800 border border-slate-700'
               }`}
             >
-              {order.status === 'quote'
-                ? 'Orçamento'
-                : order.status === 'open'
-                ? 'Aberta'
-                : order.status === 'in_progress'
-                ? 'Em andamento'
-                : 'Encerrada'}
+              <Text
+                className={`text-[11px] font-extrabold uppercase ${
+                  isQuote
+                    ? 'text-purple-300'
+                    : order.status === 'open'
+                    ? 'text-emerald-400'
+                    : order.status === 'in_progress'
+                    ? 'text-amber-400'
+                    : 'text-slate-400'
+                }`}
+              >
+                {isQuote
+                  ? 'Orçamento'
+                  : order.status === 'open'
+                  ? 'Aberta'
+                  : order.status === 'in_progress'
+                  ? 'Em andamento'
+                  : 'Encerrada'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Placa em Grande Destaque (Estilo Placa) */}
+          <View className="flex-row items-baseline gap-2 mt-0.5">
+            <Text className="text-3xl font-extrabold text-white tracking-wider">
+              {order.vehicle.plate}
             </Text>
           </View>
-        </View>
 
-        {/* Técnico / Mecânico Responsável */}
-        <View className="mt-3">
-          {order.mecanicoNome ? (
-            <View className="flex-row items-center justify-between py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-              <View className="flex-row items-center gap-2 flex-1 mr-2">
-                <Text style={{ fontSize: 14 }}>🔧</Text>
-                <View className="flex-1">
-                  <Text className="text-[10px] font-bold uppercase text-slate-400 dark:text-slate-500">
-                    Técnico Responsável
-                  </Text>
-                  <Text className="text-xs font-bold text-slate-800 dark:text-white" numberOfLines={1}>
-                    {order.mecanicoNome}
-                    {user?.mecanicoId && order.mecanicoId === user.mecanicoId ? ' (Você)' : ''}
-                  </Text>
-                </View>
-              </View>
+          <Text className="text-sm text-slate-400 mt-1">
+            {order.vehicle.model} · {order.vehicle.mileage.toLocaleString('pt-BR')} km
+          </Text>
 
-              {!isClosed && user?.mecanicoId && order.mecanicoId !== user.mecanicoId && (
-                <TouchableOpacity
-                  onPress={() => assumirOS()}
-                  disabled={assumindoOS}
-                  className="px-2.5 py-1.5 rounded-lg bg-blue-600 dark:bg-blue-500"
-                >
-                  <Text className="text-[11px] font-bold text-white">
-                    {assumindoOS ? 'Assumindo…' : 'Mudar p/ mim'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ) : (
-            <View className="py-2.5 px-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex-row items-center justify-between">
-              <View className="flex-row items-center gap-2 flex-1 mr-2">
-                <Text style={{ fontSize: 16 }}>⏳</Text>
-                <View className="flex-1">
-                  <Text className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                    Sem técnico atribuído
-                  </Text>
-                  <Text className="text-[11px] text-amber-700 dark:text-amber-400">
-                    Esta OS ainda não possui técnico
-                  </Text>
-                </View>
-              </View>
+          <Text className="text-[11px] text-slate-500 mt-1">
+            Criada em {fmtDate(order.createdAt as unknown as string)}
+            {isClosed && order.closedAt ? ` · Encerrada: ${fmtDate(order.closedAt)}` : ''}
+          </Text>
 
-              {!isClosed && user?.mecanicoId && (
-                <TouchableOpacity
-                  onPress={() => assumirOS()}
-                  disabled={assumindoOS}
-                  className="px-3 py-2 rounded-xl bg-blue-600 dark:bg-blue-500 shadow-sm flex-row items-center gap-1.5"
-                >
-                  {assumindoOS ? (
-                    <ActivityIndicator size="small" color="#ffffff" />
-                  ) : (
-                    <>
-                      <Text style={{ fontSize: 12 }}>🔧</Text>
-                      <Text className="text-xs font-bold text-white">
-                        Assumir OS
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-        </View>
-
-        {/* Auxiliar de Mecânico (se atribuído) */}
-        {order.auxiliarNome ? (
-          <View className="mt-2 flex-row items-center py-2 px-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40">
-            <View className="flex-row items-center gap-2 flex-1">
-              <Text style={{ fontSize: 14 }}>🤝</Text>
-              <View className="flex-1">
-                <Text className="text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400">
-                  Auxiliar de Mecânico
-                </Text>
-                <Text className="text-xs font-bold text-slate-800 dark:text-white" numberOfLines={1}>
-                  {order.auxiliarNome}
-                  {user?.mecanicoId && order.auxiliarId === user.mecanicoId ? ' (Você)' : ''}
-                </Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
-
-        {/* Banner de Orçamento */}
-        {order.status === 'quote' && (
-          <View className="mt-3 p-3.5 rounded-2xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60">
-            <View className="flex-row items-center gap-2 mb-2.5">
-              <Text style={{ fontSize: 16 }}>📋</Text>
-              <Text className="text-xs font-bold text-purple-900 dark:text-purple-200">
-                Orçamento Aguardando Aprovação
-              </Text>
-            </View>
+          {/* ── SELETORES: MECÂNICO TITULAR & AUXILIAR ───────────────────────────── */}
+          <View className="mt-4 pt-3 border-t border-slate-800/80 space-y-2">
+            {/* Mecânico Titular */}
             <TouchableOpacity
-              onPress={() => approveQuote()}
-              disabled={approvingQuote}
-              className="py-3 rounded-xl bg-green-600 dark:bg-green-500 items-center justify-center shadow-sm"
+              onPress={() => {
+                if (!isClosed) {
+                  setMecanicoModalTarget({
+                    type: 'titular',
+                    selectedId: order.mecanicoId ?? null,
+                  });
+                }
+              }}
+              disabled={isClosed}
+              activeOpacity={isClosed ? 1 : 0.7}
+              className="flex-row items-center justify-between p-2.5 rounded-xl bg-slate-800/80 border border-slate-700"
             >
-              {approvingQuote ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <Text className="text-white font-bold text-sm">
-                  ✅ Aprovar Orçamento (Gerar OS)
-                </Text>
-              )}
+              <View className="flex-row items-center gap-2.5 flex-1 mr-2">
+                <Text style={{ fontSize: 16 }}>🔧</Text>
+                <View className="flex-1">
+                  <Text className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Mecânico Titular
+                  </Text>
+                  <Text
+                    className="text-xs font-bold text-white mt-0.5"
+                    numberOfLines={1}
+                  >
+                    {order.mecanicoNome || 'Não atribuído (Geral da Oficina)'}
+                  </Text>
+                </View>
+              </View>
+
+              <View className="flex-row items-center gap-1.5">
+                {order.mecanicoNome ? (
+                  <View className="px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-800">
+                    <Text className="text-[10px] font-bold text-emerald-400">✓ Titular</Text>
+                  </View>
+                ) : null}
+                {!isClosed && (
+                  <Text className="text-slate-400 text-xs">▼</Text>
+                )}
+              </View>
+            </TouchableOpacity>
+
+            {/* Auxiliar de Mecânico */}
+            <TouchableOpacity
+              onPress={() => {
+                if (!isClosed) {
+                  setMecanicoModalTarget({
+                    type: 'auxiliar',
+                    selectedId: order.auxiliarId ?? null,
+                  });
+                }
+              }}
+              disabled={isClosed}
+              activeOpacity={isClosed ? 1 : 0.7}
+              className="flex-row items-center justify-between p-2.5 rounded-xl bg-slate-800/80 border border-slate-700 mt-2"
+            >
+              <View className="flex-row items-center gap-2.5 flex-1 mr-2">
+                <Text style={{ fontSize: 16 }}>🤝</Text>
+                <View className="flex-1">
+                  <Text className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                    Auxiliar de Mecânico
+                  </Text>
+                  <Text
+                    className="text-xs font-bold text-amber-200 mt-0.5"
+                    numberOfLines={1}
+                  >
+                    {order.auxiliarNome || 'Nenhum auxiliar escalado'}
+                  </Text>
+                </View>
+              </View>
+
+              <View className="flex-row items-center gap-1.5">
+                {order.auxiliarNome ? (
+                  <View className="px-2 py-0.5 rounded-full bg-amber-950/80 border border-amber-800">
+                    <Text className="text-[10px] font-bold text-amber-300">✓ Atribuído</Text>
+                  </View>
+                ) : null}
+                {!isClosed && (
+                  <Text className="text-amber-400 text-xs">▼</Text>
+                )}
+              </View>
             </TouchableOpacity>
           </View>
-        )}
 
-        {/* Banner somente-leitura */}
-        {isClosed && (
-          <View className="flex-row items-center gap-2 mt-3 px-3.5 py-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-            <Text style={{ fontSize: 18 }}>{order.vendaControle ? '✅' : '💳'}</Text>
-            <View className="flex-1">
-              <Text className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
-                {order.vendaControle
-                  ? `OS Faturada no Caixa (Venda #${order.vendaControle})`
-                  : 'Comanda Enviada ao Caixa / PDV'}
+          {/* ── BOTÕES NO CABEÇALHO: IMPRIMIR & FINALIZAR OS ────────────────────── */}
+          <View className="flex-row gap-2.5 mt-4 pt-3 border-t border-slate-800">
+            <TouchableOpacity
+              onPress={handleShareOrPrint}
+              className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 flex-row items-center justify-center gap-1.5"
+            >
+              <Text style={{ fontSize: 13 }}>🖨️</Text>
+              <Text className="text-xs font-bold text-slate-200">
+                Imprimir
               </Text>
-              <Text className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">
-                {order.vendaControle
-                  ? 'Esta ordem foi paga e finalizada no PDV. Somente leitura.'
-                  : 'Aguardando recebimento no terminal de caixa do PDV.'}
-              </Text>
-            </View>
-          </View>
-        )}
-      </View>
+            </TouchableOpacity>
 
-      {/* Barra de busca */}
-      <SearchBar
-        value={search}
-        onChangeText={setSearch}
-        loading={searching || adding}
-        placeholder="Buscar peça / serviço por código ou descrição…"
-        disabled={isClosed}
-      />
-
-      {/* Resultados de busca (overlay) */}
-      {showSearchResults && (
-        <View className="mx-4 rounded-2xl overflow-hidden border border-gray-200 dark:border-slate-700 shadow-lg bg-white dark:bg-slate-800 z-10">
-          {(searchResults ?? []).length === 0 && !searching ? (
-            <View className="py-8 items-center">
-              <Text className="text-gray-400 dark:text-slate-500 text-sm">
-                Nenhum item encontrado para "{debouncedSearch}"
-              </Text>
-            </View>
-          ) : (
-            <FlatList
-              data={searchResults ?? []}
-              keyExtractor={(item) => item.id}
-              renderItem={({ item }) => (
-                <SearchResultItem item={item} onPress={handleSelectCatalogItem} />
-              )}
-              style={{ maxHeight: 300 }}
-              keyboardShouldPersistTaps="handled"
-            />
-          )}
-        </View>
-      )}
-
-      {/* Lista de itens lançados */}
-      {!showSearchResults && (
-        <FlatList
-          data={items}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <ItemRow
-              item={item}
-              onDeleteRequest={handleDeleteRequest}
-              onQuantityChange={handleQuantityChange}
-              onLaborRequest={handleLaborRequest}
-              readOnly={isClosed}
-            />
-          )}
-          ListEmptyComponent={
-            <View className="items-center py-16 px-8">
-              <Text style={{ fontSize: 48 }}>🔩</Text>
-              <Text className="text-gray-500 dark:text-slate-400 text-base text-center mt-3">
-                {isClosed
-                  ? 'Nenhum item registrado nesta OS.'
-                  : 'Nenhum item lançado ainda.\nUse a busca acima para adicionar.'}
-              </Text>
-            </View>
-          }
-          ListHeaderComponent={
-            items.length > 0 ? (
-              <Text className="px-4 pt-4 pb-2 text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">
-                {items.length} {items.length === 1 ? 'item lançado' : 'itens lançados'}
-              </Text>
-            ) : null
-          }
-          ListFooterComponent={
-            items.length > 0 ? (
-              <View className="mx-4 my-4 bg-white dark:bg-slate-800 rounded-2xl p-4 border border-gray-100 dark:border-slate-700">
-                <Text className="text-sm font-semibold text-gray-500 dark:text-slate-400 mb-3">
-                  Resumo
+            {isQuote ? (
+              <TouchableOpacity
+                onPress={() => approveQuote()}
+                disabled={approvingQuote}
+                className="flex-1 py-2.5 rounded-xl bg-green-600 items-center justify-center shadow-md flex-row gap-1.5"
+              >
+                {approvingQuote ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <Text style={{ fontSize: 13 }}>✅</Text>
+                    <Text className="text-xs font-bold text-white">Aprovar Orçamento</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : !isClosed ? (
+              <TouchableOpacity
+                onPress={handleCloseRequest}
+                disabled={changingStatus}
+                className={`flex-1 py-2.5 rounded-xl items-center justify-center shadow-md flex-row gap-1.5 ${
+                  isBalcao
+                    ? 'bg-emerald-600'
+                    : 'bg-red-900/60 border border-red-800/80'
+                }`}
+              >
+                {changingStatus ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <Text style={{ fontSize: 13 }}>{isBalcao ? '💳' : '🔒'}</Text>
+                    <Text className={`text-xs font-bold ${isBalcao ? 'text-white' : 'text-red-300'}`}>
+                      {isBalcao ? 'Enviar ao Caixa' : 'Finalizar OS'}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                onPress={handleReopenRequest}
+                disabled={changingStatus}
+                className="flex-1 py-2.5 rounded-xl bg-amber-900/40 border border-amber-800/70 items-center justify-center flex-row gap-1.5"
+              >
+                <Text style={{ fontSize: 13 }}>🔓</Text>
+                <Text className="text-xs font-bold text-amber-300">
+                  Reabrir OS
                 </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
 
-                {/* Total Peças */}
-                <View className="flex-row justify-between mb-2">
-                  <Text className="text-sm text-gray-600 dark:text-slate-400">
-                    Total Peças
-                  </Text>
-                  <Text className="text-sm font-medium text-amber-600 dark:text-amber-400">
-                    {currency(totalParts)}
-                  </Text>
-                </View>
+        {/* ── CARD DADOS DO CLIENTE ───────────────────────────────────────────── */}
+        <View className="mx-4 mt-3 bg-slate-900 rounded-2xl border border-slate-800 p-4 shadow-sm">
+          <View className="flex-row items-center justify-between pb-2.5 border-b border-slate-800">
+            <View className="flex-row items-center gap-1.5">
+              <Text style={{ fontSize: 14 }}>👤</Text>
+              <Text className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Dados do Cliente
+              </Text>
+            </View>
 
-                {/* Total MO */}
-                <View className="flex-row justify-between mb-3">
-                  <Text className="text-sm text-gray-600 dark:text-slate-400">
-                    Total Mão de Obra
-                  </Text>
-                  <Text className={`text-sm font-medium ${totalLabor > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-slate-500'}`}>
-                    {currency(totalLabor)}
-                  </Text>
-                </View>
+            {!isClosed && (
+              <TouchableOpacity
+                onPress={() => setClientModalOpen(true)}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 flex-row items-center gap-1"
+              >
+                <Text className="text-xs text-blue-400 font-bold">✏️ Editar</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
-                {/* Total Geral */}
-                <View className="border-t border-gray-100 dark:border-slate-700 pt-3 flex-row justify-between">
-                  <Text className="text-base font-bold text-gray-900 dark:text-white">
-                    Total Geral
-                  </Text>
-                  <Text className="text-base font-bold text-green-600 dark:text-green-400">
-                    {currency(totalGeral)}
-                  </Text>
-                </View>
+          {order.client?.name ? (
+            <View className="mt-3 space-y-2">
+              <Text className="text-base font-extrabold text-white">
+                {order.client.name}
+              </Text>
 
-                {/* Ações */}
-                <View className="flex-row gap-3 mt-4">
+              {/* Telefone e WhatsApp */}
+              {order.client.phone ? (
+                <View className="flex-row items-center gap-2 flex-wrap mt-1">
                   <TouchableOpacity
-                    onPress={handleShare}
-                    className="flex-1 py-3 rounded-xl bg-blue-50 dark:bg-blue-900/30 items-center"
+                    onPress={() => handleCallPhone(order.client?.phone)}
+                    className="flex-row items-center gap-1 py-0.5 px-2 rounded-lg bg-slate-800/60 border border-slate-700/60"
                   >
-                    <Text className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                      📤 Compartilhar
+                    <Text className="text-xs text-slate-300 font-mono">
+                      📞 {order.client.phone}
                     </Text>
                   </TouchableOpacity>
 
-                  {!isClosed ? (
-                    <TouchableOpacity
-                      onPress={handleCloseRequest}
-                      disabled={changingStatus}
-                      className={`flex-1 py-3.5 rounded-xl items-center flex-row justify-center gap-1.5 ${
-                        isBalcao
-                          ? 'bg-emerald-600 dark:bg-emerald-500'
-                          : 'bg-blue-600 dark:bg-blue-500'
-                      }`}
-                    >
-                      {changingStatus ? (
-                        <ActivityIndicator size="small" color="#ffffff" />
-                      ) : (
-                        <>
-                          <Text style={{ fontSize: 14 }}>{isBalcao ? '💳' : '🏁'}</Text>
-                          <Text className="text-sm font-bold text-white">
-                            {isBalcao ? 'Enviar ao Caixa' : 'Concluir e Enviar ao Caixa'}
-                          </Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleWhatsApp(order.client?.phone)}
+                    className="flex-row items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-950/70 border border-emerald-800/70"
+                  >
+                    <Text style={{ fontSize: 11 }}>💬</Text>
+                    <Text className="text-[11px] font-bold text-emerald-400">
+                      WhatsApp
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {/* Documento */}
+              {order.client.document ? (
+                <Text className="text-xs text-slate-400 font-mono mt-0.5">
+                  Doc: {order.client.document}
+                </Text>
+              ) : null}
+
+              {/* CEP & Endereço */}
+              <View className="pt-2 border-t border-slate-800/60 space-y-1.5 mt-2">
+                <View className="flex-row items-center gap-1.5">
+                  <Text className="text-xs text-slate-400 font-medium">CEP:</Text>
+                  {order.client.cep ? (
+                    <Text className="text-xs font-mono font-bold text-slate-200">
+                      {order.client.cep}
+                    </Text>
                   ) : (
-                    <TouchableOpacity
-                      onPress={handleReopenRequest}
-                      disabled={changingStatus}
-                      className="flex-1 py-3.5 rounded-xl bg-amber-50 dark:bg-amber-900/30 items-center flex-row justify-center gap-1.5 border border-amber-200 dark:border-amber-800"
-                    >
-                      {changingStatus ? (
-                        <ActivityIndicator size="small" color="#d97706" />
-                      ) : (
-                        <>
-                          <Text style={{ fontSize: 14 }}>🔓</Text>
-                          <Text className="text-sm font-semibold text-amber-700 dark:text-amber-300">
-                            Reabrir OS
-                          </Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
+                    <Text className="text-[11px] text-amber-400/80 font-medium">
+                      Não informado
+                    </Text>
+                  )}
+                </View>
+
+                <View className="flex-row items-start gap-1.5">
+                  <Text className="text-xs text-slate-400 font-medium shrink-0">
+                    Endereço:
+                  </Text>
+                  {order.client.address ? (
+                    <Text className="text-xs text-slate-200 leading-snug flex-1">
+                      {order.client.address}
+                    </Text>
+                  ) : (
+                    <Text className="text-[11px] text-amber-400/80 font-medium">
+                      Não informado
+                    </Text>
                   )}
                 </View>
               </View>
-            ) : null
-          }
-          contentContainerStyle={{ paddingBottom: 100 }}
-          keyboardShouldPersistTaps="handled"
-        />
-      )}
 
-      {/* Modal de seleção obrigatória de instalação */}
+              {/* ID ERP */}
+              {order.client.id ? (
+                <View className="pt-2 border-t border-slate-800/60 flex-row items-center justify-between text-[11px]">
+                  <Text className="text-[11px] text-slate-500">Cadastro ERP:</Text>
+                  <Text className="text-[11px] font-mono text-slate-400">
+                    ID #{order.client.id}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <View className="py-3">
+              <Text className="text-xs text-amber-400 font-semibold">
+                ⚠️ Cliente não cadastrado
+              </Text>
+              <Text className="text-[11px] text-slate-500 mt-0.5">
+                Toque em Editar para registrar o nome e telefone.
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* ── CARD ADICIONAR PEÇAS E SERVIÇOS ─────────────────────────────────── */}
+        {!isClosed && (
+          <View
+            onLayout={(e) => {
+              searchCardY.current = e.nativeEvent.layout.y;
+            }}
+            className="mx-4 mt-3 bg-slate-900 rounded-2xl border border-slate-800 p-4 shadow-sm"
+          >
+            <View className="flex-row items-center gap-2 mb-2">
+              <Text style={{ fontSize: 16 }}>🛒</Text>
+              <View className="flex-1">
+                <Text className="text-xs font-bold text-white">
+                  {isQuote ? 'Adicionar Peças e Serviços ao Orçamento' : 'Adicionar Peças e Serviços à OS'}
+                </Text>
+                <Text className="text-[11px] text-slate-400">
+                  Busque pelo nome ou código de barras para lançar itens
+                </Text>
+              </View>
+            </View>
+
+            <SearchBar
+              value={search}
+              onChangeText={setSearch}
+              onFocus={() => {
+                if (searchCardY.current > 0) {
+                  scrollViewRef.current?.scrollTo({
+                    y: Math.max(0, searchCardY.current - 15),
+                    animated: true,
+                  });
+                }
+              }}
+              loading={searching || adding}
+              placeholder="Buscar por código de barras, código ou nome…"
+              disabled={isClosed}
+            />
+
+            {/* Resultados de busca embutidos */}
+            {showSearchResults && (
+              <View className="mt-2 rounded-xl overflow-hidden border border-slate-700 bg-slate-800 shadow-lg">
+                {(searchResults ?? []).length === 0 && !searching ? (
+                  <View className="py-6 items-center">
+                    <Text className="text-slate-400 text-xs">
+                      Nenhum item encontrado para &ldquo;{debouncedSearch}&rdquo;
+                    </Text>
+                  </View>
+                ) : (
+                  (searchResults ?? []).slice(0, 10).map((item) => (
+                    <SearchResultItem
+                      key={item.id}
+                      item={item}
+                      onPress={handleSelectCatalogItem}
+                    />
+                  ))
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── SEÇÃO: PEÇAS (EXIBIÇÃO SEPARADA) ─────────────────────────────────── */}
+        {parts.length > 0 && (
+          <View className="mx-4 mt-4">
+            <View className="flex-row items-center justify-between mb-2 px-1">
+              <View className="flex-row items-center gap-1.5">
+                <Text style={{ fontSize: 14 }}>🔩</Text>
+                <Text className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">
+                  Peças
+                </Text>
+              </View>
+              <View className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
+                <Text className="text-[11px] font-bold text-slate-400">
+                  {parts.length} {parts.length === 1 ? 'item' : 'itens'}
+                </Text>
+              </View>
+            </View>
+
+            {parts.map((item) => (
+              <ItemRow
+                key={item.id}
+                item={item}
+                onDeleteRequest={handleDeleteRequest}
+                onQuantityChange={handleQuantityChange}
+                onLaborRequest={handleLaborRequest}
+                onMechanicRequest={(it) =>
+                  setMecanicoModalTarget({
+                    type: 'item',
+                    item: it,
+                    selectedId: it.mecanicoId ?? null,
+                  })
+                }
+                readOnly={isClosed}
+              />
+            ))}
+          </View>
+        )}
+
+        {/* ── SEÇÃO: MÃO DE OBRA E SERVIÇOS (EXIBIÇÃO SEPARADA) ────────────────── */}
+        {services.length > 0 && (
+          <View className="mx-4 mt-4">
+            <View className="flex-row items-center justify-between mb-2 px-1">
+              <View className="flex-row items-center gap-1.5">
+                <Text style={{ fontSize: 14 }}>🔧</Text>
+                <Text className="text-xs font-extrabold text-blue-400 uppercase tracking-wider">
+                  Mão de Obra e Serviços
+                </Text>
+              </View>
+              <View className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
+                <Text className="text-[11px] font-bold text-slate-400">
+                  {services.length} {services.length === 1 ? 'item' : 'itens'}
+                </Text>
+              </View>
+            </View>
+
+            {services.map((item) => (
+              <ItemRow
+                key={item.id}
+                item={item}
+                onDeleteRequest={handleDeleteRequest}
+                onQuantityChange={handleQuantityChange}
+                onLaborRequest={handleLaborRequest}
+                onMechanicRequest={(it) =>
+                  setMecanicoModalTarget({
+                    type: 'item',
+                    item: it,
+                    selectedId: it.mecanicoId ?? null,
+                  })
+                }
+                readOnly={isClosed}
+              />
+            ))}
+          </View>
+        )}
+
+        {/* Estado vazio se não houver itens lançados */}
+        {items.length === 0 && !showSearchResults && (
+          <View className="items-center py-16 px-8 mx-4 mt-4 bg-slate-900 rounded-2xl border border-slate-800">
+            <Text style={{ fontSize: 44 }}>🔩</Text>
+            <Text className="text-base font-bold text-white text-center mt-2">
+              Nenhum item lançado ainda
+            </Text>
+            <Text className="text-xs text-slate-400 text-center mt-1">
+              {isClosed
+                ? 'Esta Ordem de Serviço foi encerrada sem itens cadastrados.'
+                : 'Utilize o campo de busca acima para pesquisar peças e serviços no catálogo.'}
+            </Text>
+          </View>
+        )}
+
+        {/* ── RESUMO DE VALORES ───────────────────────────────────────────────── */}
+        {items.length > 0 && (
+          <View className="mx-4 mt-4 bg-slate-900 rounded-2xl p-4 border border-slate-800 shadow-sm">
+            <Text className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+              Resumo dos Valores
+            </Text>
+
+            <View className="flex-row justify-between mb-2">
+              <Text className="text-xs text-slate-400">Total Peças</Text>
+              <Text className="text-xs font-bold text-amber-400 font-mono">
+                {currency(totalParts)}
+              </Text>
+            </View>
+
+            <View className="flex-row justify-between mb-2">
+              <Text className="text-xs text-slate-400">Total Mão de Obra</Text>
+              <Text className={`text-xs font-bold font-mono ${totalLabor > 0 ? 'text-blue-400' : 'text-slate-500'}`}>
+                {currency(totalLabor)}
+              </Text>
+            </View>
+
+            {discount > 0 && (
+              <View className="flex-row justify-between mb-2">
+                <Text className="text-xs text-red-400">Desconto Aplicado</Text>
+                <Text className="text-xs font-bold text-red-400 font-mono">
+                  - {currency(discount)}
+                </Text>
+              </View>
+            )}
+
+            <View className="border-t border-slate-800 pt-2.5 mt-1 flex-row justify-between items-baseline">
+              <Text className="text-sm font-bold text-white">
+                {order.vendaControle ? 'Total Faturado PDV' : 'Total Geral'}
+              </Text>
+              <Text className="text-base font-extrabold text-emerald-400 font-mono">
+                {currency(totalGeral)}
+              </Text>
+            </View>
+
+            {order.vendaControle ? (
+              <View className="mt-2.5 p-2 rounded-xl bg-emerald-950/70 border border-emerald-800/80 items-center">
+                <Text className="text-xs font-bold text-emerald-300 font-mono">
+                  ✓ Faturada no PDV · Venda #{order.vendaControle}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* ── MODAIS ───────────────────────────────────────────────────────────── */}
+
+      {/* Modal de Edição de Dados do Cliente */}
+      <ClientEditModal
+        visible={clientModalOpen}
+        client={order.client}
+        onSave={(data) => updateClient(data)}
+        onClose={() => setClientModalOpen(false)}
+        isSaving={savingClient}
+      />
+
+      {/* Modal de Seleção de Mecânico (Titular, Auxiliar ou Item) */}
+      <MecanicoSelectorModal
+        visible={mecanicoModalTarget !== null}
+        title={
+          mecanicoModalTarget?.type === 'titular'
+            ? 'Mecânico Titular da OS'
+            : mecanicoModalTarget?.type === 'auxiliar'
+            ? 'Auxiliar de Mecânico da OS'
+            : `Técnico: ${mecanicoModalTarget?.item?.description || ''}`
+        }
+        subtitle={
+          mecanicoModalTarget?.type === 'titular'
+            ? 'Selecione o mecânico responsável principal'
+            : mecanicoModalTarget?.type === 'auxiliar'
+            ? 'Selecione o auxiliar escalado para apoio'
+            : 'Atribuir a execução e comissão deste item para:'
+        }
+        mecanicos={mecanicos}
+        selectedId={mecanicoModalTarget?.selectedId ?? null}
+        allowClear={true}
+        clearLabel={
+          mecanicoModalTarget?.type === 'item'
+            ? 'Padrão da OS (Sem técnico individual)'
+            : 'Não atribuído'
+        }
+        onSelect={(mec: Mecanico | null) => {
+          if (!mecanicoModalTarget) return;
+          if (mecanicoModalTarget.type === 'titular') {
+            updateMechanic(mec?.id ?? null);
+          } else if (mecanicoModalTarget.type === 'auxiliar') {
+            updateAuxiliar(mec?.id ?? null);
+          } else if (mecanicoModalTarget.type === 'item') {
+            setItemMechanic({
+              itemId: mecanicoModalTarget.item.id,
+              mecanicoId: mec?.id ?? null,
+            });
+          }
+          setMecanicoModalTarget(null);
+        }}
+        onClose={() => setMecanicoModalTarget(null)}
+      />
+
+      {/* Modal de Posição de Instalação */}
       <InstalacaoModal
         visible={instalacaoTarget !== null}
         productDescription={instalacaoTarget?.description ?? ''}
@@ -753,27 +1113,36 @@ export default function OrderScreen() {
         onCancel={() => setInstalacaoTarget(null)}
       />
 
-      {/* Modal de preço total do serviço por item */}
+      {/* Modal de Preço Total do Serviço (para inclusão do catálogo) */}
       <ServicePriceModal
         visible={priceModalTarget !== null}
         title={priceModalTarget ? priceModalTarget.item.description : 'Preço Total'}
-        description={priceModalTarget
-          ? `${priceModalTarget.item.type === 'service' ? 'Serviço' : 'Peça'}: ${currency(
-              priceModalTarget.mode === 'catalog'
-                ? priceModalTarget.item.unitPrice
-                : priceModalTarget.item.total
-            )} — Digite o preço total cobrado (peça + instalação)`
-          : undefined}
-        initialValue={priceModalTarget
-          ? priceModalTarget.mode === 'catalog'
-            ? priceModalTarget.item.unitPrice
-            : (priceModalTarget.item.total ?? 0) + (priceModalTarget.item.laborPrice ?? 0)
-          : 0}
+        description={
+          priceModalTarget
+            ? `${priceModalTarget.item.type === 'service' ? 'Serviço' : 'Peça'}: ${currency(
+                priceModalTarget.item.unitPrice
+              )} — Digite o preço total cobrado (peça + instalação)`
+            : undefined
+        }
+        initialValue={priceModalTarget ? priceModalTarget.item.unitPrice : 0}
+        allowZero={false}
         onConfirm={handlePriceConfirm}
         onCancel={() => setPriceModalTarget(null)}
       />
 
-      {/* Modal de PIN — para todas as ações que exigem supervisor */}
+      {/* Modal de Edição Exclusiva de Mão de Obra do Item */}
+      <ServicePriceModal
+        visible={editingLaborItem !== null}
+        title="Mão de Obra do Item"
+        description={editingLaborItem ? editingLaborItem.description : undefined}
+        inputLabel="Valor da Mão de Obra (R$)"
+        initialValue={editingLaborItem?.laborPrice ?? 0}
+        allowZero={true}
+        onConfirm={handleConfirmEditLabor}
+        onCancel={() => setEditingLaborItem(null)}
+      />
+
+      {/* Modal de PIN (para exclusão, redução e fechamento de OS) */}
       <PinModal
         visible={pendingAction !== null}
         itemDescription={pendingAction?.itemDescription}
