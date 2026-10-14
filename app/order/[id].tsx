@@ -326,12 +326,6 @@ export default function OrderScreen() {
     });
   }, [isClosed]);
 
-  const isBalcao = Boolean(
-    order?.mecanicoNome?.toUpperCase().includes('BALC') ||
-    order?.vehicle?.plate?.toUpperCase().includes('BALC') ||
-    (items.length > 0 && totalLabor === 0)
-  );
-
   const handleCloseRequest = useCallback(() => {
     if (!order) return;
     if (items.length === 0) {
@@ -339,27 +333,9 @@ export default function OrderScreen() {
       return;
     }
 
-    if (isBalcao) {
-      Alert.alert(
-        'Enviar ao Caixa / PDV',
-        `Deseja concluir esta Venda de Balcão (${currency(totalGeral)}) e liberá-la para recebimento imediato no Caixa?`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Confirmar e Enviar',
-            style: 'default',
-            onPress: () => {
-              changeOrderStatus({ status: 'closed', isBalcao: true });
-            },
-          },
-        ]
-      );
-      return;
-    }
-
-    // Para OS normal de oficina: abre modal com confirmação cadastral e senha de administrador
+    // Exige aprovação e senha do gerente para liberar e enviar ao Caixa / PDV
     setFinalizarModalOpen(true);
-  }, [order, items.length, isBalcao, totalGeral, changeOrderStatus]);
+  }, [order, items.length]);
 
   const handleFinalizarSuccess = useCallback(
     (updated: Order, sendToPdv: boolean) => {
@@ -504,16 +480,37 @@ export default function OrderScreen() {
     setPendingAction(null);
   }, [pendingAction, removeItem, updateQty, changeOrderStatus]);
 
-  const showSearchResults = !isClosed && debouncedSearch.length >= 2;
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   useEffect(() => {
-    if (showSearchResults && searchCardY.current > 0) {
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const scrollToSearch = useCallback(() => {
+    if (searchCardY.current > 0) {
       scrollViewRef.current?.scrollTo({
-        y: Math.max(0, searchCardY.current - 15),
+        y: Math.max(0, searchCardY.current - 10),
         animated: true,
       });
     }
-  }, [showSearchResults]);
+  }, []);
+
+  const showSearchResults = !isClosed && debouncedSearch.length >= 2;
+
+  useEffect(() => {
+    if (showSearchResults) {
+      scrollToSearch();
+    }
+  }, [showSearchResults, scrollToSearch]);
 
   // ─── Estados de carregamento / erro ──────────────────────────────────────────
 
@@ -554,7 +551,7 @@ export default function OrderScreen() {
         ref={scrollViewRef}
         className="flex-1"
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingBottom: 110 }}
+        contentContainerStyle={{ paddingBottom: Math.max(140, keyboardHeight + 60) }}
       >
         {/* ── CARD PRINCIPAL: VEÍCULO & STATUS ─────────────────────────────────── */}
         <View className="bg-slate-900 px-5 pt-14 pb-5 border-b border-slate-800 shadow-md">
@@ -729,19 +726,15 @@ export default function OrderScreen() {
               <TouchableOpacity
                 onPress={handleCloseRequest}
                 disabled={changingStatus}
-                className={`flex-1 py-2.5 rounded-xl items-center justify-center shadow-md flex-row gap-1.5 ${
-                  isBalcao
-                    ? 'bg-emerald-600'
-                    : 'bg-red-900/60 border border-red-800/80'
-                }`}
+                className="flex-1 py-3.5 rounded-xl bg-emerald-600 active:bg-emerald-500 items-center justify-center shadow-md flex-row gap-2"
               >
                 {changingStatus ? (
                   <ActivityIndicator size="small" color="#ffffff" />
                 ) : (
                   <>
-                    <Text style={{ fontSize: 13 }}>{isBalcao ? '💳' : '🔒'}</Text>
-                    <Text className={`text-xs font-bold ${isBalcao ? 'text-white' : 'text-red-300'}`}>
-                      {isBalcao ? 'Enviar ao Caixa' : 'Finalizar OS'}
+                    <Text style={{ fontSize: 14 }}>🔒</Text>
+                    <Text className="text-xs font-bold text-white uppercase tracking-wider">
+                      Finalizar e Enviar ao Caixa
                     </Text>
                   </>
                 )}
@@ -894,36 +887,36 @@ export default function OrderScreen() {
             <SearchBar
               value={search}
               onChangeText={setSearch}
-              onFocus={() => {
-                if (searchCardY.current > 0) {
-                  scrollViewRef.current?.scrollTo({
-                    y: Math.max(0, searchCardY.current - 15),
-                    animated: true,
-                  });
-                }
-              }}
+              onFocus={scrollToSearch}
               loading={searching || adding}
               placeholder="Buscar por código de barras, código ou nome…"
               disabled={isClosed}
             />
 
-            {/* Resultados de busca embutidos */}
+            {/* Resultados de busca embutidos com altura máxima e rolagem aninhada */}
             {showSearchResults && (
-              <View className="mt-2 rounded-xl overflow-hidden border border-slate-700 bg-slate-800 shadow-lg">
+              <View className="mt-2 rounded-xl overflow-hidden border border-slate-700 bg-slate-800 shadow-xl">
                 {(searchResults ?? []).length === 0 && !searching ? (
-                  <View className="py-6 items-center">
+                  <View className="py-5 items-center">
                     <Text className="text-slate-400 text-xs">
                       Nenhum item encontrado para &ldquo;{debouncedSearch}&rdquo;
                     </Text>
                   </View>
                 ) : (
-                  (searchResults ?? []).slice(0, 10).map((item) => (
-                    <SearchResultItem
-                      key={item.id}
-                      item={item}
-                      onPress={handleSelectCatalogItem}
-                    />
-                  ))
+                  <ScrollView
+                    style={{ maxHeight: 250 }}
+                    nestedScrollEnabled={true}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={true}
+                  >
+                    {(searchResults ?? []).slice(0, 15).map((item) => (
+                      <SearchResultItem
+                        key={item.id}
+                        item={item}
+                        onPress={handleSelectCatalogItem}
+                      />
+                    ))}
+                  </ScrollView>
                 )}
               </View>
             )}
