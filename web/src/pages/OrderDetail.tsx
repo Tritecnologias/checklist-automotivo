@@ -1720,7 +1720,7 @@ export default function OrderDetail() {
       {/* Modal — Finalizar OS com Confirmação dos Dados do Cliente e Senha de Administrador */}
       {confirmClose && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
-          <div className="bg-slate-900 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col h-[94vh] sm:h-auto sm:max-h-[92vh] overflow-hidden my-auto">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col h-[94vh] sm:h-[88vh] sm:max-h-[850px] overflow-hidden my-auto">
             {/* Cabeçalho */}
             <div className="flex items-start justify-between gap-3 p-4 sm:p-5 border-b border-slate-800 shrink-0 bg-slate-900">
               <div className="flex items-center gap-3">

@@ -504,6 +504,17 @@ export default function OrderScreen() {
     setPendingAction(null);
   }, [pendingAction, removeItem, updateQty, changeOrderStatus]);
 
+  const showSearchResults = !isClosed && debouncedSearch.length >= 2;
+
+  useEffect(() => {
+    if (showSearchResults && searchCardY.current > 0) {
+      scrollViewRef.current?.scrollTo({
+        y: Math.max(0, searchCardY.current - 15),
+        animated: true,
+      });
+    }
+  }, [showSearchResults]);
+
   // ─── Estados de carregamento / erro ──────────────────────────────────────────
 
   if (orderLoading) {
@@ -534,17 +545,6 @@ export default function OrderScreen() {
       </View>
     );
   }
-
-  const showSearchResults = !isClosed && debouncedSearch.length >= 2;
-
-  useEffect(() => {
-    if (showSearchResults && searchCardY.current > 0) {
-      scrollViewRef.current?.scrollTo({
-        y: Math.max(0, searchCardY.current - 15),
-        animated: true,
-      });
-    }
-  }, [showSearchResults]);
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
@@ -1169,12 +1169,14 @@ export default function OrderScreen() {
       />
 
       {/* Modal de Finalizar OS (Confirmação dos dados do cliente e Senha de Administrador) */}
-      <FinalizarOrderModal
-        visible={finalizarModalOpen}
-        order={order}
-        onClose={() => setFinalizarModalOpen(false)}
-        onSuccess={handleFinalizarSuccess}
-      />
+      {order && (
+        <FinalizarOrderModal
+          visible={finalizarModalOpen}
+          order={order}
+          onClose={() => setFinalizarModalOpen(false)}
+          onSuccess={handleFinalizarSuccess}
+        />
+      )}
     </View>
   );
 }

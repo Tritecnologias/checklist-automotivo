@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -31,6 +32,7 @@ export function FinalizarOrderModal({
   onSuccess,
 }: FinalizarOrderModalProps) {
   const { user: currentUser } = useAuth();
+  const { height: screenHeight } = useWindowDimensions();
 
   // Estados dos dados do cliente
   const [clientName, setClientName] = useState('');
@@ -221,10 +223,11 @@ export function FinalizarOrderModal({
       statusBarTranslucent
       onRequestClose={isSubmitting ? undefined : onClose}
     >
-      <View className="flex-1 bg-black/80 items-center justify-center p-3">
+      <View className="flex-1 bg-black/80 items-center justify-center p-2 sm:p-4">
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          className="w-full max-w-xl max-h-[92%] bg-slate-900 rounded-3xl border border-slate-700 shadow-2xl flex-col overflow-hidden"
+          style={{ height: Math.min(screenHeight * 0.92, 750), width: '100%', maxWidth: 560 }}
+          className="bg-slate-900 rounded-3xl border border-slate-700 shadow-2xl flex-col overflow-hidden"
         >
           {/* Cabeçalho */}
           <View className="flex-row items-center justify-between p-4 border-b border-slate-800 bg-slate-900">
