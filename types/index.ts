@@ -52,6 +52,14 @@ export interface Mecanico {
   is_auxiliar?: boolean;
 }
 
+export interface OrderAdminUser {
+  id: number;
+  nome: string;
+  email: string;
+  role: string;
+  roleLabel: string;
+}
+
 // ─── Itens da Ordem ──────────────────────────────────────────────────────────
 
 export type ItemType = 'part' | 'service';

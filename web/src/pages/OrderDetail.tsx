@@ -1719,16 +1719,16 @@ export default function OrderDetail() {
       {/* ── MODAIS EXISTENTES (ENCERRAMENTO, REABERTURA E CLIENTE) ────────────── */}
       {/* Modal — Finalizar OS com Confirmação dos Dados do Cliente e Senha de Administrador */}
       {confirmClose && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-6 overflow-y-auto">
-          <div className="bg-slate-900 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col h-[94vh] sm:h-auto sm:max-h-[92vh] overflow-hidden my-auto">
             {/* Cabeçalho */}
-            <div className="flex items-start justify-between gap-3 p-5 border-b border-slate-800 shrink-0">
+            <div className="flex items-start justify-between gap-3 p-4 sm:p-5 border-b border-slate-800 shrink-0 bg-slate-900">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 text-xl font-bold">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 text-xl font-bold shrink-0">
                   🔒
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-white leading-tight">Finalizar Ordem de Serviço</h2>
+                  <h2 className="text-base sm:text-lg font-bold text-white leading-tight">Finalizar Ordem de Serviço</h2>
                   <p className="text-xs text-slate-400 font-mono mt-0.5">
                     OS #{order.id.split('-')[0].toUpperCase()} • {order.vehicle.plate} ({order.vehicle.model})
                   </p>
@@ -1741,14 +1741,14 @@ export default function OrderDetail() {
                   setAdminPassword('')
                   setCloseError('')
                 }}
-                className="text-slate-500 hover:text-slate-300 p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Conteúdo com rolagem */}
-            <div className="p-6 overflow-y-auto space-y-5">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
               <div className="bg-amber-950/40 border border-amber-800/60 rounded-xl p-3.5 text-xs text-amber-200/90 space-y-1">
                 <p className="font-semibold text-amber-300 flex items-center gap-1.5">
                   <span>⚠️</span>
@@ -1940,20 +1940,45 @@ export default function OrderDetail() {
             </div>
 
             {/* Rodapé com botões de ação */}
-            <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex flex-col sm:flex-row items-center gap-3 shrink-0">
+            <div className="p-3.5 sm:p-4 border-t border-slate-800 bg-slate-900 flex flex-col gap-2.5 shrink-0">
+              {/* Botão de Destaque Principal: Finalizar e Enviar para o PDV */}
               <button
                 type="button"
+                disabled={closing || !adminPassword.trim() || (!isAdmin && !selectedAdminId)}
                 onClick={() => {
-                  setConfirmClose(false)
-                  setAdminPassword('')
-                  setCloseError('')
+                  setSendToPdvOnClose(true)
+                  closeOrder(true)
                 }}
-                className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors"
+                className="w-full py-3.5 sm:py-4 px-6 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-base sm:text-lg font-extrabold shadow-xl shadow-emerald-950/60 transition-all flex items-center justify-center gap-2.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer min-h-[52px] sm:min-h-[56px] active:scale-[0.99]"
+                title="Finaliza a OS e redireciona direto para o PDV com a OS pronta para faturamento"
               >
-                Cancelar
+                {closing && sendToPdvOnClose ? (
+                  <>
+                    <span className="animate-spin text-lg">↻</span>
+                    <span>Enviando ao PDV…</span>
+                  </>
+                ) : (
+                  <>
+                    <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
+                    <span>Finalizar e Enviar para o PDV →</span>
+                  </>
+                )}
               </button>
 
-              <div className="flex-1 w-full flex flex-col sm:flex-row gap-2.5 justify-end">
+              {/* Botões Secundários: Cancelar e Finalizar OS (sem enviar ao PDV) */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmClose(false)
+                    setAdminPassword('')
+                    setCloseError('')
+                  }}
+                  className="flex-1 py-2.5 sm:py-3 px-4 rounded-xl border border-slate-700 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors min-h-[44px]"
+                >
+                  Cancelar
+                </button>
+
                 <button
                   type="button"
                   disabled={closing || !adminPassword.trim() || (!isAdmin && !selectedAdminId)}
@@ -1961,7 +1986,7 @@ export default function OrderDetail() {
                     setSendToPdvOnClose(false)
                     closeOrder(false)
                   }}
-                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-sm font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 py-2.5 sm:py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-sm font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
                   title="Finaliza a OS e mantém nesta tela"
                 >
                   {closing && !sendToPdvOnClose ? (
@@ -1972,30 +1997,7 @@ export default function OrderDetail() {
                   ) : (
                     <>
                       <span>🔒</span>
-                      <span>Finalizar OS</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  disabled={closing || !adminPassword.trim() || (!isAdmin && !selectedAdminId)}
-                  onClick={() => {
-                    setSendToPdvOnClose(true)
-                    closeOrder(true)
-                  }}
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-bold shadow-lg shadow-emerald-950/50 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Finaliza a OS e redireciona direto para o PDV com a OS pronta para faturamento"
-                >
-                  {closing && sendToPdvOnClose ? (
-                    <>
-                      <span className="animate-spin text-sm">↻</span>
-                      <span>Enviando ao PDV…</span>
-                    </>
-                  ) : (
-                    <>
-                      <ShoppingCart className="w-4 h-4" />
-                      <span>Finalizar e Enviar para o PDV →</span>
+                      <span>Apenas Finalizar OS</span>
                     </>
                   )}
                 </button>

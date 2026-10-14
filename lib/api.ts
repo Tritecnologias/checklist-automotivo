@@ -4,6 +4,7 @@ import type {
   CatalogItem,
   Mecanico,
   Order,
+  OrderAdminUser,
   OrderClient,
   OrderItem,
   PinVerificationResult,
@@ -179,6 +180,29 @@ export const api = {
     request<Order>(`/orders/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status, ...options }),
+    }),
+
+  getAdministradores: (tenantId?: number | null) =>
+    request<OrderAdminUser[]>(`/orders/administradores${tenantId ? `?tenantId=${tenantId}` : ''}`),
+
+  finalizarOrder: (
+    id: string,
+    auth: {
+      adminPassword: string;
+      adminUserId?: number;
+      adminEmail?: string;
+      client?: {
+        name?: string;
+        document?: string;
+        phone?: string;
+        cep?: string;
+        address?: string;
+      };
+    },
+  ) =>
+    request<Order>(`/orders/${id}/finalizar`, {
+      method: 'POST',
+      body: JSON.stringify(auth),
     }),
 
   // ─── Catálogo ──────────────────────────────────────────────────────────────

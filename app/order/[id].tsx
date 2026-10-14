@@ -17,6 +17,7 @@ import { SearchBar } from '@/components/SearchBar';
 import { SearchResultItem } from '@/components/SearchResultItem';
 import { ItemRow } from '@/components/ItemRow';
 import { PinModal } from '@/components/PinModal';
+import { FinalizarOrderModal } from '@/components/FinalizarOrderModal';
 import { ServicePriceModal } from '@/components/ServicePriceModal';
 import { InstalacaoModal } from '@/components/InstalacaoModal';
 import { ClientEditModal } from '@/components/ClientEditModal';
@@ -56,6 +57,7 @@ export default function OrderScreen() {
 
   const [search, setSearch] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [finalizarModalOpen, setFinalizarModalOpen] = useState(false);
   const [instalacaoTarget, setInstalacaoTarget] = useState<CatalogItem | null>(null);
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [editingLaborItem, setEditingLaborItem] = useState<OrderItem | null>(null);
@@ -355,13 +357,29 @@ export default function OrderScreen() {
       return;
     }
 
-    // Para OS normal de oficina:
-    setPendingAction({
-      type: 'close',
-      itemId: order.id,
-      itemDescription: `Concluir e Enviar ao Caixa: ${order.vehicle.plate}`,
-    });
+    // Para OS normal de oficina: abre modal com confirmação cadastral e senha de administrador
+    setFinalizarModalOpen(true);
   }, [order, items.length, isBalcao, totalGeral, changeOrderStatus]);
+
+  const handleFinalizarSuccess = useCallback(
+    (updated: Order, sendToPdv: boolean) => {
+      qc.setQueryData(['order', id], updated);
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      setFinalizarModalOpen(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'Ordem de Serviço Finalizada!',
+        sendToPdv
+          ? 'A OS foi finalizada com sucesso e enviada ao PDV para emissão e cobrança.'
+          : 'A Ordem de Serviço foi concluída com sucesso.',
+        [
+          { text: 'Voltar ao Início', onPress: () => router.replace('/') },
+          { text: 'Permanecer aqui', style: 'default' },
+        ]
+      );
+    },
+    [id, qc, router]
+  );
 
   const handleReopenRequest = useCallback(() => {
     if (!order) return;
@@ -1142,12 +1160,20 @@ export default function OrderScreen() {
         onCancel={() => setEditingLaborItem(null)}
       />
 
-      {/* Modal de PIN (para exclusão, redução e fechamento de OS) */}
+      {/* Modal de PIN (para exclusão, redução de itens e reabertura) */}
       <PinModal
         visible={pendingAction !== null}
         itemDescription={pendingAction?.itemDescription}
         onAuthorized={handlePinAuthorized}
         onCancel={() => setPendingAction(null)}
+      />
+
+      {/* Modal de Finalizar OS (Confirmação dos dados do cliente e Senha de Administrador) */}
+      <FinalizarOrderModal
+        visible={finalizarModalOpen}
+        order={order}
+        onClose={() => setFinalizarModalOpen(false)}
+        onSuccess={handleFinalizarSuccess}
       />
     </View>
   );
