@@ -149,6 +149,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ pin }),
     }),
+  authorizeDiscount: (payload: {
+    userId?: number
+    email?: string
+    password?: string
+    tenantId?: number
+    pin?: string
+  }) =>
+    request<{
+      authorized: boolean
+      supervisorId?: number
+      supervisorName?: string
+      supervisorRole?: string
+      token?: string
+      message?: string
+    }>('/auth/authorize-discount', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   searchCatalog: (query: string) =>
     request<CatalogItem[]>(`/items?search=${encodeURIComponent(query)}`),
   addItem: (
@@ -293,6 +311,9 @@ export const erpApi = {
     parcelas?: number
     id_os?: string
     supervisor_pin?: string
+    supervisor_token?: string
+    supervisor_user_id?: number
+    supervisor_password?: string
   }) => adminRequest<{ controle: string; id: number; vr_total: number; avisos_estoque?: string[] }>(
     '/erp/vendas', { method: 'POST', body: JSON.stringify(data) }
   ),

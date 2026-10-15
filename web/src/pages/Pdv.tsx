@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { SlidersHorizontal, Lock, Wallet, ArrowRight } from 'lucide-react'
+import { SlidersHorizontal, Lock, Wallet, ArrowRight, Eye, EyeOff } from 'lucide-react'
 import { api, erpApi } from '../lib/api'
-import type { ProdutoPdv, ClientePdv, OsEncerradaPdv } from '../types'
+import type { ProdutoPdv, ClientePdv, OsEncerradaPdv, OrderAdminUser } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import { printThermalReceipt, type ThermalReceiptData } from '../lib/thermalPrint'
 
@@ -97,16 +97,44 @@ export default function Pdv() {
   const [vendaRecente, setVendaRecente] = useState<ThermalReceiptData | null>(null)
   const [avisosEstoqueVenda, setAvisosEstoqueVenda] = useState<string[] | null>(null)
 
-  // ── Autorização de Desconto (> 4%) ─────────────────────────────────────────
+  // ── Autorização de Desconto (> limiteDescontoPct%) ──────────────────────────
   const [autorizacaoAdmin, setAutorizacaoAdmin] = useState<{
+    supervisorId?: number
     supervisorName: string
-    pin: string
+    supervisorRole?: string
+    token?: string
+    pin?: string
     valorAutorizado: number
   } | null>(null)
   const [showPinModal, setShowPinModal] = useState(false)
-  const [pin, setPin] = useState('')
+  const [selectedAdminId, setSelectedAdminId] = useState<number | null>(null)
+  const [adminPassword, setAdminPassword] = useState('')
+  const [showAdminPassword, setShowAdminPassword] = useState(false)
   const [pinError, setPinError] = useState('')
   const [verificandoPin, setVerificandoPin] = useState(false)
+
+  // Lista de Administradores e Gerentes para autorização de desconto
+  const { data: administradores = [], isLoading: carregandoAdmins } = useQuery<OrderAdminUser[]>({
+    queryKey: ['administradores', tid],
+    queryFn: () => api.getAdministradores(tid),
+    enabled: showPinModal,
+  })
+
+  // Pré-seleciona o administrador logado (se owner/manager) ou o primeiro da lista
+  useEffect(() => {
+    if (showPinModal && administradores.length > 0) {
+      if (selectedAdminId && administradores.some(a => a.id === selectedAdminId)) {
+        return
+      }
+      const isCurrentAdmin = user?.role === 'owner' || user?.role === 'manager'
+      if (isCurrentAdmin && user?.id) {
+        const found = administradores.find(a => a.id === user.id)
+        setSelectedAdminId(found ? found.id : administradores[0].id)
+      } else {
+        setSelectedAdminId(administradores[0].id)
+      }
+    }
+  }, [showPinModal, administradores, user, selectedAdminId])
 
   // ── Estado de Integração com OS Encerradas ──────────────────────────────────
   const [showOsModal, setShowOsModal]               = useState(false)
@@ -231,6 +259,8 @@ export default function Pdv() {
         itens,
         id_os: osImportada?.id,
         supervisor_pin: autorizacaoAdmin?.pin,
+        supervisor_token: autorizacaoAdmin?.token,
+        supervisor_user_id: autorizacaoAdmin?.supervisorId,
       }
 
       // Prepara snapshot da venda para impressão térmica
@@ -369,29 +399,39 @@ export default function Pdv() {
     c => !c.produto.is_service && c.produto.controla_estoque !== 0 && (c.produto.estoque <= 0 || c.quant > c.produto.estoque)
   )
 
-  const handlePinSubmit = async () => {
-    if (!/^\d{4}$/.test(pin)) {
-      setPinError('O PIN deve conter exatamente 4 dígitos.')
+  const handleAuthorizeSubmit = async () => {
+    if (!selectedAdminId) {
+      setPinError('Selecione um administrador ou gerente.')
+      return
+    }
+    if (!adminPassword.trim()) {
+      setPinError('Digite a senha de acesso.')
       return
     }
     setVerificandoPin(true)
     setPinError('')
     try {
-      const res = await api.verifySupervisorPin(pin)
+      const res = await api.authorizeDiscount({
+        userId: selectedAdminId,
+        password: adminPassword.trim(),
+        tenantId: tid ?? undefined,
+      })
       if (res.authorized) {
         setAutorizacaoAdmin({
+          supervisorId: res.supervisorId,
           supervisorName: res.supervisorName || 'Supervisor',
-          pin,
+          supervisorRole: res.supervisorRole,
+          token: res.token,
           valorAutorizado: descontoVal,
         })
         setShowPinModal(false)
-        setPin('')
+        setAdminPassword('')
         setPinError('')
       } else {
-        setPinError('PIN inválido. Somente administradores podem autorizar descontos.')
+        setPinError(res.message || 'Senha incorreta. Somente administradores ou gerentes podem autorizar descontos.')
       }
     } catch (err: any) {
-      setPinError(err?.message || 'Erro ao validar PIN. Tente novamente.')
+      setPinError(err?.message || 'Erro ao validar autorização. Tente novamente.')
     } finally {
       setVerificandoPin(false)
     }
@@ -875,7 +915,7 @@ export default function Pdv() {
                 <button
                   type="button"
                   onClick={() => {
-                    setPin('')
+                    setAdminPassword('')
                     setPinError('')
                     setShowPinModal(true)
                   }}
@@ -964,7 +1004,7 @@ export default function Pdv() {
               return
             }
             if (excedeLimiteDesconto && !isDescontoAutorizado) {
-              setPin('')
+              setAdminPassword('')
               setPinError('')
               setShowPinModal(true)
               return
@@ -1206,17 +1246,17 @@ export default function Pdv() {
       {/* ── MODAL: AUTORIZAÇÃO DE DESCONTO (> {limiteDescontoPct}%) ── */}
       {showPinModal && (
         <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 px-4">
-          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-sm shadow-2xl">
-            <div className="flex items-center gap-2 mb-2">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center gap-2.5 mb-2">
               <span className="text-2xl">🔒</span>
               <div>
                 <h2 className="text-lg font-bold text-white">Autorização de Desconto</h2>
-                <p className="text-xs text-slate-400">Requer permissão de Administrador</p>
+                <p className="text-xs text-slate-400">Requer permissão de Administrador ou Gerente</p>
               </div>
             </div>
 
             <p className="text-slate-300 text-xs mb-3 leading-relaxed">
-              O desconto aplicado de <strong className="text-amber-400 font-mono">{R(descontoVal)} ({pctDesconto.toFixed(1)}%)</strong> excede o limite máximo padrão de <strong>{limiteDescontoPct.toFixed(1).replace('.', ',')}% ({R(limiteDescontoPermitido)})</strong>.
+              O desconto aplicado de <strong className="text-amber-400 font-mono">{R(descontoVal)} ({pctDesconto.toFixed(1)}%)</strong> excede o limite padrão de <strong>{limiteDescontoPct.toFixed(1).replace('.', ',')}% ({R(limiteDescontoPermitido)})</strong>.
             </p>
 
             <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800 text-xs space-y-1.5 mb-4">
@@ -1229,7 +1269,7 @@ export default function Pdv() {
                 <span className="text-amber-400 font-mono font-bold">{R(descontoVal)} ({pctDesconto.toFixed(1)}%)</span>
               </div>
               <div className="flex justify-between text-slate-400">
-                <span>Limite sem PIN ({limiteDescontoPct}%):</span>
+                <span>Limite sem autorização ({limiteDescontoPct}%):</span>
                 <span className="text-slate-400 font-mono">{R(limiteDescontoPermitido)}</span>
               </div>
               <div className="flex justify-between border-t border-slate-800/80 pt-1 text-slate-300">
@@ -1238,38 +1278,82 @@ export default function Pdv() {
               </div>
             </div>
 
-            <p className="text-slate-300 text-xs font-semibold mb-2">
-              Digite o PIN do Administrador (4 dígitos):
-            </p>
+            <div className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Selecione o Administrador ou Gerente *
+                </label>
+                {carregandoAdmins ? (
+                  <div className="flex items-center gap-2 py-2 px-3 bg-slate-800 border border-slate-700 rounded-xl text-xs text-slate-400">
+                    <span className="animate-spin text-amber-400">↻</span>
+                    <span>Carregando administradores e gerentes...</span>
+                  </div>
+                ) : (
+                  <select
+                    value={selectedAdminId ?? ''}
+                    onChange={(e) => {
+                      setSelectedAdminId(Number(e.target.value) || null)
+                      setPinError('')
+                    }}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                  >
+                    <option value="">Selecione um usuário...</option>
+                    {administradores.map((adm) => (
+                      <option key={adm.id} value={adm.id}>
+                        {adm.nome} ({adm.email}) — [{adm.roleLabel}]
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
 
-            <input
-              type="password"
-              inputMode="numeric"
-              maxLength={4}
-              value={pin}
-              onChange={(e) => {
-                setPin(e.target.value.replace(/\D/g, '').slice(0, 4))
-                setPinError('')
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && pin.length === 4 && handlePinSubmit()}
-              placeholder="••••"
-              className="w-full bg-slate-800 border border-slate-700 text-white text-center text-2xl tracking-[0.5em] placeholder-slate-600 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-amber-500 mb-2 font-mono"
-              autoFocus
-            />
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Senha de Acesso *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showAdminPassword ? 'text' : 'password'}
+                    value={adminPassword}
+                    onChange={(e) => {
+                      setAdminPassword(e.target.value)
+                      setPinError('')
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && adminPassword.trim() && selectedAdminId) {
+                        handleAuthorizeSubmit()
+                      }
+                    }}
+                    placeholder="Digite a senha do administrador/gerente..."
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 placeholder-slate-500"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPassword(!showAdminPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1"
+                    tabIndex={-1}
+                    title={showAdminPassword ? 'Ocultar senha' : 'Exibir senha'}
+                  >
+                    {showAdminPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
 
             {pinError && (
-              <p className="text-red-400 text-xs mb-3 font-medium flex items-center gap-1">
+              <p className="text-red-400 text-xs mt-3 font-medium flex items-center gap-1.5 bg-red-950/40 border border-red-800/40 rounded-lg p-2">
                 <span>⚠️</span>
                 <span>{pinError}</span>
               </p>
             )}
 
-            <div className="flex gap-3 mt-4">
+            <div className="flex gap-3 mt-5">
               <button
                 type="button"
                 onClick={() => {
                   setShowPinModal(false)
-                  setPin('')
+                  setAdminPassword('')
                   setPinError('')
                 }}
                 className="flex-1 py-2.5 rounded-xl border border-slate-700 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors"
@@ -1278,11 +1362,18 @@ export default function Pdv() {
               </button>
               <button
                 type="button"
-                onClick={handlePinSubmit}
-                disabled={verificandoPin || pin.length < 4}
-                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-amber-950/40"
+                onClick={handleAuthorizeSubmit}
+                disabled={verificandoPin || !adminPassword.trim() || !selectedAdminId}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-bold disabled:opacity-50 transition-all shadow-md shadow-amber-950/40 flex items-center justify-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
               >
-                {verificandoPin ? 'Validando…' : 'Autorizar'}
+                {verificandoPin ? (
+                  <>
+                    <span className="animate-spin text-sm">↻</span>
+                    <span>Validando…</span>
+                  </>
+                ) : (
+                  <span>Autorizar Desconto</span>
+                )}
               </button>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { pool } from '../db';
 import { JWT_SECRET, type JwtPayload } from '../middleware/auth';
 import { getUserPermissions, userHasPermission } from '../lib/permissions';
@@ -1326,6 +1327,9 @@ router.post('/vendas', async (req, res) => {
       turno = '1',
       id_os,
       supervisor_pin,
+      supervisor_token,
+      supervisor_user_id,
+      supervisor_password,
     } = req.body as {
       id_cliente?: number;
       itens: { id_produto: number; valor: number; quant: number }[];
@@ -1344,6 +1348,9 @@ router.post('/vendas', async (req, res) => {
       turno?: string;
       id_os?: string;
       supervisor_pin?: string;
+      supervisor_token?: string;
+      supervisor_user_id?: number;
+      supervisor_password?: string;
     };
 
     const itensArray = Array.isArray(itens) ? itens : [];
@@ -1419,21 +1426,45 @@ router.post('/vendas', async (req, res) => {
       const limiteDescontoPermitido = Math.round((subtotalCalculado * (pctLimite / 100)) * 100) / 100;
       if (descontoAplicado > limiteDescontoPermitido + 0.005) {
         const isOwner = req.user?.role === 'owner';
-        let pinValido = false;
+        let autorizado = false;
 
-        if (supervisor_pin && /^\d{4}$/.test(String(supervisor_pin))) {
+        // 1. Validação via token JWT de autorização de supervisor (gerado após senha)
+        if (supervisor_token) {
+          try {
+            const decoded = jwt.verify(supervisor_token, JWT_SECRET) as any;
+            if (decoded && ['owner', 'manager', 'Proprietário', 'Gerente'].includes(decoded.supervisorRole || decoded.role)) {
+              autorizado = true;
+            }
+          } catch {}
+        }
+
+        // 2. Validação direta por usuário e senha se enviados
+        if (!autorizado && supervisor_user_id && supervisor_password) {
+          const [uRows] = await pool.query<any>(
+            'SELECT id, senha_hash, role, ativo FROM users WHERE id = ?',
+            [Number(supervisor_user_id)]
+          );
+          const u = uRows[0];
+          if (u && u.ativo && ['owner', 'manager'].includes(u.role)) {
+            const okPass = await bcrypt.compare(String(supervisor_password).trim(), u.senha_hash);
+            if (okPass) autorizado = true;
+          }
+        }
+
+        // 3. Fallback PIN legado
+        if (!autorizado && supervisor_pin && /^\d{4}$/.test(String(supervisor_pin))) {
           const [pinRows] = await pool.query<any>(
             'SELECT supervisor_name FROM os_supervisor_pins WHERE pin = ? AND active = 1',
             [supervisor_pin]
           );
           if ((pinRows as any[]).length > 0 || (process.env.SUPERVISOR_PIN && supervisor_pin === process.env.SUPERVISOR_PIN)) {
-            pinValido = true;
+            autorizado = true;
           }
         }
 
-        if (!isOwner && !pinValido) {
+        if (!isOwner && !autorizado) {
           res.status(403).json({
-            message: `Desconto de R$ ${descontoAplicado.toFixed(2)} excede o limite permitido de ${pctLimite}% (R$ ${limiteDescontoPermitido.toFixed(2)}). Requer autorização do Administrador via PIN.`
+            message: `Desconto de R$ ${descontoAplicado.toFixed(2)} excede o limite permitido de ${pctLimite}% (R$ ${limiteDescontoPermitido.toFixed(2)}). Requer autorização de um Administrador ou Gerente.`
           });
           return;
         }
