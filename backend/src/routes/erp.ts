@@ -1278,7 +1278,7 @@ router.get('/vendas/:controle', async (req, res) => {
       finalItens = [{
         id: 0,
         id_produto: 0,
-        nome_produto: 'LANÇAMENTO AVULSO / PDV',
+        nome_produto: 'RECEBIMENTO DE NOTINHA',
         valor: totalVal,
         quant: 1,
         vr_total: totalVal,

@@ -286,7 +286,7 @@ export default function Pdv() {
             }))
           : [
               {
-                nome: 'LANÇAMENTO AVULSO (OUTROS)',
+                nome: 'RECEBIMENTO DE NOTINHA',
                 quant: 1,
                 valorUnit: outrosVal,
                 total: outrosVal,
@@ -676,12 +676,12 @@ export default function Pdv() {
               {outrosVal > 0 ? (
                 <div className="bg-purple-950/40 border border-purple-500/40 rounded-2xl p-6 text-center space-y-2 max-w-sm w-full shadow-lg">
                   <span className="text-3xl">🔄</span>
-                  <p className="text-white font-bold text-base">Lançamento Avulso (Outros)</p>
+                  <p className="text-white font-bold text-base">Recebimento de Notinha</p>
                   <p className="text-3xl font-black text-emerald-400 font-mono">
                     {R(outrosVal)}
                   </p>
                   <p className="text-xs text-purple-200/80">
-                    Valor informado no campo Outros. Pronto para finalizar a venda sem OS ou orçamento.
+                    Valor informado no campo Outros. Pronto para finalizar o recebimento.
                   </p>
                 </div>
               ) : (
