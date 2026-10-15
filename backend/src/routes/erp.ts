@@ -2812,8 +2812,39 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
     const offset = (page - 1) * limit;
     const search = String(req.query.search ?? '').trim();
     const status = String(req.query.status ?? 'ativos');
+    const sort   = String(req.query.sort ?? 'recentes').trim();
 
-    const filterTenantId = getClienteTenantId(req);
+    // Filtros específicos por coluna
+    const colCliente = String(req.query.col_cliente ?? '').trim();
+    const colPlaca   = String(req.query.col_placa ?? '').trim().replace(/[-\s]/g, '').toUpperCase();
+    const colVeiculo = String(req.query.col_veiculo ?? '').trim();
+    const colLoja    = String(req.query.col_loja ?? '').trim();
+    const comCompras = String(req.query.com_compras ?? '').trim();
+
+    let filterTenantId = getClienteTenantId(req);
+    // Suporte a filtro explícito de tenant_id via query
+    if (req.query.tenant_id !== undefined && req.query.tenant_id !== '') {
+      if (req.query.tenant_id === 'todos' || req.query.tenant_id === 'all') {
+        if (req.user?.role === 'owner') {
+          filterTenantId = null;
+        }
+      } else {
+        const qTid = Number(req.query.tenant_id);
+        if (qTid > 0) {
+          if (req.user?.role === 'owner' || (req.user?.tenantIds && req.user.tenantIds.includes(qTid))) {
+            filterTenantId = qTid;
+          }
+        }
+      }
+    } else if (colLoja && colLoja !== 'todos') {
+      const qColTid = Number(colLoja);
+      if (qColTid > 0) {
+        if (req.user?.role === 'owner' || (req.user?.tenantIds && req.user.tenantIds.includes(qColTid))) {
+          filterTenantId = qColTid;
+        }
+      }
+    }
+
     let tenantJoin = '';
     const tenantParams: any[] = [];
 
@@ -2837,6 +2868,8 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
     }
 
     const searchParams: any[] = [];
+
+    // Busca Geral (cabeçalho)
     if (search.length >= 2) {
       const cleanPlate = search.replace(/[-\s]/g, '').toUpperCase();
       let matchedClientIds: number[] = [];
@@ -2882,13 +2915,123 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
       whereParts.push(`(${orClauses.join(' OR ')})`);
     }
 
+    // Filtro por coluna: Cliente (Nome, CPF/CNPJ, Telefone ou E-mail)
+    if (colCliente) {
+      whereParts.push('(c.nome_cliente LIKE ? OR c.cpf_cnpj LIKE ? OR c.telefone LIKE ? OR c.celular LIKE ? OR c.email LIKE ?)');
+      searchParams.push(`%${colCliente}%`, `%${colCliente}%`, `%${colCliente}%`, `%${colCliente}%`, `%${colCliente}%`);
+    }
+
+    // Filtro por coluna: Placa
+    if (colPlaca) {
+      try {
+        const [osPlacaHits] = await pool.query<any>(
+          `SELECT DISTINCT client_id, client_document FROM os_orders
+           WHERE REPLACE(REPLACE(UPPER(plate), '-', ''), ' ', '') LIKE ?
+           LIMIT 200`,
+          [`%${colPlaca}%`]
+        );
+        const placaClientIds = (osPlacaHits as any[]).map(h => Number(h.client_id)).filter(id => id > 0);
+        const placaDocs = (osPlacaHits as any[]).map(h => String(h.client_document || '').trim()).filter(d => d.length >= 5);
+
+        const placaOr: string[] = ['REPLACE(REPLACE(UPPER(c.nome_cliente), "-", ""), " ", "") LIKE ?'];
+        searchParams.push(`%${colPlaca}%`);
+
+        if (placaClientIds.length > 0) {
+          placaOr.push(`c.id IN (${placaClientIds.map(() => '?').join(',')})`);
+          searchParams.push(...placaClientIds);
+        }
+        if (placaDocs.length > 0) {
+          placaOr.push(`c.cpf_cnpj IN (${placaDocs.map(() => '?').join(',')})`);
+          searchParams.push(...placaDocs);
+        }
+        whereParts.push(`(${placaOr.join(' OR ')})`);
+      } catch (err) {
+        console.error('Erro ao filtrar col_placa:', err);
+      }
+    }
+
+    // Filtro por coluna: Veículo / Modelo
+    if (colVeiculo) {
+      try {
+        const [osVeicHits] = await pool.query<any>(
+          `SELECT DISTINCT client_id, client_document FROM os_orders
+           WHERE UPPER(model) LIKE ?
+           LIMIT 200`,
+          [`%${colVeiculo.toUpperCase()}%`]
+        );
+        const veicClientIds = (osVeicHits as any[]).map(h => Number(h.client_id)).filter(id => id > 0);
+        const veicDocs = (osVeicHits as any[]).map(h => String(h.client_document || '').trim()).filter(d => d.length >= 5);
+
+        const veicOr: string[] = ['c.inf_adicional LIKE ?'];
+        searchParams.push(`%${colVeiculo}%`);
+
+        if (veicClientIds.length > 0) {
+          veicOr.push(`c.id IN (${veicClientIds.map(() => '?').join(',')})`);
+          searchParams.push(...veicClientIds);
+        }
+        if (veicDocs.length > 0) {
+          veicOr.push(`c.cpf_cnpj IN (${veicDocs.map(() => '?').join(',')})`);
+          searchParams.push(...veicDocs);
+        }
+        whereParts.push(`(${veicOr.join(' OR ')})`);
+      } catch (err) {
+        console.error('Erro ao filtrar col_veiculo:', err);
+      }
+    }
+
+    // Filtro de Compras / Histórico
+    if (comCompras === 'com_compras') {
+      whereParts.push('(EXISTS (SELECT 1 FROM mv_vendas _v WHERE _v.id_cliente = c.id) OR EXISTS (SELECT 1 FROM os_orders _o WHERE _o.client_id = c.id))');
+    } else if (comCompras === 'sem_compras') {
+      whereParts.push('(NOT EXISTS (SELECT 1 FROM mv_vendas _v WHERE _v.id_cliente = c.id) AND NOT EXISTS (SELECT 1 FROM os_orders _o WHERE _o.client_id = c.id))');
+    }
+
     const where = whereParts.length > 0 ? 'WHERE ' + whereParts.join(' AND ') : '';
     const baseParams = [...tenantParams, ...searchParams];
+
+    // Contadores globais por status para a barra de filtros
+    let counts = { total: 0, total_ativos: 0, total_inativos: 0 };
+    try {
+      const [[cntRow]] = await pool.query<any>(
+        `SELECT
+           COUNT(DISTINCT c.id) as total,
+           COUNT(DISTINCT CASE WHEN c.inativo = 0 THEN c.id END) as total_ativos,
+           COUNT(DISTINCT CASE WHEN c.inativo = 1 THEN c.id END) as total_inativos
+         FROM cad_clientes c
+         ${tenantJoin}`,
+        tenantParams
+      );
+      if (cntRow) {
+        counts = {
+          total: Number(cntRow.total || 0),
+          total_ativos: Number(cntRow.total_ativos || 0),
+          total_inativos: Number(cntRow.total_inativos || 0),
+        };
+      }
+    } catch (cntErr) {
+      console.warn('Erro ao calcular contadores de clientes:', cntErr);
+    }
 
     const [[{ total }]] = await pool.query<any>(
       `SELECT COUNT(DISTINCT c.id) as total FROM cad_clientes c ${tenantJoin} ${where}`,
       baseParams
     );
+
+    // Ordenação dinâmica
+    let orderBy = 'c.id DESC';
+    if (sort === 'antigos') {
+      orderBy = 'c.id ASC';
+    } else if (sort === 'nome_asc') {
+      orderBy = 'c.nome_cliente ASC';
+    } else if (sort === 'nome_desc') {
+      orderBy = 'c.nome_cliente DESC';
+    } else if (sort === 'total_gasto_desc') {
+      orderBy = '(COALESCE((SELECT SUM(vr_total) FROM mv_vendas WHERE id_cliente = c.id), 0) + COALESCE((SELECT SUM(total_amount) FROM os_orders WHERE client_id = c.id), 0)) DESC, c.id DESC';
+    } else if (sort === 'qtd_compras_desc') {
+      orderBy = '(COALESCE((SELECT COUNT(id) FROM mv_vendas WHERE id_cliente = c.id), 0) + COALESCE((SELECT COUNT(id) FROM os_orders WHERE client_id = c.id), 0)) DESC, c.id DESC';
+    } else if (sort === 'ultima_compra_desc') {
+      orderBy = 'COALESCE((SELECT MAX(data_venda) FROM mv_vendas WHERE id_cliente = c.id), (SELECT MAX(DATE(created_at)) FROM os_orders WHERE client_id = c.id)) DESC, c.id DESC';
+    }
 
     const [rows] = await pool.query<any>(
       `SELECT c.id, c.nome_cliente, c.telefone, c.celular, c.inf_adicional,
@@ -2896,7 +3039,7 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
        FROM cad_clientes c
        ${tenantJoin}
        ${where}
-       ORDER BY c.id DESC
+       ORDER BY ${orderBy}
        LIMIT ? OFFSET ?`,
       [...baseParams, limit, offset]
     );
@@ -2906,6 +3049,7 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
         data: [],
         total: Number(total || 0),
         pages: Math.ceil(Number(total || 0) / limit),
+        counts,
       });
     }
 
@@ -3041,6 +3185,7 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
       data,
       total: Number(total || 0),
       pages: Math.ceil(Number(total || 0) / limit),
+      counts,
     });
   } catch (err: any) {
     console.error('Erro em GET /clientes:', err);

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -13,8 +13,18 @@ import {
   AlertTriangle,
   Building2,
   ExternalLink,
+  Filter,
+  SlidersHorizontal,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ShoppingBag,
+  RotateCcw,
+  CheckCircle2,
+  XCircle,
+  Users,
 } from 'lucide-react'
-import { erpApi } from '../lib/api'
+import { erpApi, tenantsApi } from '../lib/api'
 import type { ClienteErp } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import ClienteModal from '../components/ClienteModal'
@@ -53,15 +63,33 @@ function LojasBadge({ lojas }: { lojas: string | null }) {
 }
 
 export default function Clientes() {
-  const { currentTenant } = useAuth()
+  const { currentTenant, isOwner, tenants: authTenants } = useAuth()
   const tid = currentTenant?.id ?? null
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  // Lista de Lojas disponíveis para o usuário
+  const { data: lojasApi = [] } = useQuery({ queryKey: ['tenants'], queryFn: tenantsApi.list })
+  const listaLojas = lojasApi.length > 0 ? lojasApi : (authTenants || [])
+
+  // Filtros Globais do Cabeçalho
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [selectedLoja, setSelectedLoja] = useState<string>('')
   const [status, setStatus] = useState<'ativos' | 'inativos' | 'todos'>('ativos')
+  const [comCompras, setComCompras] = useState<'todas' | 'com_compras' | 'sem_compras'>('todas')
+  const [sort, setSort] = useState<string>('recentes')
   const [page, setPage] = useState(1)
-  const [inputVal, setInputVal] = useState('')
+
+  // Filtros específicos por Coluna da Tabela
+  const [showColFilters, setShowColFilters] = useState(true)
+  const [colCliente, setColCliente] = useState('')
+  const [debouncedColCliente, setDebouncedColCliente] = useState('')
+  const [colPlaca, setColPlaca] = useState('')
+  const [debouncedColPlaca, setDebouncedColPlaca] = useState('')
+  const [colVeiculo, setColVeiculo] = useState('')
+  const [debouncedColVeiculo, setDebouncedColVeiculo] = useState('')
+  const [colLoja, setColLoja] = useState('')
 
   // Modais de CRUD
   const [modalOpen, setModalOpen] = useState(false)
@@ -72,22 +100,97 @@ export default function Clientes() {
   const [deleting, setDeleting] = useState(false)
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['erp-clientes', tid, search, status, page],
-    queryFn: () => erpApi.clientes({ search: search || undefined, status, page }),
-  })
+  // Debounce da busca geral
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [search])
 
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault()
-    setSearch(inputVal)
-    setPage(1)
-  }
+  // Debounce dos filtros de coluna
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedColCliente(colCliente)
+      setDebouncedColPlaca(colPlaca)
+      setDebouncedColVeiculo(colVeiculo)
+      setPage(1)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [colCliente, colPlaca, colVeiculo])
 
-  function handleClear() {
-    setInputVal('')
+  const hasActiveFilters = Boolean(
+    search ||
+    selectedLoja ||
+    status !== 'ativos' ||
+    comCompras !== 'todas' ||
+    sort !== 'recentes' ||
+    colCliente ||
+    colPlaca ||
+    colVeiculo ||
+    colLoja
+  )
+
+  function handleResetAllFilters() {
     setSearch('')
+    setDebouncedSearch('')
+    setSelectedLoja('')
+    setStatus('ativos')
+    setComCompras('todas')
+    setSort('recentes')
+    setColCliente('')
+    setDebouncedColCliente('')
+    setColPlaca('')
+    setDebouncedColPlaca('')
+    setColVeiculo('')
+    setDebouncedColVeiculo('')
+    setColLoja('')
     setPage(1)
   }
+
+  function handleSortClick(field: string) {
+    if (field === 'cliente') {
+      setSort(s => (s === 'nome_asc' ? 'nome_desc' : 'nome_asc'))
+    } else if (field === 'compras') {
+      setSort(s => (s === 'qtd_compras_desc' ? 'recentes' : 'qtd_compras_desc'))
+    } else if (field === 'total_gasto') {
+      setSort(s => (s === 'total_gasto_desc' ? 'recentes' : 'total_gasto_desc'))
+    } else if (field === 'ultima_compra') {
+      setSort(s => (s === 'ultima_compra_desc' ? 'recentes' : 'ultima_compra_desc'))
+    }
+    setPage(1)
+  }
+
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+    queryKey: [
+      'erp-clientes',
+      tid,
+      selectedLoja,
+      debouncedSearch,
+      status,
+      comCompras,
+      sort,
+      debouncedColCliente,
+      debouncedColPlaca,
+      debouncedColVeiculo,
+      colLoja,
+      page,
+    ],
+    queryFn: () =>
+      erpApi.clientes({
+        search: debouncedSearch || undefined,
+        status,
+        page,
+        tenant_id: selectedLoja || undefined,
+        col_cliente: debouncedColCliente || undefined,
+        col_placa: debouncedColPlaca || undefined,
+        col_veiculo: debouncedColVeiculo || undefined,
+        col_loja: colLoja || undefined,
+        com_compras: comCompras !== 'todas' ? comCompras : undefined,
+        sort: sort || undefined,
+      }),
+  })
 
   function handleOpenCreate() {
     setEditingId(null)
@@ -144,17 +247,60 @@ export default function Clientes() {
   const clientes: ClienteErp[] = data?.data ?? []
   const total = data?.total ?? 0
   const pages = data?.pages ?? 1
+  const counts = data?.counts
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      {/* Header */}
+      {/* Header com Título e Estatísticas Rápidas */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-white tracking-tight">Clientes</h1>
-            <span className="text-xs bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700">
-              {total.toLocaleString('pt-BR')} cadastrados
-            </span>
+
+            {/* Badges Rápidos com Contadores */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => { setStatus('todos'); setPage(1); }}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-all ${
+                  status === 'todos'
+                    ? 'bg-blue-600/30 text-blue-300 border-blue-500/50 ring-1 ring-blue-500/30 font-semibold'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                }`}
+                title="Mostrar todos os clientes cadastrados"
+              >
+                <Users className="w-3 h-3" />
+                <span>{counts?.total ?? total} cadastrados</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setStatus('ativos'); setPage(1); }}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-all ${
+                  status === 'ativos'
+                    ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50 ring-1 ring-emerald-500/30 font-semibold'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-emerald-400'
+                }`}
+                title="Filtrar apenas clientes ativos"
+              >
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                <span>{counts ? counts.total_ativos : '—'} ativos</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setStatus('inativos'); setPage(1); }}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-all ${
+                  status === 'inativos'
+                    ? 'bg-red-600/30 text-red-300 border-red-500/50 ring-1 ring-red-500/30 font-semibold'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-red-400'
+                }`}
+                title="Filtrar apenas clientes inativos"
+              >
+                <XCircle className="w-3 h-3 text-red-400" />
+                <span>{counts ? counts.total_inativos : '—'} inativos</span>
+              </button>
+            </div>
           </div>
           <p className="text-sm text-slate-400 mt-1">
             Clientes cadastrados no ERP com veículos, histórico de compras e ordens de serviço
@@ -163,7 +309,7 @@ export default function Clientes() {
 
         <button
           onClick={handleOpenCreate}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-600/25 transition-all"
+          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-600/25 transition-all self-start sm:self-auto"
         >
           <UserPlus className="w-4 h-4" />
           <span>Novo Cliente</span>
@@ -186,71 +332,300 @@ export default function Clientes() {
         </div>
       )}
 
-      {/* Search & Filter Bar */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
-        <form onSubmit={handleSearch} className="flex-1 flex gap-2">
+      {/* ── PAINEL DE FILTROS DO CABEÇALHO ────────────────────────────────────────── */}
+      <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3.5 backdrop-blur-sm">
+        {/* Linha 1: Campo de Busca Geral Instantânea + Ações */}
+        <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
           <div className="relative flex-1">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
-              value={inputVal}
-              onChange={e => setInputVal(e.target.value)}
-              placeholder="Buscar por nome, placa, telefone ou CPF/CNPJ…"
-              className="w-full bg-slate-800/90 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar por nome, placa, telefone, CPF/CNPJ ou e-mail…"
+              className="w-full bg-slate-800/90 border border-slate-700/80 rounded-xl pl-10 pr-10 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => { setSearch(''); setDebouncedSearch(''); setPage(1); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white rounded-md transition-colors"
+                title="Limpar busca geral"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
-          <button
-            type="submit"
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
-          >
-            Buscar
-          </button>
-          {search && (
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Alternar Filtros nas Colunas da Tabela */}
             <button
               type="button"
-              onClick={handleClear}
-              className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm rounded-lg transition-colors"
+              onClick={() => setShowColFilters(v => !v)}
+              className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold rounded-xl border transition-all ${
+                showColFilters
+                  ? 'bg-blue-600/20 text-blue-300 border-blue-500/40 shadow-sm'
+                  : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-slate-200 hover:bg-slate-700/80'
+              }`}
+              title="Mostrar ou ocultar campos de pesquisa diretamente nas colunas da tabela"
             >
-              Limpar
+              <SlidersHorizontal className="w-3.5 h-3.5 text-blue-400" />
+              <span>Filtro nas Colunas</span>
+              {(colCliente || colPlaca || colVeiculo || colLoja) && (
+                <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+              )}
             </button>
-          )}
-        </form>
 
-        {/* Status Filter Tabs */}
-        <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-lg border border-slate-700 self-start md:self-auto">
-          <button
-            type="button"
-            onClick={() => { setStatus('ativos'); setPage(1); }}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              status === 'ativos'
-                ? 'bg-blue-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Ativos
-          </button>
-          <button
-            type="button"
-            onClick={() => { setStatus('inativos'); setPage(1); }}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              status === 'inativos'
-                ? 'bg-blue-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Inativos
-          </button>
-          <button
-            type="button"
-            onClick={() => { setStatus('todos'); setPage(1); }}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              status === 'todos'
-                ? 'bg-blue-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Todos
-          </button>
+            {/* Botão Limpar Filtros */}
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={handleResetAllFilters}
+                className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-red-950/40 text-slate-300 hover:text-red-300 border border-slate-700 hover:border-red-800/50 transition-all"
+                title="Redefinir todos os filtros para o padrão"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Limpar Filtros</span>
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Linha 2: Dropdowns de Loja, Status, Histórico de Compras e Ordenação */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-800/70">
+          {/* Loja / Unidade */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Building2 className="w-3.5 h-3.5 text-blue-400" />
+              <span>Loja / Unidade</span>
+            </label>
+            <select
+              value={selectedLoja}
+              onChange={e => { setSelectedLoja(e.target.value); setPage(1); }}
+              className="w-full bg-slate-800/90 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
+            >
+              {isOwner && (
+                <option value="todos">Todas as Lojas (Consolidado)</option>
+              )}
+              {!isOwner && <option value="">Minha Loja Atual ({currentTenant?.nome || 'Padrão'})</option>}
+              {listaLojas.map(l => (
+                <option key={l.id} value={String(l.id)}>
+                  {l.nome} {l.id === currentTenant?.id ? '(Atual)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Status do Cliente */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Filter className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Status</span>
+            </label>
+            <div className="grid grid-cols-3 bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 h-[38px] items-center">
+              <button
+                type="button"
+                onClick={() => { setStatus('ativos'); setPage(1); }}
+                className={`h-full text-xs font-semibold rounded-md transition-all flex items-center justify-center ${
+                  status === 'ativos'
+                    ? 'bg-blue-600 text-white shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Ativos
+              </button>
+              <button
+                type="button"
+                onClick={() => { setStatus('inativos'); setPage(1); }}
+                className={`h-full text-xs font-semibold rounded-md transition-all flex items-center justify-center ${
+                  status === 'inativos'
+                    ? 'bg-blue-600 text-white shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Inativos
+              </button>
+              <button
+                type="button"
+                onClick={() => { setStatus('todos'); setPage(1); }}
+                className={`h-full text-xs font-semibold rounded-md transition-all flex items-center justify-center ${
+                  status === 'todos'
+                    ? 'bg-blue-600 text-white shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Todos
+              </button>
+            </div>
+          </div>
+
+          {/* Histórico de Compras */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <ShoppingBag className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Histórico de Compras</span>
+            </label>
+            <select
+              value={comCompras}
+              onChange={e => { setComCompras(e.target.value as any); setPage(1); }}
+              className="w-full bg-slate-800/90 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
+            >
+              <option value="todas">Todos os clientes (Com/Sem compras)</option>
+              <option value="com_compras">Com compras/OS realizadas (&gt; 0)</option>
+              <option value="sem_compras">Sem compras/OS realizadas (0)</option>
+            </select>
+          </div>
+
+          {/* Ordenação */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <ArrowUpDown className="w-3.5 h-3.5 text-amber-400" />
+              <span>Classificar Por</span>
+            </label>
+            <select
+              value={sort}
+              onChange={e => { setSort(e.target.value); setPage(1); }}
+              className="w-full bg-slate-800/90 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
+            >
+              <option value="recentes">Mais recentes (Cadastro)</option>
+              <option value="nome_asc">Nome do Cliente (A → Z)</option>
+              <option value="nome_desc">Nome do Cliente (Z → A)</option>
+              <option value="total_gasto_desc">Maior Total Gasto (R$)</option>
+              <option value="qtd_compras_desc">Mais Compras / OS Realizadas</option>
+              <option value="ultima_compra_desc">Última Compra Mais Recente</option>
+              <option value="antigos">Mais antigos (Cadastro)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Tags de Resumo dos Filtros Ativos */}
+        {hasActiveFilters && (
+          <div className="flex items-center gap-2 flex-wrap pt-2.5 border-t border-slate-800/50 text-xs">
+            <span className="text-slate-400 font-medium">Filtros aplicados:</span>
+            {debouncedSearch && (
+              <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-200 px-2.5 py-0.5 rounded-md border border-slate-700">
+                Busca: &ldquo;{debouncedSearch}&rdquo;
+                <button
+                  type="button"
+                  onClick={() => { setSearch(''); setDebouncedSearch(''); }}
+                  className="hover:text-red-400 ml-0.5"
+                  title="Remover filtro"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {selectedLoja && (
+              <span className="inline-flex items-center gap-1 bg-blue-900/30 text-blue-300 px-2.5 py-0.5 rounded-md border border-blue-800/50">
+                Loja: {selectedLoja === 'todos' ? 'Todas as Lojas' : listaLojas.find(l => String(l.id) === selectedLoja)?.nome || selectedLoja}
+                <button
+                  type="button"
+                  onClick={() => setSelectedLoja('')}
+                  className="hover:text-red-400 ml-0.5"
+                  title="Remover filtro"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {status !== 'ativos' && (
+              <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-200 px-2.5 py-0.5 rounded-md border border-slate-700">
+                Status: {status === 'inativos' ? 'Inativos' : 'Todos'}
+                <button
+                  type="button"
+                  onClick={() => setStatus('ativos')}
+                  className="hover:text-red-400 ml-0.5"
+                  title="Voltar para Ativos"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {comCompras !== 'todas' && (
+              <span className="inline-flex items-center gap-1 bg-emerald-950/40 text-emerald-300 px-2.5 py-0.5 rounded-md border border-emerald-800/50">
+                Compras: {comCompras === 'com_compras' ? 'Com compras (>0)' : 'Sem compras (0)'}
+                <button
+                  type="button"
+                  onClick={() => setComCompras('todas')}
+                  className="hover:text-red-400 ml-0.5"
+                  title="Remover filtro"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {sort !== 'recentes' && (
+              <span className="inline-flex items-center gap-1 bg-amber-950/30 text-amber-300 px-2.5 py-0.5 rounded-md border border-amber-800/50">
+                Ordem: {sort}
+                <button
+                  type="button"
+                  onClick={() => setSort('recentes')}
+                  className="hover:text-red-400 ml-0.5"
+                  title="Resetar ordem"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {debouncedColCliente && (
+              <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-200 px-2.5 py-0.5 rounded-md border border-slate-700">
+                Col. Cliente: &ldquo;{debouncedColCliente}&rdquo;
+                <button
+                  type="button"
+                  onClick={() => { setColCliente(''); setDebouncedColCliente(''); }}
+                  className="hover:text-red-400 ml-0.5"
+                  title="Remover filtro"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {debouncedColPlaca && (
+              <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-200 px-2.5 py-0.5 rounded-md border border-slate-700">
+                Col. Placa: &ldquo;{debouncedColPlaca}&rdquo;
+                <button
+                  type="button"
+                  onClick={() => { setColPlaca(''); setDebouncedColPlaca(''); }}
+                  className="hover:text-red-400 ml-0.5"
+                  title="Remover filtro"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {debouncedColVeiculo && (
+              <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-200 px-2.5 py-0.5 rounded-md border border-slate-700">
+                Col. Veículo: &ldquo;{debouncedColVeiculo}&rdquo;
+                <button
+                  type="button"
+                  onClick={() => { setColVeiculo(''); setDebouncedColVeiculo(''); }}
+                  className="hover:text-red-400 ml-0.5"
+                  title="Remover filtro"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {colLoja && (
+              <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-200 px-2.5 py-0.5 rounded-md border border-slate-700">
+                Col. Loja: {listaLojas.find(l => String(l.id) === colLoja)?.nome || colLoja}
+                <button
+                  type="button"
+                  onClick={() => setColLoja('')}
+                  className="hover:text-red-400 ml-0.5"
+                  title="Remover filtro"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {isFetching && (
+              <span className="text-blue-400 text-[11px] animate-pulse font-medium ml-auto">
+                Atualizando resultados…
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Clientes Table */}
@@ -272,23 +647,225 @@ export default function Clientes() {
             </button>
           </div>
         ) : clientes.length === 0 ? (
-          <div className="text-center py-20 text-slate-500">
-            Nenhum cliente encontrado com os filtros atuais.
+          <div className="text-center py-20 text-slate-500 space-y-3">
+            <p>Nenhum cliente encontrado com os filtros atuais.</p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={handleResetAllFilters}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-blue-400 rounded-lg border border-slate-700 transition-colors inline-flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Limpar todos os filtros</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-800 text-left bg-slate-950/40">
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Cliente</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Placa</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Veículo</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Lojas</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right">Compras</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right">Total Gasto</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">Última Compra</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider text-center">Ações</th>
+                <tr className="border-b border-slate-800 text-left bg-slate-950/60 select-none">
+                  {/* Coluna Cliente (com ordenação interativa) */}
+                  <th
+                    onClick={() => handleSortClick('cliente')}
+                    className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-white transition-colors"
+                    title="Clique para ordenar por nome"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Cliente</span>
+                      {sort === 'nome_asc' ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-blue-400" />
+                      ) : sort === 'nome_desc' ? (
+                        <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-600" />
+                      )}
+                    </div>
+                  </th>
+
+                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    Placa
+                  </th>
+
+                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    Veículo
+                  </th>
+
+                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    Lojas
+                  </th>
+
+                  {/* Coluna Compras (com ordenação interativa) */}
+                  <th
+                    onClick={() => handleSortClick('compras')}
+                    className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right cursor-pointer hover:text-white transition-colors"
+                    title="Clique para ordenar por quantidade de compras/OS"
+                  >
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span>Compras</span>
+                      {sort === 'qtd_compras_desc' ? (
+                        <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-600" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Coluna Total Gasto (com ordenação interativa) */}
+                  <th
+                    onClick={() => handleSortClick('total_gasto')}
+                    className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right cursor-pointer hover:text-white transition-colors"
+                    title="Clique para ordenar por maior total gasto"
+                  >
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span>Total Gasto</span>
+                      {sort === 'total_gasto_desc' ? (
+                        <ArrowDown className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-600" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Coluna Última Compra (com ordenação interativa) */}
+                  <th
+                    onClick={() => handleSortClick('ultima_compra')}
+                    className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-white transition-colors"
+                    title="Clique para ordenar por data da última compra"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Última Compra</span>
+                      {sort === 'ultima_compra_desc' ? (
+                        <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-600" />
+                      )}
+                    </div>
+                  </th>
+
+                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider text-center">
+                    Ações
+                  </th>
                 </tr>
+
+                {/* ── LINHA DE PESQUISA POR COLUNA NA TABELA ── */}
+                {showColFilters && (
+                  <tr className="border-b border-slate-800 bg-slate-900/90 text-xs">
+                    {/* Pesquisa por Cliente */}
+                    <th className="px-3 py-2 font-normal">
+                      <div className="relative">
+                        <input
+                          value={colCliente}
+                          onChange={e => setColCliente(e.target.value)}
+                          placeholder="Filtrar por nome/doc/tel..."
+                          className="w-full bg-slate-800/90 border border-slate-700/80 rounded-md px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                        />
+                        {colCliente && (
+                          <button
+                            type="button"
+                            onClick={() => { setColCliente(''); setDebouncedColCliente(''); }}
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                            title="Limpar campo"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Pesquisa por Placa */}
+                    <th className="px-3 py-2 font-normal">
+                      <div className="relative">
+                        <input
+                          value={colPlaca}
+                          onChange={e => setColPlaca(e.target.value)}
+                          placeholder="Placa..."
+                          className="w-full bg-slate-800/90 border border-slate-700/80 rounded-md px-2 py-1 text-xs text-slate-200 placeholder-slate-500 uppercase focus:outline-none focus:border-blue-500"
+                        />
+                        {colPlaca && (
+                          <button
+                            type="button"
+                            onClick={() => { setColPlaca(''); setDebouncedColPlaca(''); }}
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                            title="Limpar campo"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Pesquisa por Veículo */}
+                    <th className="px-3 py-2 font-normal">
+                      <div className="relative">
+                        <input
+                          value={colVeiculo}
+                          onChange={e => setColVeiculo(e.target.value)}
+                          placeholder="Modelo..."
+                          className="w-full bg-slate-800/90 border border-slate-700/80 rounded-md px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                        />
+                        {colVeiculo && (
+                          <button
+                            type="button"
+                            onClick={() => { setColVeiculo(''); setDebouncedColVeiculo(''); }}
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                            title="Limpar campo"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </th>
+
+                    {/* Pesquisa por Loja */}
+                    <th className="px-3 py-2 font-normal">
+                      <select
+                        value={colLoja}
+                        onChange={e => { setColLoja(e.target.value); setPage(1); }}
+                        className="w-full bg-slate-800/90 border border-slate-700/80 rounded-md px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="">Todas</option>
+                        {listaLojas.map(l => (
+                          <option key={l.id} value={String(l.id)}>
+                            {l.nome}
+                          </option>
+                        ))}
+                      </select>
+                    </th>
+
+                    {/* Compras (Vazio na linha de filtro) */}
+                    <th className="px-3 py-2 text-right text-slate-600 font-normal">—</th>
+
+                    {/* Total Gasto (Vazio na linha de filtro) */}
+                    <th className="px-3 py-2 text-right text-slate-600 font-normal">—</th>
+
+                    {/* Última Compra (Vazio na linha de filtro) */}
+                    <th className="px-3 py-2 text-slate-600 font-normal">—</th>
+
+                    {/* Ações: Limpar filtros de coluna */}
+                    <th className="px-3 py-2 text-center font-normal">
+                      {(colCliente || colPlaca || colVeiculo || colLoja) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setColCliente('')
+                            setDebouncedColCliente('')
+                            setColPlaca('')
+                            setDebouncedColPlaca('')
+                            setColVeiculo('')
+                            setDebouncedColVeiculo('')
+                            setColLoja('')
+                          }}
+                          title="Limpar filtros específicos de colunas"
+                          className="px-2 py-0.5 rounded bg-slate-800 hover:bg-red-950/40 text-slate-400 hover:text-red-400 border border-slate-700 hover:border-red-800 transition-colors inline-flex items-center gap-1 text-[11px]"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Limpar</span>
+                        </button>
+                      )}
+                    </th>
+                  </tr>
+                )}
               </thead>
               <tbody className="divide-y divide-slate-800/80">
                 {clientes.map(c => {

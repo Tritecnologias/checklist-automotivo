@@ -546,12 +546,35 @@ export const erpApi = {
       }
     ),
 
-  clientes: (params: { search?: string; status?: 'ativos' | 'inativos' | 'todos'; page?: number }) => {
+  clientes: (params: {
+    search?: string
+    status?: 'ativos' | 'inativos' | 'todos'
+    page?: number
+    tenant_id?: number | string
+    col_cliente?: string
+    col_placa?: string
+    col_veiculo?: string
+    col_loja?: string
+    com_compras?: string
+    sort?: string
+  }) => {
     const q = new URLSearchParams()
     if (params.search) q.set('search', params.search)
     if (params.status) q.set('status', params.status)
     if (params.page)   q.set('page',   String(params.page))
-    return adminRequest<{ data: ClienteErp[]; total: number; pages: number }>(`/erp/clientes?${q}`)
+    if (params.tenant_id !== undefined && params.tenant_id !== '') q.set('tenant_id', String(params.tenant_id))
+    if (params.col_cliente) q.set('col_cliente', params.col_cliente)
+    if (params.col_placa)   q.set('col_placa',   params.col_placa)
+    if (params.col_veiculo) q.set('col_veiculo', params.col_veiculo)
+    if (params.col_loja)    q.set('col_loja',    params.col_loja)
+    if (params.com_compras) q.set('com_compras', params.com_compras)
+    if (params.sort)        q.set('sort',        params.sort)
+    return adminRequest<{
+      data: ClienteErp[]
+      total: number
+      pages: number
+      counts?: { total: number; total_ativos: number; total_inativos: number }
+    }>(`/erp/clientes?${q}`)
   },
   clienteDetalhes: (id: number) =>
     adminRequest<ClienteErp>(`/erp/clientes/${id}`),
