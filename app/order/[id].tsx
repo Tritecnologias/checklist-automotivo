@@ -92,9 +92,12 @@ export default function OrderScreen() {
     refetchInterval: 15_000,
   });
 
+  const { activeTenant } = useAuth();
+  const targetTenantId = order?.tenantId || activeTenant?.id;
+
   const { data: mecanicos = [] } = useQuery({
-    queryKey: ['mecanicos'],
-    queryFn: () => api.listMecanicos(true),
+    queryKey: ['mecanicos', targetTenantId],
+    queryFn: () => api.listMecanicos(true, targetTenantId),
   });
 
   const {

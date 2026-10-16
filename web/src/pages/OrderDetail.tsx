@@ -226,7 +226,7 @@ export default function OrderDetail() {
   // Lista de Mecânicos / Técnicos
   const { data: mecanicos = [] } = useQuery<Mecanico[]>({
     queryKey: ['mecanicos', tid],
-    queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true }),
+    queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true, tenantId: tid }),
   })
 
   // ── Mutações ──────────────────────────────────────────────────────────────
@@ -1023,6 +1023,11 @@ export default function OrderDetail() {
                       className="bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-white rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors cursor-pointer"
                     >
                       <option value="">Não atribuído (Geral)</option>
+                      {order.mecanicoId && !mecanicos.some((m) => m.id === order.mecanicoId) && (
+                        <option value={order.mecanicoId}>
+                          {order.mecanicoNome || `Mecânico #${order.mecanicoId}`}
+                        </option>
+                      )}
                       {mecanicos.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '• [Auxiliar]' : '• [Titular]'}
@@ -1058,6 +1063,11 @@ export default function OrderDetail() {
                       className="bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-amber-200 rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors cursor-pointer"
                     >
                       <option value="">Nenhum auxiliar escalado</option>
+                      {order.auxiliarId && !mecanicos.some((m) => m.id === order.auxiliarId) && (
+                        <option value={order.auxiliarId}>
+                          {order.auxiliarNome || `Auxiliar #${order.auxiliarId}`}
+                        </option>
+                      )}
                       {mecanicos.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '★ [Auxiliar]' : '• [Mecânico]'}

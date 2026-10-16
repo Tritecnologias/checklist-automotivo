@@ -17,8 +17,45 @@ export const AUTH_TOKEN_KEY = '@auth_token';
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
+function decodeJwtTenantId(token: string): number | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4 !== 0) {
+      base64 += '=';
+    }
+    let jsonStr = '';
+    if (typeof atob === 'function') {
+      try {
+        jsonStr = atob(base64);
+      } catch {
+        jsonStr = '';
+      }
+    }
+    if (!jsonStr) {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+      for (let i = 0; i < base64.length; i += 4) {
+        const b1 = chars.indexOf(base64[i]);
+        const b2 = chars.indexOf(base64[i + 1]);
+        const b3 = chars.indexOf(base64[i + 2]);
+        const b4 = chars.indexOf(base64[i + 3]);
+        if (b1 === -1 || b2 === -1) break;
+        jsonStr += String.fromCharCode((b1 << 2) | (b2 >> 4));
+        if (b3 !== 64 && b3 !== -1) jsonStr += String.fromCharCode(((b2 & 15) << 4) | (b3 >> 2));
+        if (b4 !== 64 && b4 !== -1) jsonStr += String.fromCharCode(((b3 & 3) << 6) | b4);
+      }
+    }
+    const payload = JSON.parse(jsonStr);
+    return payload.tenantId ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY).catch(() => null);
+  const activeTenantId = token ? decodeJwtTenantId(token) : null;
 
   const timeoutMs = options?.timeoutMs ?? 12000;
   const controller = new AbortController();
@@ -31,6 +68,7 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(activeTenantId ? { 'x-tenant-id': String(activeTenantId) } : {}),
         ...options?.headers,
       },
     });
@@ -121,8 +159,13 @@ export const api = {
       source?: string;
     }>(`/orders/lookup-plate/${encodeURIComponent(plate)}`),
 
-  listMecanicos: (apenasAtivos: boolean = true) =>
-    request<Mecanico[]>(`/erp/mecanicos${apenasAtivos ? '?ativo=1' : ''}`),
+  listMecanicos: (apenasAtivos: boolean = true, tenantId?: number | null) => {
+    const params = new URLSearchParams();
+    if (apenasAtivos) params.append('ativo', '1');
+    if (tenantId && tenantId > 0) params.append('tenant_id', String(tenantId));
+    const qs = params.toString();
+    return request<Mecanico[]>(`/erp/mecanicos${qs ? `?${qs}` : ''}`);
+  },
 
   createOrder: (
     vehicle: Vehicle,

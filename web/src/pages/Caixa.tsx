@@ -185,9 +185,10 @@ export default function Caixa() {
   })
 
   const { mutate: fechar, isPending: fechando } = useMutation({
-    mutationFn: (id: number) => erpApi.caixaFechar(id, {
-      vr_fechamento: parseFloat(vrFechamento.replace(',', '.')) || 0,
+    mutationFn: (args: { id: number; valor?: number; fecharZerado?: boolean }) => erpApi.caixaFechar(args.id, {
+      vr_fechamento: args.valor,
       fechado_por: user?.nome || undefined,
+      fechar_zerado: args.fecharZerado,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['caixa-status'] })
@@ -522,10 +523,20 @@ export default function Caixa() {
                   <input
                     value={vrFechamento}
                     onChange={e => setVrFechamento(e.target.value)}
-                    placeholder="0,00"
-                    className="w-48 bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-white font-medium text-sm focus:outline-none focus:border-blue-500 transition-colors"
+                    placeholder={esperadoDinheiro > 0 ? esperadoDinheiro.toFixed(2).replace('.', ',') : '0,00'}
+                    className="w-44 bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-white font-medium text-sm focus:outline-none focus:border-blue-500 transition-colors"
                   />
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setVrFechamento(esperadoDinheiro.toFixed(2).replace('.', ','))}
+                  className="px-3.5 py-2 bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 text-xs font-semibold rounded-xl border border-emerald-700/60 transition-colors flex items-center gap-1.5 shadow-sm active:scale-95"
+                  title="Preencher com o saldo esperado na gaveta para fechar zerado"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Fechar Zerado ({R(esperadoDinheiro)})</span>
+                </button>
 
                 <button
                   type="button"
@@ -552,8 +563,25 @@ export default function Caixa() {
 
                 <button
                   onClick={() => {
-                    if (status?.id && confirm(`Confirma o fechamento do caixa com ${R(fechamentoNum)} conferidos?`)) {
-                      fechar(status.id)
+                    if (!status?.id) return
+                    const valorFinal = temValorDigitado ? fechamentoNum : esperadoDinheiro
+                    const fechaZerado = !temValorDigitado || Math.abs(fechamentoNum - esperadoDinheiro) < 0.01
+
+                    const msg = !temValorDigitado
+                      ? `Confirma o fechamento do caixa ZERADO com ${R(esperadoDinheiro)} (saldo esperado na gaveta)?`
+                      : Math.abs(diferencaFechamento) < 0.01
+                      ? `Confirma o fechamento do caixa ZERADO com ${R(fechamentoNum)} conferidos?`
+                      : `Confirma o fechamento do caixa com ${R(fechamentoNum)} conferidos?\n\n` +
+                        (diferencaFechamento > 0
+                          ? `⚠️ Atenção: Houve SOBRA de ${R(diferencaFechamento)}.`
+                          : `⚠️ Atenção: Houve QUEBRA/FALTA de ${R(Math.abs(diferencaFechamento))}.`)
+
+                    if (confirm(msg)) {
+                      fechar({
+                        id: status.id,
+                        valor: valorFinal,
+                        fecharZerado: fechaZerado,
+                      })
                     }
                   }}
                   disabled={fechando}
@@ -1092,11 +1120,15 @@ export default function Caixa() {
                         )}
 
                         <td className="px-5 py-3 text-right text-slate-200 whitespace-nowrap font-medium">
-                          {c.vr_fechamento ? R(Number(c.vr_fechamento)) : '—'}
+                          {Number(c.vr_fechamento) > 0
+                            ? R(Number(c.vr_fechamento))
+                            : (c.status_caixa === 'F' && c.saldo_esperado_dinheiro !== undefined
+                              ? R(Number(c.saldo_esperado_dinheiro))
+                              : (c.vr_fechamento ? R(Number(c.vr_fechamento)) : '—'))}
                         </td>
 
                         <td className="px-5 py-3 text-center whitespace-nowrap">
-                          {c.status_caixa === 'F' && c.vr_fechamento !== null ? (
+                          {c.status_caixa === 'F' ? (
                             <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${
                               Math.abs(dif) < 0.01
                                 ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/50'
@@ -1562,6 +1594,7 @@ export default function Caixa() {
       <ContadorCedulasModal
         isOpen={contadorModalOpen}
         onClose={() => setContadorModalOpen(false)}
+        initialExpected={esperadoDinheiro}
         onApply={(total) => {
           setVrFechamento(total.toFixed(2).replace('.', ','))
         }}

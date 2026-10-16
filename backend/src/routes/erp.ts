@@ -330,13 +330,19 @@ router.get('/caixa', async (req, res) => {
       const vrPrazo = Number(s?.vr_prazo || 0);
       const vrOutros = Number(s?.vr_outros || 0);
       const vrAbertura = Number(c.vr_abertura || 0);
-      const vrFechamento = Number(c.vr_fechamento || 0);
+      const rawFechamento = c.vr_fechamento !== null ? Number(c.vr_fechamento) : null;
       const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - valorDespesasCaixa);
       const saldoLiquido = totalVendas - totalDespesas;
-      const diferenca = c.status_caixa === 'F' && c.vr_fechamento !== null ? (vrFechamento - saldoEsperado) : 0;
+      // Se fechado e teve contagem explícita > 0, apura a diferença real.
+      // Se fechado com 0 (ou null) sem quebra expressa, o caixa encerrou zerado com o saldo esperado.
+      const vrFechamento = (rawFechamento !== null && rawFechamento > 0)
+        ? rawFechamento
+        : (c.status_caixa === 'F' ? saldoEsperado : 0);
+      const diferenca = c.status_caixa === 'F' ? (vrFechamento - saldoEsperado) : 0;
 
       return {
         ...c,
+        vr_fechamento: c.status_caixa === 'F' ? vrFechamento : c.vr_fechamento,
         vr_fechado_turno: totalVendas,
         total_despesas: totalDespesas,
         despesas_dinheiro: valorDespesasCaixa,
@@ -892,20 +898,27 @@ router.get('/caixa/:id/detalhes', async (req, res) => {
   const vrTotal = Number(totais?.vr_total || caixa.vr_fechado_turno || 0);
   const vrDinheiro = Number(totais?.vr_dinheiro || 0);
   const vrAbertura = Number(caixa.vr_abertura || 0);
-  const vrFechamento = Number(caixa.vr_fechamento || 0);
   const totalDespesas = Number(despesasDetalhes?.total_despesas || 0);
   const despesasDinheiro = Number(despesasDetalhes?.despesas_dinheiro || 0);
   const valorDespesasCaixa = despesasDinheiro > 0 ? despesasDinheiro : totalDespesas;
   const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - valorDespesasCaixa);
   const saldoLiquido = vrTotal - totalDespesas;
+
+  const rawFechamento = caixa.vr_fechamento !== null ? Number(caixa.vr_fechamento) : null;
+  const vrFechamento = (rawFechamento !== null && rawFechamento > 0)
+    ? rawFechamento
+    : (caixa.status_caixa === 'F' ? saldoEsperado : 0);
   const diferenca = caixa.status_caixa === 'F' ? (vrFechamento - saldoEsperado) : 0;
 
   res.json({
-    caixa,
+    caixa: {
+      ...caixa,
+      vr_fechamento: caixa.status_caixa === 'F' ? vrFechamento : caixa.vr_fechamento,
+    },
     totais: {
       total_vendas: vrTotal,
       total_despesas: totalDespesas,
-      despesas_dinheiro: despesasDinheiro,
+      despesas_dinheiro: valorDespesasCaixa,
       saldo_liquido: saldoLiquido,
       dinheiro: vrDinheiro,
       cartao: Number(totais?.vr_cartao || 0),
@@ -950,7 +963,7 @@ router.post('/caixa/abrir', async (req, res) => {
 });
 
 router.patch('/caixa/:id/fechar', async (req, res) => {
-  const { vr_fechamento = 0, fechado_por } = req.body;
+  const { vr_fechamento, fechado_por, fechar_zerado, confirmar_quebra_zero } = req.body;
   const { clause: tf, params: tp } = getErpTenantFilter(req, true);
 
   // garante que o caixa pertence ao tenant do usuário logado
@@ -1060,25 +1073,45 @@ router.patch('/caixa/:id/fechar', async (req, res) => {
   const saldoEsperado = Math.max(0, vrAbertura + vrDinheiro - valorDespesasCaixa);
   const saldoLiquido = totalVendas - totalDespesas;
 
+  let valorFechamentoFinal: number;
+  if (fechar_zerado || vr_fechamento === undefined || vr_fechamento === null || vr_fechamento === '') {
+    valorFechamentoFinal = saldoEsperado;
+  } else {
+    const num = Number(vr_fechamento);
+    if (isNaN(num)) {
+      valorFechamentoFinal = saldoEsperado;
+    } else if (num === 0 && !confirmar_quebra_zero && saldoEsperado > 0) {
+      // Se enviou 0 sem confirmação expressa de quebra total da gaveta, assume saldo esperado para fechar zerado
+      valorFechamentoFinal = saldoEsperado;
+    } else {
+      valorFechamentoFinal = num;
+    }
+  }
+
+  const diferencaFinal = valorFechamentoFinal - saldoEsperado;
+
   await pool.query(
     `UPDATE mv_caixa SET status_caixa='F', hora_fechamento=?, data_fechamento=?,
       vr_fechamento=?, vr_fechado_turno=?, fechado_por=?, id_usuario_fechamento=? WHERE id=? AND tenant_id=?`,
-    [hora, data, vr_fechamento, totalVendas, nomeUsuarioFechamento, idUsuarioFechamento, req.params.id, caixaRow.tenant_id]
+    [hora, data, valorFechamentoFinal, totalVendas, nomeUsuarioFechamento, idUsuarioFechamento, req.params.id, caixaRow.tenant_id]
   );
   res.json({
     ok: true,
+    vr_fechamento: valorFechamentoFinal,
     vr_fechado_turno: totalVendas,
     total_despesas: totalDespesas,
-    despesas_dinheiro: despesasDinheiro,
+    despesas_dinheiro: valorDespesasCaixa,
     saldo_liquido: saldoLiquido,
     saldo_esperado_dinheiro: saldoEsperado,
+    diferenca_caixa: diferencaFinal,
     fechado_por: nomeUsuarioFechamento,
     totais: {
       ...totals,
       total_despesas: totalDespesas,
-      despesas_dinheiro: despesasDinheiro,
+      despesas_dinheiro: valorDespesasCaixa,
       saldo_liquido: saldoLiquido,
       saldo_esperado_dinheiro: saldoEsperado,
+      diferenca_caixa: diferencaFinal,
     }
   });
 });
@@ -5687,8 +5720,10 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
       targetTid = queryTid;
     } else if (headerTid && headerTid > 0) {
       targetTid = headerTid;
-    } else if (user && user.role !== 'owner') {
-      targetTid = user.tenantIds[0] ?? 1;
+    } else if (user?.tenantId && user.tenantId > 0) {
+      targetTid = user.tenantId;
+    } else if (user && user.tenantIds && user.tenantIds.length > 0) {
+      targetTid = user.tenantIds[0];
     }
 
     const conditions: string[] = [];
@@ -5703,9 +5738,8 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
         // Multi-loja padrão da rede 4 Rodas:
         // Mecânico que atende Todas as Lojas (todas_lojas = 1), ou é da unidade, ou tem vínculo via mecanico_tenants ou login user_tenants
         conditions.push(`(
-          COALESCE(m.todas_lojas, 1) = 1
+          m.todas_lojas = 1
           OR m.tenant_id = ?
-          OR m.tenant_id IS NULL
           OR EXISTS (SELECT 1 FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id AND mt.tenant_id = ?)
           OR (m.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = m.user_id AND ut.tenant_id = ?))
         )`);
@@ -6112,13 +6146,12 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
     const prodHeaderTid = Number(req.headers['x-tenant-id']);
     const targetProdTid = prodHeaderTid && prodHeaderTid > 0
       ? prodHeaderTid
-      : (req.user && req.user.role !== 'owner' ? (req.user.tenantIds[0] ?? 1) : undefined);
+      : (req.user?.tenantId ? req.user.tenantId : (req.user && req.user.tenantIds?.length ? req.user.tenantIds[0] : undefined));
 
     if (targetProdTid && targetProdTid > 0) {
       mecTenantClause = `WHERE (
-        COALESCE(todas_lojas, 1) = 1
+        todas_lojas = 1
         OR tenant_id = ?
-        OR tenant_id IS NULL
         OR EXISTS (SELECT 1 FROM mecanico_tenants mt WHERE mt.mecanico_id = cad_mecanicos.id AND mt.tenant_id = ?)
         OR (user_id IS NOT NULL AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = cad_mecanicos.user_id AND ut.tenant_id = ?))
       )`;

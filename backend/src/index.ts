@@ -878,10 +878,13 @@ async function runMigrations() {
   if (Number(cntMecTodasLojas) === 0) {
     await pool.query(`
       ALTER TABLE cad_mecanicos
-      ADD COLUMN todas_lojas TINYINT(1) NOT NULL DEFAULT 1,
+      ADD COLUMN todas_lojas TINYINT(1) NOT NULL DEFAULT 0,
       ADD INDEX idx_cad_mecanicos_todas_lojas (todas_lojas)
     `);
-    console.log('[migration] cad_mecanicos.todas_lojas adicionada');
+    console.log('[migration] cad_mecanicos.todas_lojas adicionada com padrão 0');
+  } else {
+    // Altera o padrão de todas_lojas para 0 para isolar mecânicos por loja
+    await pool.query('ALTER TABLE cad_mecanicos MODIFY COLUMN todas_lojas TINYINT(1) NOT NULL DEFAULT 0').catch(() => {});
   }
 
   // Tabela mecanico_tenants (vínculo multi-loja por mecânico)
@@ -895,13 +898,30 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
-  // Garante que mecânicos existentes estejam habilitados para todas as lojas e sincronizados
+  // Vincula mecânicos que possuem login ao tenant_id do usuário, caso tenant_id do mecânico seja nulo
   await pool.query(`
-    UPDATE cad_mecanicos SET todas_lojas = 1 WHERE todas_lojas IS NULL OR todas_lojas = 0
+    UPDATE cad_mecanicos m
+    JOIN users u ON u.id = m.user_id
+    SET m.tenant_id = u.tenant_id
+    WHERE m.tenant_id IS NULL AND u.tenant_id IS NOT NULL
   `).catch(() => {});
+
+  // Remove vínculos cruzados espúrios de lojas onde o mecânico não pertence
+  await pool.query(`
+    DELETE mt FROM mecanico_tenants mt
+    JOIN cad_mecanicos m ON m.id = mt.mecanico_id
+    WHERE m.tenant_id IS NOT NULL AND m.tenant_id > 0 AND mt.tenant_id <> m.tenant_id
+  `).catch(() => {});
+
+  // Garante que cada mecânico com loja fixa fique restrito à sua respectiva loja (todas_lojas = 0)
+  await pool.query(`
+    UPDATE cad_mecanicos SET todas_lojas = 0 WHERE tenant_id IS NOT NULL AND tenant_id > 0
+  `).catch(() => {});
+
+  // Assegura o vínculo do mecânico com a sua loja principal
   await pool.query(`
     INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
-    SELECT m.id, t.id FROM cad_mecanicos m CROSS JOIN tenants t WHERE t.ativo = 1
+    SELECT id, tenant_id FROM cad_mecanicos WHERE tenant_id IS NOT NULL AND tenant_id > 0
   `).catch(() => {});
 
 

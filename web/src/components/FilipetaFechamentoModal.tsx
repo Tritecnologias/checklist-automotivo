@@ -32,10 +32,10 @@ export default function FilipetaFechamentoModal({
   // Saldo esperado em dinheiro = Fundo + Vendas Dinheiro - Despesas
   const saldoEsperadoDinheiro = Math.max(0, fundoAbertura + vendasDinheiro - valorDespesas)
 
-  // Dinheiro contado na gaveta (se passou por prop, ou o que foi gravado no fechamento, ou o esperado)
+  // Dinheiro contado na gaveta (se passou por prop, ou o que foi gravado no fechamento > 0, ou o esperado)
   const dinheiroContado = valorContadoDinheiro !== undefined
     ? valorContadoDinheiro
-    : (session.status_caixa === 'F' && session.vr_fechamento !== null)
+    : (session.status_caixa === 'F' && session.vr_fechamento !== null && Number(session.vr_fechamento) > 0)
       ? Number(session.vr_fechamento)
       : saldoEsperadoDinheiro
 

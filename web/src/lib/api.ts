@@ -296,7 +296,7 @@ export const erpApi = {
   }>(`/erp/caixa/${id}/detalhes`),
   caixaAbrir: (data: { vr_abertura?: number }) =>
     adminRequest<{ id: number }>('/erp/caixa/abrir', { method: 'POST', body: JSON.stringify(data) }),
-  caixaFechar: (id: number, data: { vr_fechamento?: number; fechado_por?: string }) =>
+  caixaFechar: (id: number, data: { vr_fechamento?: number; fechado_por?: string; fechar_zerado?: boolean; confirmar_quebra_zero?: boolean }) =>
     adminRequest('/erp/caixa/' + id + '/fechar', { method: 'PATCH', body: JSON.stringify(data) }),
 
   vendas: (params: { data?: string; page?: number; search?: string }) => {
@@ -796,15 +796,23 @@ export const adminApi = {
 }
 
 export const oficinaApi = {
-  listMecanicos: (params?: boolean | { apenasAtivos?: boolean }) => {
+  listMecanicos: (params?: boolean | { apenasAtivos?: boolean; tenantId?: number | null; apenasDoTenant?: boolean }) => {
     let ativo: boolean | undefined
+    let tenantId: number | null | undefined
+    let apenasDoTenant: boolean | undefined
     if (typeof params === 'boolean') {
       ativo = params
     } else if (params && typeof params === 'object') {
       ativo = params.apenasAtivos
+      tenantId = params.tenantId
+      apenasDoTenant = params.apenasDoTenant
     }
-    const q = ativo !== undefined ? `?ativo=${ativo ? 1 : 0}` : ''
-    return request<Mecanico[]>(`/erp/mecanicos${q}`)
+    const q = new URLSearchParams()
+    if (ativo !== undefined) q.append('ativo', ativo ? '1' : '0')
+    if (tenantId && tenantId > 0) q.append('tenant_id', String(tenantId))
+    if (apenasDoTenant) q.append('apenasDoTenant', 'true')
+    const qs = q.toString()
+    return request<Mecanico[]>(`/erp/mecanicos${qs ? `?${qs}` : ''}`)
   },
   listUsuariosSistema: () =>
     request<UsuarioSistema[]>('/erp/mecanicos/usuarios-sistema'),

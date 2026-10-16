@@ -80,7 +80,7 @@ export default function Orders() {
 
   const { data: mecanicos = [] } = useQuery<Mecanico[]>({
     queryKey: ['mecanicos', tid],
-    queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true }),
+    queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true, tenantId: tid }),
   })
 
   const triggerLookup = async (plateToSearch: string) => {

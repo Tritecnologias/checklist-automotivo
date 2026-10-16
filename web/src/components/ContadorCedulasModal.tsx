@@ -6,6 +6,7 @@ interface ContadorCedulasModalProps {
   onClose: () => void
   onApply: (total: number) => void
   initialTotal?: number
+  initialExpected?: number
 }
 
 const CEDULAS = [
@@ -32,6 +33,7 @@ export default function ContadorCedulasModal({
   isOpen,
   onClose,
   onApply,
+  initialExpected,
 }: ContadorCedulasModalProps) {
   const [tab, setTab] = useState<'cedulas' | 'rapido'>('cedulas')
 
@@ -246,6 +248,20 @@ export default function ContadorCedulasModal({
             >
               <RotateCcw className="w-4 h-4" />
             </button>
+            {initialExpected !== undefined && initialExpected > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTab('rapido')
+                  setTextoMontantes(initialExpected.toFixed(2).replace('.', ','))
+                }}
+                className="px-2.5 py-1.5 bg-emerald-950/50 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-800/60 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                title="Preencher com o saldo esperado na gaveta"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Usar Esperado ({R(initialExpected)})</span>
+              </button>
+            )}
             <div>
               <span className="text-xs text-slate-400 block">Total Contado em Dinheiro:</span>
               <strong className="text-xl font-bold text-emerald-400 font-mono">

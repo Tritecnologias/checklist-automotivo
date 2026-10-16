@@ -66,7 +66,7 @@ export default function IdentificationScreen() {
 
   const { data: mecanicos = [] } = useQuery({
     queryKey: ['mecanicos', activeTenant?.id],
-    queryFn: () => api.listMecanicos(true),
+    queryFn: () => api.listMecanicos(true, activeTenant?.id),
     staleTime: 60_000,
   });
 
