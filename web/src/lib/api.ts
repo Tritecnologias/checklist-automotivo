@@ -679,7 +679,16 @@ export const tenantsApi = {
 }
 
 export const usersApi = {
-  list: () => adminRequest<UserAdmin[]>('/auth/users'),
+  list: (paramsOrTenantId?: number | string | { tenant_id?: number | string } | any) => {
+    let tid: number | string | undefined
+    if (typeof paramsOrTenantId === 'number' || typeof paramsOrTenantId === 'string') {
+      tid = paramsOrTenantId
+    } else if (paramsOrTenantId && typeof paramsOrTenantId === 'object' && 'tenant_id' in paramsOrTenantId) {
+      tid = paramsOrTenantId.tenant_id
+    }
+    const q = tid ? `?tenant_id=${tid}` : ''
+    return adminRequest<UserAdmin[]>(`/auth/users${q}`)
+  },
   getTenants: (id: number) => adminRequest<number[]>(`/auth/users/${id}/tenants`),
   create: (data: {
     nome: string; email: string; password: string

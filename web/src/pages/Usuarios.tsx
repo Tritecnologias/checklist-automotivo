@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { 
@@ -35,24 +35,41 @@ const EMPTY_FORM = {
 
 export default function Usuarios() {
   const navigate = useNavigate()
-  const { isOwner, tenants: authTenants } = useAuth()
+  const { currentTenant, isOwner, tenants: authTenants } = useAuth()
   const qc = useQueryClient()
 
   const { data: users = [], isLoading, isFetching, refetch } = useQuery({
     queryKey: ['users'],
-    queryFn: usersApi.list,
+    queryFn: () => usersApi.list(),
   })
   const { data: lojasApi = [] } = useQuery({ queryKey: ['tenants'], queryFn: tenantsApi.list })
   const listaLojas = lojasApi.length > 0 ? lojasApi : (authTenants || [])
 
   // ── Filtros ───────────────────────────────────────────────────────────────
   const [busca, setBusca] = useState('')
-  const [filtroLoja, setFiltroLoja] = useState('')
+  const [filtroLoja, setFiltroLoja] = useState<string>(
+    currentTenant?.id ? String(currentTenant.id) : ''
+  )
+  const [incluirOwners, setIncluirOwners] = useState(true)
   const [filtroPerfil, setFiltroPerfil] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<'todos' | 'ativos' | 'inativos'>('todos')
 
+  // Sincroniza filtroLoja quando a loja ativa for trocada no cabeçalho
+  useEffect(() => {
+    if (currentTenant?.id) {
+      setFiltroLoja(String(currentTenant.id))
+    }
+  }, [currentTenant?.id])
+
   const [showNew, setShowNew] = useState(false)
-  const [form, setForm] = useState({ ...EMPTY_FORM })
+  const [form, setForm] = useState({
+    nome: '',
+    email: '',
+    password: '',
+    role: 'operator',
+    tenant_id: (currentTenant?.id ? String(currentTenant.id) : '') as string | number,
+    tenant_ids: (currentTenant?.id ? [currentTenant.id] : []) as number[],
+  })
   const [formError, setFormError] = useState('')
 
   const [editing, setEditing] = useState<UserAdmin | null>(null)
@@ -86,10 +103,15 @@ export default function Usuarios() {
     const payload: Parameters<typeof usersApi.create>[0] = {
       nome: nome.trim(), email: email.trim(), password, role,
     }
-    if (MULTI_TENANT_ROLES.includes(role) && form.tenant_ids.length > 1) {
+    if (MULTI_TENANT_ROLES.includes(role) && form.tenant_ids.length > 0) {
       payload.tenant_ids = form.tenant_ids
+      payload.tenant_id = form.tenant_ids[0]
     } else if (tenant_id) {
       payload.tenant_id = Number(tenant_id)
+      payload.tenant_ids = [Number(tenant_id)]
+    } else if (currentTenant?.id && role !== 'owner') {
+      payload.tenant_id = currentTenant.id
+      payload.tenant_ids = [currentTenant.id]
     }
     createMut.mutate(payload)
   }
@@ -156,9 +178,18 @@ export default function Usuarios() {
           if (hasStore || u.role === 'owner') return false
         } else {
           const lid = Number(filtroLoja)
-          const isDirect = u.tenant_id === lid
-          const isMulti = Array.isArray(u.tenant_ids) && u.tenant_ids.includes(lid)
-          if (!isDirect && !isMulti) return false
+          const userTenantIds = [
+            ...(u.tenant_id ? [Number(u.tenant_id)] : []),
+            ...(Array.isArray(u.tenant_ids) ? u.tenant_ids.map(Number) : []),
+          ]
+          const pertenceALoja = userTenantIds.includes(lid)
+          const isOwnerAll = u.role === 'owner'
+
+          if (isOwnerAll) {
+            if (!incluirOwners) return false
+          } else if (!pertenceALoja) {
+            return false
+          }
         }
       }
 
@@ -177,7 +208,7 @@ export default function Usuarios() {
 
       return true
     })
-  }, [users, busca, filtroLoja, filtroPerfil, filtroStatus])
+  }, [users, busca, filtroLoja, filtroPerfil, filtroStatus, incluirOwners])
 
   const hasFiltrosAtivos = Boolean(
     busca.trim() !== '' ||
@@ -229,7 +260,18 @@ export default function Usuarios() {
             <span>{isFetching ? 'Atualizando…' : 'Atualizar'}</span>
           </button>
           <button
-            onClick={() => { setShowNew(v => !v); setFormError('') }}
+            onClick={() => {
+              setShowNew(v => !v)
+              setForm({
+                nome: '',
+                email: '',
+                password: '',
+                role: 'operator',
+                tenant_id: (currentTenant?.id ? String(currentTenant.id) : '') as string | number,
+                tenant_ids: (currentTenant?.id ? [currentTenant.id] : []) as number[],
+              })
+              setFormError('')
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition-colors"
           >
             <span>＋</span> Novo usuário
@@ -435,7 +477,53 @@ export default function Usuarios() {
       {/* ── BARRA DE FILTROS ── */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 mb-6 space-y-4 shadow-xl backdrop-blur-md">
         
-        {/* Linha 1: Status rápidos e Contagem */}
+        {/* Abas Rápidas por Loja */}
+        {listaLojas.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-slate-800/80">
+            <span className="text-xs font-semibold text-slate-400 mr-1 flex items-center gap-1.5">
+              <Building2 className="w-3.5 h-3.5 text-blue-400" />
+              Filtrar Loja:
+            </span>
+            <button
+              type="button"
+              onClick={() => setFiltroLoja('')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                filtroLoja === ''
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                  : 'bg-slate-800/70 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+              }`}
+            >
+              🏢 Todas as Lojas
+            </button>
+            {listaLojas.map(l => {
+              const isSelected = filtroLoja === String(l.id)
+              const isCurrent = currentTenant?.id === l.id
+              return (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setFiltroLoja(String(l.id))}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                    isSelected
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                      : 'bg-slate-800/70 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/50'
+                  }`}
+                >
+                  <span>🏪 {l.nome}</span>
+                  {isCurrent && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                      isSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-700 text-slate-300'
+                    }`}>
+                      Ativa
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Linha 2: Status rápidos e Contagem */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <button
@@ -555,25 +643,39 @@ export default function Usuarios() {
           </div>
 
           {/* Filtro por Loja */}
-          <div className="lg:col-span-4 relative">
-            <Building2 className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <select
-              value={filtroLoja}
-              onChange={e => setFiltroLoja(e.target.value)}
-              className="w-full bg-slate-950/70 border border-slate-700/80 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-9 pr-8 py-2.5 text-sm text-white focus:outline-none transition-all appearance-none shadow-inner cursor-pointer"
-            >
-              <option value="">🏢 Todas as Lojas</option>
-              {listaLojas.map(l => (
-                <option key={l.id} value={String(l.id)}>
-                  🏪 {l.nome}
-                </option>
-              ))}
-              <option value="owner">⭐ Acesso a Todas (Proprietários)</option>
-              <option value="sem_loja">⚠️ Sem loja vinculada</option>
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
-              <span className="text-xs">▼</span>
+          <div className="lg:col-span-4 space-y-1">
+            <div className="relative">
+              <Building2 className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <select
+                value={filtroLoja}
+                onChange={e => setFiltroLoja(e.target.value)}
+                className="w-full bg-slate-950/70 border border-slate-700/80 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-9 pr-8 py-2.5 text-sm text-white focus:outline-none transition-all appearance-none shadow-inner cursor-pointer"
+              >
+                <option value="">🏢 Todas as Lojas</option>
+                {listaLojas.map(l => (
+                  <option key={l.id} value={String(l.id)}>
+                    🏪 {l.nome} {currentTenant?.id === l.id ? '(Loja Ativa)' : ''}
+                  </option>
+                ))}
+                <option value="owner">⭐ Acesso a Todas (Proprietários)</option>
+                <option value="sem_loja">⚠️ Sem loja vinculada</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+                <span className="text-xs">▼</span>
+              </div>
             </div>
+
+            {filtroLoja && filtroLoja !== 'owner' && filtroLoja !== 'sem_loja' && (
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none pl-1">
+                <input
+                  type="checkbox"
+                  checked={incluirOwners}
+                  onChange={e => setIncluirOwners(e.target.checked)}
+                  className="rounded bg-slate-900 border-slate-700 text-blue-600 focus:ring-0 w-3 h-3"
+                />
+                <span>Incluir Proprietários (acesso a todas as lojas)</span>
+              </label>
+            )}
           </div>
 
           {/* Filtro por Perfil / Cargo */}
@@ -652,15 +754,53 @@ export default function Usuarios() {
                     <td className="px-5 py-3.5">
                       {u.role === 'owner' ? (
                         <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/20">
-                          ⭐ Todas
+                          ⭐ Todas as Lojas
                         </span>
-                      ) : u.tenant_count > 1 ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30" title={`Acesso a ${u.tenant_count} lojas`}>
-                          🏪 {u.tenant_count} lojas
-                        </span>
-                      ) : (
-                        <span className="text-sm text-slate-300">{u.tenant_nome ?? '—'}</span>
-                      )}
+                      ) : (() => {
+                        const userStoreIds = [
+                          ...(u.tenant_id ? [Number(u.tenant_id)] : []),
+                          ...(Array.isArray(u.tenant_ids) ? u.tenant_ids.map(Number) : []),
+                        ]
+                        const uniqueStoreIds = Array.from(new Set(userStoreIds))
+                        const matchedLojas = listaLojas.filter(l => uniqueStoreIds.includes(l.id))
+
+                        if (matchedLojas.length > 0) {
+                          return (
+                            <div className="flex flex-wrap gap-1 items-center max-w-[280px]">
+                              {matchedLojas.map(l => {
+                                const isCurrent = currentTenant?.id === l.id
+                                return (
+                                  <span
+                                    key={l.id}
+                                    className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md ${
+                                      isCurrent
+                                        ? 'bg-blue-500/25 text-blue-200 border border-blue-500/40 font-semibold'
+                                        : 'bg-slate-700/60 text-slate-300 border border-slate-600/50'
+                                    }`}
+                                    title={isCurrent ? 'Loja atualmente selecionada' : undefined}
+                                  >
+                                    🏪 {l.nome}
+                                  </span>
+                                )
+                              })}
+                            </div>
+                          )
+                        }
+
+                        if (u.tenant_nome) {
+                          return (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-700/60 text-slate-300 border border-slate-600/50">
+                              🏪 {u.tenant_nome}
+                            </span>
+                          )
+                        }
+
+                        return (
+                          <span className="text-xs text-slate-500 italic flex items-center gap-1">
+                            <span>⚠️</span> Sem loja vinculada
+                          </span>
+                        )
+                      })()}
                     </td>
                     <td className="px-5 py-3.5">
                       <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full ${

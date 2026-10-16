@@ -262,24 +262,63 @@ router.post('/users', requireAuth, requireRole('owner', 'manager'), async (req, 
 
 router.get('/users', requireAuth, requireRole('owner', 'manager'), async (req, res) => {
   try {
+    const tenantFilter = req.query.tenant_id ? Number(req.query.tenant_id) : undefined;
+    const isOwner = req.user!.role === 'owner';
+    const managerTenantIds = !isOwner
+      ? (req.user!.tenantIds && req.user!.tenantIds.length > 0
+          ? req.user!.tenantIds
+          : (req.user!.tenantId ? [req.user!.tenantId] : []))
+      : [];
+
     const [rows] = await pool.query<any>(
       `SELECT u.id, u.nome, u.email, u.role, u.tenant_id, u.ativo,
               COALESCE(u.custom_permissions, 0) AS custom_permissions,
-              t.nome AS tenant_nome,
+              COALESCE(
+                (SELECT GROUP_CONCAT(t2.nome ORDER BY t2.nome SEPARATOR ', ')
+                 FROM user_tenants ut2
+                 JOIN tenants t2 ON t2.id = ut2.tenant_id
+                 WHERE ut2.user_id = u.id),
+                t.nome
+              ) AS tenant_nome,
               (SELECT COUNT(*) FROM user_tenants ut WHERE ut.user_id = u.id) AS tenant_count,
               (SELECT GROUP_CONCAT(ut.tenant_id) FROM user_tenants ut WHERE ut.user_id = u.id) AS tenant_ids_str
        FROM users u
        LEFT JOIN tenants t ON t.id = u.tenant_id
        ORDER BY u.nome`
     );
-    const mapped = rows.map((r: any) => ({
-      ...r,
-      tenant_ids: r.tenant_ids_str
-        ? String(r.tenant_ids_str).split(',').map(Number).filter(Boolean)
-        : (r.tenant_id ? [Number(r.tenant_id)] : []),
-    }));
-    res.json(mapped);
 
+    const mapped = rows.map((r: any) => {
+      const idsFromStr = r.tenant_ids_str
+        ? String(r.tenant_ids_str).split(',').map(Number).filter(Boolean)
+        : [];
+      const directId = r.tenant_id ? Number(r.tenant_id) : null;
+      const allTenantIds = Array.from(new Set([...(directId ? [directId] : []), ...idsFromStr]));
+
+      return {
+        ...r,
+        tenant_id: directId || (allTenantIds.length === 1 ? allTenantIds[0] : null),
+        tenant_ids: allTenantIds,
+        tenant_count: Math.max(Number(r.tenant_count || 0), allTenantIds.length),
+        tenant_nome: r.tenant_nome || null,
+      };
+    });
+
+    let filtered = mapped;
+    if (tenantFilter) {
+      filtered = filtered.filter((u: any) =>
+        u.role === 'owner' ||
+        u.tenant_id === tenantFilter ||
+        (Array.isArray(u.tenant_ids) && u.tenant_ids.includes(tenantFilter))
+      );
+    } else if (!isOwner && managerTenantIds.length > 0) {
+      filtered = filtered.filter((u: any) =>
+        u.role === 'owner' ||
+        (u.tenant_id && managerTenantIds.includes(u.tenant_id)) ||
+        (Array.isArray(u.tenant_ids) && u.tenant_ids.some((id: number) => managerTenantIds.includes(id)))
+      );
+    }
+
+    res.json(filtered);
   } catch (err) {
     res.status(500).json({ message: 'Erro interno' });
   }
