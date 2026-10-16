@@ -10,6 +10,7 @@ interface ItemRowProps {
   onDeleteRequest: (item: OrderItem) => void;
   onQuantityChange: (item: OrderItem, delta: 1 | -1) => void;
   onLaborRequest: (item: OrderItem) => void;
+  onPriceRequest?: (item: OrderItem) => void;
   onMechanicRequest?: (item: OrderItem) => void;
   /** Quando true, desabilita todas as ações de edição (OS encerrada) */
   readOnly?: boolean;
@@ -20,6 +21,7 @@ export function ItemRow({
   onDeleteRequest,
   onQuantityChange,
   onLaborRequest,
+  onPriceRequest,
   onMechanicRequest,
   readOnly = false,
 }: ItemRowProps) {
@@ -27,6 +29,12 @@ export function ItemRow({
     if (readOnly) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     onDeleteRequest(item);
+  };
+
+  const handlePrice = () => {
+    if (readOnly || !onPriceRequest) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onPriceRequest(item);
   };
 
   const handleIncrease = () => {
@@ -204,14 +212,28 @@ export function ItemRow({
           </Text>
         </View>
 
-        <View className="items-end">
-          <Text className="text-[10px] uppercase font-bold text-gray-400 dark:text-slate-500">
-            {isService ? 'Total Serviço' : 'Total Peça'}
-          </Text>
+        <TouchableOpacity
+          onPress={handlePrice}
+          disabled={readOnly || !onPriceRequest}
+          activeOpacity={readOnly || !onPriceRequest ? 1 : 0.7}
+          className={`items-end px-2 py-1 rounded-xl transition-all ${
+            !readOnly && onPriceRequest
+              ? 'bg-amber-500/10 dark:bg-amber-950/40 border border-amber-500/30'
+              : ''
+          }`}
+        >
+          <View className="flex-row items-center gap-1">
+            <Text className="text-[10px] uppercase font-bold text-gray-500 dark:text-slate-400">
+              {isService ? 'Total Serviço' : 'Total Peça'}
+            </Text>
+            {!readOnly && onPriceRequest && (
+              <Text style={{ fontSize: 10 }}>✏️</Text>
+            )}
+          </View>
           <Text className="text-xs font-extrabold text-amber-600 dark:text-amber-400 font-mono">
             {currency(item.total)}
           </Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* Linha separada de Mão de Obra (M.O.) com lápis para editar */}

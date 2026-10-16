@@ -22,10 +22,12 @@ import { ServicePriceModal } from '@/components/ServicePriceModal';
 import { InstalacaoModal } from '@/components/InstalacaoModal';
 import { ClientEditModal } from '@/components/ClientEditModal';
 import { MecanicoSelectorModal } from '@/components/MecanicoSelectorModal';
+import { ItemPriceModal } from '@/components/ItemPriceModal';
 import {
   useAddItem,
   useRemoveItem,
   useUpdateItemLabor,
+  useUpdateItemPrice,
   useUpdateQuantity,
 } from '@/hooks/useOrderMutations';
 import { useDebounce } from '@/hooks/useDebounce';
@@ -61,6 +63,7 @@ export default function OrderScreen() {
   const [instalacaoTarget, setInstalacaoTarget] = useState<CatalogItem | null>(null);
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [editingLaborItem, setEditingLaborItem] = useState<OrderItem | null>(null);
+  const [editingPriceItem, setEditingPriceItem] = useState<OrderItem | null>(null);
   const [mecanicoModalTarget, setMecanicoModalTarget] = useState<
     | { type: 'titular'; selectedId: number | null }
     | { type: 'auxiliar'; selectedId: number | null }
@@ -114,6 +117,7 @@ export default function OrderScreen() {
   const { mutate: removeItem } = useRemoveItem(id);
   const { mutate: updateQty } = useUpdateQuantity(id);
   const { mutate: updateItemLabor } = useUpdateItemLabor(id);
+  const { mutate: updateItemPrice } = useUpdateItemPrice(id);
 
   const { mutate: updateClient, isPending: savingClient } = useMutation({
     mutationFn: (clientData: {
@@ -269,6 +273,34 @@ export default function OrderScreen() {
       setEditingLaborItem(item);
     },
     [isClosed],
+  );
+
+  const handlePriceRequest = useCallback(
+    (item: OrderItem) => {
+      if (isClosed) return;
+      setEditingPriceItem(item);
+    },
+    [isClosed],
+  );
+
+  const handleConfirmEditPrice = useCallback(
+    ({ itemId, total, unitPrice }: { itemId: string; total: number; unitPrice: number }) => {
+      setEditingPriceItem(null);
+      updateItemPrice(
+        { itemId, total, unitPrice },
+        {
+          onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+          onError: (err: any) => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            Alert.alert(
+              'Erro ao atualizar preço',
+              err?.message || 'Não foi possível salvar o novo valor total da peça.'
+            );
+          },
+        }
+      );
+    },
+    [updateItemPrice],
   );
 
   const handleConfirmEditLabor = useCallback(
@@ -947,6 +979,7 @@ export default function OrderScreen() {
                 onDeleteRequest={handleDeleteRequest}
                 onQuantityChange={handleQuantityChange}
                 onLaborRequest={handleLaborRequest}
+                onPriceRequest={handlePriceRequest}
                 onMechanicRequest={(it) =>
                   setMecanicoModalTarget({
                     type: 'item',
@@ -984,6 +1017,7 @@ export default function OrderScreen() {
                 onDeleteRequest={handleDeleteRequest}
                 onQuantityChange={handleQuantityChange}
                 onLaborRequest={handleLaborRequest}
+                onPriceRequest={handlePriceRequest}
                 onMechanicRequest={(it) =>
                   setMecanicoModalTarget({
                     type: 'item',
@@ -1151,6 +1185,14 @@ export default function OrderScreen() {
         allowZero={true}
         onConfirm={handleConfirmEditLabor}
         onCancel={() => setEditingLaborItem(null)}
+      />
+
+      {/* Modal de Edição de Total / Preço da Peça */}
+      <ItemPriceModal
+        visible={editingPriceItem !== null}
+        item={editingPriceItem}
+        onConfirm={handleConfirmEditPrice}
+        onCancel={() => setEditingPriceItem(null)}
       />
 
       {/* Modal de PIN (para exclusão, redução de itens e reabertura) */}

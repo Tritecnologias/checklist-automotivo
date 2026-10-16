@@ -133,6 +133,12 @@ export default function OrderDetail() {
   const [laborInputValue, setLaborInputValue]   = useState('')
   const [laborError, setLaborError]             = useState('')
 
+  // ── estado do modal de edição de total/preço de item ──────────────────────
+  const [editingPriceItem, setEditingPriceItem] = useState<OrderItem | null>(null)
+  const [priceTotalInput, setPriceTotalInput]   = useState('')
+  const [priceUnitInput, setPriceUnitInput]     = useState('')
+  const [priceError, setPriceError]             = useState('')
+
   // ── estado do modal de rateio de executantes (mecânico + auxiliar) ───────
   const [rateioModalItem, setRateioModalItem]   = useState<OrderItem | null>(null)
 
@@ -514,11 +520,59 @@ export default function OrderDetail() {
     }
   }
 
+  // Atualizar Preço / Total da Peça do Item
+  const { mutate: handleUpdatePrice, isPending: updatingPrice } = useMutation({
+    mutationFn: () => {
+      if (!editingPriceItem) throw new Error('Nenhum item selecionado')
+      const totalVal = parseFloat(priceTotalInput.replace(',', '.'))
+      const unitVal = parseFloat(priceUnitInput.replace(',', '.'))
+      if (isNaN(totalVal) || totalVal < 0) throw new Error('Informe um valor válido maior ou igual a zero')
+      return api.updateItemPrice(id!, editingPriceItem.id, {
+        total: totalVal,
+        unitPrice: isNaN(unitVal) || unitVal < 0 ? undefined : unitVal,
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['order', id] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      setEditingPriceItem(null)
+    },
+    onError: (err: any) => {
+      setPriceError(err.message || 'Erro ao atualizar preço da peça')
+    },
+  })
+
   const handleOpenEditLabor = (item: OrderItem) => {
     if (isClosed) return
     setEditingLaborItem(item)
     setLaborInputValue(String(item.laborPrice ?? 0))
     setLaborError('')
+  }
+
+  const handleOpenEditPrice = (item: OrderItem) => {
+    if (isClosed) return
+    setEditingPriceItem(item)
+    const initialTotal = item.total ?? (item.unitPrice * item.quantity)
+    const initialUnit = item.unitPrice ?? (item.quantity > 0 ? initialTotal / item.quantity : 0)
+    setPriceTotalInput(initialTotal.toFixed(2))
+    setPriceUnitInput(initialUnit.toFixed(2))
+    setPriceError('')
+  }
+
+  const handlePriceTotalChange = (valStr: string) => {
+    setPriceTotalInput(valStr)
+    const total = parseFloat(valStr.replace(',', '.'))
+    if (!isNaN(total) && editingPriceItem && editingPriceItem.quantity > 0) {
+      setPriceUnitInput((total / editingPriceItem.quantity).toFixed(2))
+    }
+  }
+
+  const handlePriceUnitChange = (valStr: string) => {
+    setPriceUnitInput(valStr)
+    const unit = parseFloat(valStr.replace(',', '.'))
+    if (!isNaN(unit) && editingPriceItem) {
+      setPriceTotalInput((unit * editingPriceItem.quantity).toFixed(2))
+    }
   }
 
   const handleReopenClick = () => {
@@ -1716,6 +1770,112 @@ export default function OrderDetail() {
         </div>
       )}
 
+      {/* ── MODAL: EDITAR TOTAL DE PEÇA / ITEM ───────────────────────────────── */}
+      {editingPriceItem && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-amber-400 font-bold text-base">💰</span>
+                <h2 className="text-base font-bold text-white">
+                  {editingPriceItem.type === 'service' ? 'Editar Total do Serviço' : 'Editar Total da Peça'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingPriceItem(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 mb-1">
+              Item: <strong className="text-slate-200">{editingPriceItem.description}</strong>
+            </p>
+            <p className="text-xs text-slate-400 mb-4">
+              Quantidade: <strong className="text-amber-400">{editingPriceItem.quantity} un.</strong>
+            </p>
+
+            {priceError && (
+              <div className="bg-red-950/50 border border-red-800 rounded-xl px-3 py-2 text-red-300 text-xs mb-3">
+                {priceError}
+              </div>
+            )}
+
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider mb-1.5">
+                Valor Total da Peça (R$)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                  R$
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={priceTotalInput}
+                  onChange={(e) => handlePriceTotalChange(e.target.value)}
+                  className="w-full bg-slate-800 border border-amber-500/50 text-white rounded-xl pl-10 pr-4 py-2.5 text-base font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="mb-5 bg-slate-800/50 p-3 rounded-xl border border-slate-700/60">
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-slate-400 font-medium">
+                  Valor Unitário (por unidade):
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const originalUnit = editingPriceItem.unitPrice || 0
+                    setPriceUnitInput(originalUnit.toFixed(2))
+                    setPriceTotalInput((originalUnit * editingPriceItem.quantity).toFixed(2))
+                  }}
+                  className="text-[11px] text-blue-400 hover:underline font-medium"
+                >
+                  Restaurar original
+                </button>
+              </div>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-semibold text-xs">
+                  R$
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={priceUnitInput}
+                  onChange={(e) => handlePriceUnitChange(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setEditingPriceItem(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-700 text-sm font-medium text-slate-300 hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUpdatePrice()}
+                disabled={updatingPrice}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold disabled:opacity-50"
+              >
+                {updatingPrice ? 'Salvando…' : 'Salvar Total'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── MODAIS EXISTENTES (ENCERRAMENTO, REABERTURA E CLIENTE) ────────────── */}
       {/* Modal — Finalizar OS com Confirmação dos Dados do Cliente e Senha de Administrador */}
       {confirmClose && (
@@ -2223,6 +2383,7 @@ export default function OrderDetail() {
               mecanicos={mecanicos}
               onUpdateQuantity={handleQuantityDelta}
               onEditLabor={handleOpenEditLabor}
+              onEditPrice={handleOpenEditPrice}
               onDeleteItem={setItemToDelete}
               onUpdateItemMechanic={(itemId, mecanicoId) => handleUpdateItemMechanic({ itemId, mecanicoId })}
               onOpenRateio={(item) => setRateioModalItem(item)}
@@ -2237,6 +2398,7 @@ export default function OrderDetail() {
               mecanicos={mecanicos}
               onUpdateQuantity={handleQuantityDelta}
               onEditLabor={handleOpenEditLabor}
+              onEditPrice={handleOpenEditPrice}
               onDeleteItem={setItemToDelete}
               onUpdateItemMechanic={(itemId, mecanicoId) => handleUpdateItemMechanic({ itemId, mecanicoId })}
               onOpenRateio={(item) => setRateioModalItem(item)}
@@ -2333,6 +2495,7 @@ function ItemsTable({
   mecanicos,
   onUpdateQuantity,
   onEditLabor,
+  onEditPrice,
   onDeleteItem,
   onUpdateItemMechanic,
   onOpenRateio,
@@ -2344,6 +2507,7 @@ function ItemsTable({
   mecanicos?: Mecanico[]
   onUpdateQuantity: (item: OrderItem, delta: number) => void
   onEditLabor: (item: OrderItem) => void
+  onEditPrice?: (item: OrderItem) => void
   onDeleteItem: (item: OrderItem) => void
   onUpdateItemMechanic?: (itemId: string, mecanicoId: number | null) => void
   onOpenRateio?: (item: OrderItem) => void
@@ -2540,7 +2704,21 @@ function ItemsTable({
                   {currency(item.unitPrice)}
                 </td>
                 <td className={`px-5 py-3 text-right font-semibold font-mono ${accentColor}`}>
-                  {currency(item.total)}
+                  {!isClosed && onEditPrice ? (
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span>{currency(item.total)}</span>
+                      <button
+                        type="button"
+                        onClick={() => onEditPrice(item)}
+                        className="text-slate-500 hover:text-amber-400 p-1 rounded-md hover:bg-slate-800 transition-colors"
+                        title="Editar total deste item"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    currency(item.total)
+                  )}
                 </td>
                 <td className="px-5 py-3 text-right">
                   {!isClosed ? (

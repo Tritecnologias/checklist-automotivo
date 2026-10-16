@@ -224,6 +224,16 @@ export const api = {
       body: JSON.stringify({ quantity }),
     }),
 
+  updateItemPrice: (
+    orderId: string,
+    itemId: string,
+    payload: { unitPrice?: number; total?: number; quantity?: number }
+  ) =>
+    request<OrderItem>(`/orders/${orderId}/items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
   removeItem: (orderId: string, itemId: string) =>
     request<void>(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' }),
 

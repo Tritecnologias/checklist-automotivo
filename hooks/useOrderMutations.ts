@@ -114,6 +114,55 @@ export function useUpdateItemLabor(orderId: string) {
   });
 }
 
+// ─── Atualizar Preço / Total da Peça de um item ──────────────────────────────
+
+export function useUpdateItemPrice(orderId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      itemId,
+      unitPrice,
+      total,
+      quantity,
+    }: {
+      itemId: string;
+      unitPrice?: number;
+      total?: number;
+      quantity?: number;
+    }) => api.updateItemPrice(orderId, itemId, { unitPrice, total, quantity }),
+    onMutate: async ({ itemId, unitPrice, total, quantity }) => {
+      await qc.cancelQueries({ queryKey: ['order', orderId] });
+      const snapshot = qc.getQueryData<Order>(['order', orderId]);
+      qc.setQueryData<Order>(['order', orderId], (prev) => {
+        if (!prev) return prev;
+        const newItems = prev.items.map((i) => {
+          if (i.id !== itemId) return i;
+          const q = quantity !== undefined ? quantity : i.quantity;
+          const t = total !== undefined ? total : (unitPrice !== undefined ? unitPrice * q : i.total);
+          const u = unitPrice !== undefined ? unitPrice : (total !== undefined && q > 0 ? total / q : i.unitPrice);
+          return { ...i, quantity: q, unitPrice: u, total: t };
+        });
+        const totalLabor = newItems.reduce((s, i) => s + (i.laborPrice ?? 0), 0);
+        const totalParts = newItems.reduce((s, i) => s + (i.total ?? 0), 0);
+        return {
+          ...prev,
+          items: newItems,
+          laborAmount: totalLabor,
+          totalAmount: totalParts + totalLabor,
+        };
+      });
+      return { snapshot };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.snapshot) qc.setQueryData(['order', orderId], ctx.snapshot);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['order', orderId] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
+
 // ─── Verificar PIN de supervisor ──────────────────────────────────────────────
 
 export function useVerifyPin() {

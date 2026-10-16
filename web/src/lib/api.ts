@@ -202,6 +202,15 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ quantity }),
     }),
+  updateItemPrice: (
+    orderId: string,
+    itemId: string,
+    payload: { unitPrice?: number; total?: number; quantity?: number }
+  ) =>
+    request<OrderItem>(`/orders/${orderId}/items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   updateItemLabor: (orderId: string, itemId: string, laborPrice: number) =>
     request<Order>(`/orders/${orderId}/items/${itemId}/labor`, {
       method: 'PATCH',

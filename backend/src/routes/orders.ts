@@ -1186,10 +1186,29 @@ router.post('/:id/items', async (req: Request, res: Response) => {
 // ── PATCH /orders/:id/items/:itemId ────────────────────────────────────────
 
 router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
-  const { quantity } = req.body as { quantity?: number };
+  const { quantity, unitPrice: reqUnitPrice, total: reqTotal } = req.body as {
+    quantity?: number;
+    unitPrice?: number;
+    total?: number;
+  };
 
-  if (!quantity || quantity <= 0) {
+  if (quantity === undefined && reqUnitPrice === undefined && reqTotal === undefined) {
+    res.status(400).json({ message: 'Informe quantity, unitPrice ou total para atualizar' });
+    return;
+  }
+
+  if (quantity !== undefined && (isNaN(Number(quantity)) || Number(quantity) <= 0)) {
     res.status(400).json({ message: 'quantity deve ser maior que zero' });
+    return;
+  }
+
+  if (reqUnitPrice !== undefined && (isNaN(Number(reqUnitPrice)) || Number(reqUnitPrice) < 0)) {
+    res.status(400).json({ message: 'unitPrice não pode ser negativo' });
+    return;
+  }
+
+  if (reqTotal !== undefined && (isNaN(Number(reqTotal)) || Number(reqTotal) < 0)) {
+    res.status(400).json({ message: 'total não pode ser negativo' });
     return;
   }
 
@@ -1203,9 +1222,19 @@ router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
     const item = (rows as Record<string, unknown>[])[0];
     if (!item) { res.status(404).json({ message: 'Item não encontrado' }); return; }
 
-    const qty       = Number(quantity);
-    const unitPrice = Number(item.unit_price);
-    const total     = qty * unitPrice;
+    const qty = quantity !== undefined ? Number(quantity) : Number(item.quantity);
+    let unitPrice = Number(item.unit_price);
+    let total = Number(item.total);
+
+    if (reqTotal !== undefined) {
+      total = Number(Number(reqTotal).toFixed(2));
+      unitPrice = qty > 0 ? Number((total / qty).toFixed(4)) : unitPrice;
+    } else if (reqUnitPrice !== undefined) {
+      unitPrice = Number(Number(reqUnitPrice).toFixed(4));
+      total = Number((qty * unitPrice).toFixed(2));
+    } else if (quantity !== undefined) {
+      total = Number((qty * unitPrice).toFixed(2));
+    }
 
     let comissaoVal = item.comissao_valor !== null ? Number(item.comissao_valor) : null;
     if (item.comissao_pct !== null && item.comissao_pct !== undefined) {
@@ -1215,8 +1244,8 @@ router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
     }
 
     await pool.execute(
-      'UPDATE os_order_items SET quantity = ?, total = ?, comissao_valor = ? WHERE id = ?',
-      [qty, total, comissaoVal, req.params.itemId],
+      'UPDATE os_order_items SET quantity = ?, unit_price = ?, total = ?, comissao_valor = ? WHERE id = ?',
+      [qty, unitPrice, total, comissaoVal, req.params.itemId],
     );
 
     await syncExecutantesValues(req.params.id, req.params.itemId, String(item.type), total, Number(item.labor_price || 0));
@@ -1238,7 +1267,7 @@ router.patch('/:id/items/:itemId', async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error('PATCH /orders/:id/items/:itemId error:', err);
-    res.status(500).json({ message: 'Erro ao atualizar quantidade' });
+    res.status(500).json({ message: 'Erro ao atualizar item' });
   }
 });
 
