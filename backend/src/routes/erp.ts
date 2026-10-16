@@ -3599,9 +3599,9 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
 
   const saldoExpr = `COALESCE(pst.saldo, IF(? = 1, p.estoque, 0))`;
 
-  // Para lojas novas (tenant != 1), só exibe produtos que já têm linha em produto_saldo_tenant
-  const whereParts: string[] = ['p.inativo = 0', '(? = 1 OR pst.produto_id IS NOT NULL)'];
-  const whereParams: any[] = [tenantId];
+  // Exibe todos os produtos ativos do catálogo para qualquer loja (itens sem movimentação nesta filial têm saldo 0)
+  const whereParts: string[] = ['p.inativo = 0'];
+  const whereParams: any[] = [];
 
   if (search.length > 0) {
     whereParts.push('(p.nome_produto LIKE ? OR p.cod_barra LIKE ?)');
@@ -4593,9 +4593,8 @@ router.get('/estoque/curva-abc', requireManagerUp, async (req, res) => {
          LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
          LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
          WHERE p.inativo = 0
-           ${serviceFilter}
-           AND (? = 1 OR pst.produto_id IS NOT NULL)`,
-        [tenantId, tenantId, tenantId]
+           ${serviceFilter}`,
+        [tenantId, tenantId]
       );
 
       // 3. Monta lista completa e ordena por faturamento decrescente para classificar ABC
@@ -4842,9 +4841,8 @@ router.get('/estoque/valorizacao', requireManagerUp, async (req, res) => {
        LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
        WHERE p.inativo = 0
          ${serviceFilter}
-         AND (? = 1 OR pst.produto_id IS NOT NULL)
        ORDER BY p.nome_produto ASC`,
-      [tenantId, tenantId, tenantId]
+      [tenantId, tenantId]
     );
 
     let totalProdutosCatalogo = rows.length;
@@ -5123,9 +5121,8 @@ router.get('/estoque/sugestao-compras', requireManagerUp, async (req, res) => {
          WHERE COALESCE(f.inativo, 0) = 0
        ) forn ON forn.id_produto = p.id
        WHERE p.inativo = 0
-         ${serviceFilter}
-         AND (? = 1 OR pst.produto_id IS NOT NULL)`,
-      [tenantId, tenantId, tenantId]
+         ${serviceFilter}`,
+      [tenantId, tenantId]
     );
 
     // 4. Processamento dos Itens e Cálculo de Sugestão
