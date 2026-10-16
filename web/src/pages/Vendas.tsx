@@ -9,7 +9,7 @@ const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency
 const today = () => new Date().toISOString().slice(0, 10)
 
 export default function Vendas() {
-  const { currentTenant } = useAuth()
+  const { currentTenant, user } = useAuth()
   const tid = currentTenant?.id ?? null
   const [data, setData] = useState(today())
   const [search, setSearch] = useState('')
@@ -236,6 +236,9 @@ export default function Vendas() {
                 <button
                   type="button"
                   onClick={() => {
+                    const isRecebimentoNotinha = (detalhe.itens ?? []).some(
+                      i => (i.nome_produto || '').toUpperCase().includes('RECEBIMENTO DE NOTINHA')
+                    ) || (detalhe.itens?.length === 0 && Number(detalhe.vr_total) > 0)
                     const receiptData: ThermalReceiptData = {
                       empresa: currentTenant?.nome || '4Rodas Centro Automotivo',
                       controle: detalhe.controle,
@@ -267,13 +270,16 @@ export default function Vendas() {
                         { nome: 'Carnê', valor: Number(detalhe.vr_carne || 0) },
                         { nome: 'Ticket', valor: Number(detalhe.vr_ticket || 0) },
                       ].filter(p => p.valor > 0),
+                      operador: (detalhe as any).nome_operador || (detalhe as any).nome_login || user?.nome,
+                      isRecebimentoNotinha,
+                      exibirAssinatura: isRecebimentoNotinha,
                     }
                     printThermalReceipt(receiptData)
                   }}
                   className="w-full mt-3 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-950/40 hover:scale-[1.02] active:scale-95"
                 >
                   <span>🖨️</span>
-                  <span>Imprimir 2ª Via do Cupom</span>
+                  <span>{((detalhe.itens ?? []).some(i => (i.nome_produto || '').toUpperCase().includes('RECEBIMENTO DE NOTINHA'))) ? 'Imprimir 2ª Via do Recebimento (com Assinatura)' : 'Imprimir 2ª Via do Cupom'}</span>
                 </button>
               </div>
             )}

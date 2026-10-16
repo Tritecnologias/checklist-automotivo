@@ -29,6 +29,9 @@ export interface ThermalReceiptData {
   total: number
   pagamentos: ThermalReceiptPayment[]
   troco?: number
+  operador?: string
+  isRecebimentoNotinha?: boolean
+  exibirAssinatura?: boolean
 }
 
 function formatMoeda(val: number): string {
@@ -36,6 +39,26 @@ function formatMoeda(val: number): string {
 }
 
 export function generateThermalReceiptHtml(dados: ThermalReceiptData): string {
+  const isRecebimentoNotinha = Boolean(
+    dados.isRecebimentoNotinha ||
+    dados.itens.some(it => {
+      const n = (it.nome || '').toUpperCase()
+      return n.includes('RECEBIMENTO DE NOTINHA') ||
+             n.includes('RECEBIMENTO NOTINHA') ||
+             n.includes('REC. NOTINHA')
+    })
+  )
+
+  const isVendaNota = Boolean(
+    dados.pagamentos.some(p => (p.nome || '').toUpperCase().includes('NOTA') && p.valor > 0)
+  )
+
+  const deveExibirAssinatura = Boolean(
+    dados.exibirAssinatura ||
+    isRecebimentoNotinha ||
+    isVendaNota
+  )
+
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -113,6 +136,50 @@ export function generateThermalReceiptHtml(dados: ThermalReceiptData): string {
       padding: 4px 0;
       margin: 4px 0;
     }
+    .signature-section {
+      margin-top: 14px;
+      margin-bottom: 8px;
+      text-align: center;
+      page-break-inside: avoid;
+    }
+    .signature-desc {
+      font-size: 8.5px;
+      font-style: italic;
+      color: #333;
+      margin-bottom: 26px;
+      line-height: 1.25;
+      padding: 0 4px;
+    }
+    .signature-space {
+      height: 6px;
+    }
+    .signature-line {
+      border-top: 1px solid #000;
+      width: 88%;
+      margin: 0 auto 5px auto;
+    }
+    .signature-name {
+      font-size: 10px;
+      font-weight: bold;
+      text-transform: uppercase;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+    .signature-doc {
+      font-size: 9px;
+      margin-top: 2px;
+      color: #222;
+    }
+    .signature-sub {
+      font-size: 8.5px;
+      color: #444;
+      margin-top: 2px;
+    }
+    .signature-operador {
+      font-size: 8px;
+      color: #555;
+      margin-top: 5px;
+    }
     .footer {
       text-align: center;
       font-size: 9.5px;
@@ -125,6 +192,9 @@ export function generateThermalReceiptHtml(dados: ThermalReceiptData): string {
         margin: 0;
         padding: 2mm 2mm 15mm 2mm;
       }
+      .signature-section {
+        page-break-inside: avoid;
+      }
     }
   </style>
 </head>
@@ -132,6 +202,7 @@ export function generateThermalReceiptHtml(dados: ThermalReceiptData): string {
   <div class="text-center">
     <div class="header-title uppercase">${dados.empresa}</div>
     <div class="header-sub">COMPROVANTE NÃO FISCAL</div>
+    ${isRecebimentoNotinha ? '<div class="header-sub bold" style="font-size: 11px; margin-top: 2px; letter-spacing: 0.5px;">*** RECEBIMENTO DE NOTINHA ***</div>' : ''}
     <div class="header-sub">Emissão: ${dados.dataHora}</div>
     <div class="header-sub bold">Controle: ${dados.controle}</div>
   </div>
@@ -188,7 +259,7 @@ export function generateThermalReceiptHtml(dados: ThermalReceiptData): string {
     </div>
   ` : ''}
   <div class="row total-highlight">
-    <span>TOTAL A PAGAR:</span>
+    <span>${isRecebimentoNotinha ? 'TOTAL RECEBIDO:' : 'TOTAL A PAGAR:'}</span>
     <span>R$ ${formatMoeda(dados.total)}</span>
   </div>
 
@@ -204,6 +275,31 @@ export function generateThermalReceiptHtml(dados: ThermalReceiptData): string {
     <div class="row bold">
       <span>Troco:</span>
       <span>R$ ${formatMoeda(dados.troco)}</span>
+    </div>
+  ` : ''}
+
+  ${deveExibirAssinatura ? `
+    <div class="divider"></div>
+    <div class="signature-section">
+      <div class="signature-desc">
+        ${isRecebimentoNotinha
+          ? 'Declaro para os devidos fins a quitação/recebimento do valor acima descrito.'
+          : 'Reconheço e pagarei o valor a prazo discriminado acima.'}
+      </div>
+      <div class="signature-space"></div>
+      <div class="signature-line"></div>
+      <div class="signature-name bold">
+        ${dados.cliente?.nome ? dados.cliente.nome.toUpperCase() : 'ASSINATURA DO CLIENTE'}
+      </div>
+      ${dados.cliente?.documento ? `
+        <div class="signature-doc">CPF/CNPJ: ${dados.cliente.documento}</div>
+      ` : ''}
+      <div class="signature-sub">
+        ${isRecebimentoNotinha ? 'Assinatura do Cliente / Responsável' : 'Assinatura do Cliente'}
+      </div>
+      ${dados.operador ? `
+        <div class="signature-operador">Atendente: ${dados.operador}</div>
+      ` : ''}
     </div>
   ` : ''}
 

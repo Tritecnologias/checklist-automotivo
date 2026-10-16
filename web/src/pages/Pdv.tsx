@@ -300,6 +300,7 @@ export default function Pdv() {
       }
 
       // Prepara snapshot da venda para impressão térmica
+      const isRecebimento = isVendaAvulsa || cart.length === 0
       const snapshot: ThermalReceiptData = {
         empresa: currentTenant?.nome || '4Rodas Centro Automotivo',
         controle: '',
@@ -339,6 +340,9 @@ export default function Pdv() {
           { nome: 'Outros', valor: outrosVal },
         ].filter(p => p.valor > 0),
         troco,
+        operador: user?.nome,
+        isRecebimentoNotinha: isRecebimento,
+        exibirAssinatura: isRecebimento,
       }
 
       return erpApi.criarVenda(pag).then(res => ({ ...res, snapshot }))
@@ -563,9 +567,11 @@ export default function Pdv() {
         {sucesso && (
           <div className="bg-emerald-950/70 border border-emerald-500/80 rounded-2xl px-5 py-3.5 text-emerald-200 text-sm font-medium flex items-center justify-between gap-4 flex-wrap shadow-xl shadow-emerald-950/50">
             <div className="flex items-center gap-3">
-              <span className="text-2xl">✅</span>
+              <span className="text-2xl">{vendaRecente?.isRecebimentoNotinha ? '📝' : '✅'}</span>
               <div>
-                <p className="text-white font-bold text-sm">Venda finalizada com sucesso!</p>
+                <p className="text-white font-bold text-sm">
+                  {vendaRecente?.isRecebimentoNotinha ? 'Recebimento de Notinha registrado com sucesso!' : 'Venda finalizada com sucesso!'}
+                </p>
                 <p className="text-xs text-emerald-300 font-mono">
                   Controle: <strong className="text-white">{sucesso}</strong>
                   {vendaRecente && <> · Total: <strong className="text-white">{R(vendaRecente.total)}</strong></>}
@@ -580,7 +586,7 @@ export default function Pdv() {
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-950/50 transition-all hover:scale-105 active:scale-95"
                 >
                   <span>🖨️</span>
-                  <span>Imprimir Comprovante</span>
+                  <span>{vendaRecente.isRecebimentoNotinha ? 'Imprimir Comprovante com Assinatura' : 'Imprimir Comprovante'}</span>
                 </button>
               )}
               <button
