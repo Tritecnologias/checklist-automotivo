@@ -6217,6 +6217,8 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
     let faturamentoGeralServicos = 0;
     let faturamentoGeralPecas = 0;
     let totalComissoesGeral = 0;
+    let totalComissaoServicosGeral = 0;
+    let totalComissaoPecasGeral = 0;
     const osDistintasTotal = new Set<string>();
 
     const extratoItens: any[] = [];
@@ -6300,6 +6302,11 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
           const pctAplicado = Number(ex.comissao_pct);
 
           totalComissoesGeral += comissaoExec;
+          if (isServico) {
+            totalComissaoServicosGeral += comissaoExec;
+          } else {
+            totalComissaoPecasGeral += comissaoExec;
+          }
 
           let mecStat = mecanicosStats.get(exMecId);
           if (!mecStat) {
@@ -6351,6 +6358,9 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
               : `${Number(ex.percentual).toFixed(0)}%`;
             const papelBadge = ex.papel === 'auxiliar' ? 'Auxiliar' : 'Titular';
 
+            const isServico = row.type === 'service';
+            const valorMaoDeObra = isServico ? valorBaseExec : (ex.tipo_rateio === 'PERCENTUAL' ? (laborPrice * Number(ex.percentual || 100)) / 100 : Math.min(laborPrice, valorBaseExec));
+
             extratoItens.push({
               item_id: `${row.item_id}_${ex.id}`,
               order_id: row.order_id,
@@ -6374,6 +6384,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
               total_item: totalItem,
               valor_base: valorBaseExec,
               valor_total_linha: valorTotalLinha,
+              valor_mao_de_obra: valorMaoDeObra,
               mecanico_id: exMecId,
               mecanico_nome: ex.cad_mecanico_apelido || ex.cad_mecanico_nome || `Técnico #${exMecId}`,
               auxiliar_id: row.auxiliar_id ? Number(row.auxiliar_id) : null,
@@ -6410,6 +6421,11 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
         }
 
         totalComissoesGeral += comissaoLinha;
+        if (isServico) {
+          totalComissaoServicosGeral += comissaoLinha;
+        } else {
+          totalComissaoPecasGeral += comissaoLinha;
+        }
 
         let mecStat = mecanicosStats.get(mecId);
         if (!mecStat) {
@@ -6492,6 +6508,7 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
             total_item: totalItem,
             valor_base: valorTotalLinha,
             valor_total_linha: valorTotalLinha,
+            valor_mao_de_obra: valorServico,
             mecanico_id: mecId > 0 ? mecId : null,
             mecanico_nome: nomeMec,
             auxiliar_id: row.auxiliar_id ? Number(row.auxiliar_id) : null,
@@ -6575,6 +6592,8 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
           faturamento_servicos: mecSelecionado.total_servicos,
           faturamento_pecas: mecSelecionado.total_pecas,
           total_comissoes: (mecSelecionado.comissao_servicos + mecSelecionado.comissao_pecas),
+          total_comissao_servicos: mecSelecionado.comissao_servicos,
+          total_comissao_pecas: mecSelecionado.comissao_pecas,
           total_comissoes_pagas: pagamentosMecSelecionado,
           saldo_comissoes_pendente: Math.max(0, (mecSelecionado.comissao_servicos + mecSelecionado.comissao_pecas) - pagamentosMecSelecionado),
           qtd_os: mecSelecionado.qtd_os_set.size,
@@ -6589,6 +6608,8 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
           faturamento_servicos: faturamentoGeralServicos,
           faturamento_pecas: faturamentoGeralPecas,
           total_comissoes: totalComissoesGeral,
+          total_comissao_servicos: totalComissaoServicosGeral,
+          total_comissao_pecas: totalComissaoPecasGeral,
           total_comissoes_pagas: totalPagamentosGeral,
           saldo_comissoes_pendente: saldoComissoesPendente,
           qtd_os: qtdOsTotal,

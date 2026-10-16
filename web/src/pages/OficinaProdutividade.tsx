@@ -45,6 +45,11 @@ const fmtData = (d?: string | null) => {
   return `${dia}/${mes}/${ano}`
 }
 
+const getMaoDeObra = (it: ExtratoItemComissao) => {
+  if (typeof it.valor_mao_de_obra === 'number') return it.valor_mao_de_obra
+  return it.tipo === 'service' ? it.valor_base : (it.labor_price || 0)
+}
+
 type PeriodoPreset = 'hoje' | 'esta_semana' | 'este_mes' | 'mes_anterior' | 'ultimos_90' | 'personalizado'
 
 function getPresetDates(preset: PeriodoPreset): { inicio: string; fim: string } {
@@ -397,13 +402,14 @@ export default function OficinaProdutividade() {
               <th>Tipo</th>
               <th>Item / Descrição</th>
               <th class="text-right">Valor Base</th>
+              <th class="text-right">Mão de Obra</th>
               <th class="text-right">% Com.</th>
               <th class="text-right">Comissão R$</th>
             </tr>
           </thead>
           <tbody>
             ${itensParaImprimir.length === 0 ? `
-              <tr><td colspan="${!alvo ? 10 : 9}" style="text-align: center; padding: 20px; color: #94a3b8;">Nenhum item de comissão no período.</td></tr>
+              <tr><td colspan="${!alvo ? 11 : 10}" style="text-align: center; padding: 20px; color: #94a3b8;">Nenhum item de comissão no período.</td></tr>
             ` : itensParaImprimir.map(it => `
               <tr>
                 <td>${fmtData(it.data_os)}</td>
@@ -414,6 +420,7 @@ export default function OficinaProdutividade() {
                 <td><span class="badge-tipo ${it.tipo === 'service' ? 'tipo-servico' : 'tipo-peca'}">${it.tipo === 'service' ? 'Serviço' : 'Peça'}</span></td>
                 <td>${it.descricao}</td>
                 <td class="text-right">${R(it.valor_base)}</td>
+                <td class="text-right font-bold" style="color: #4338ca;">${R(getMaoDeObra(it))}</td>
                 <td class="text-right">${P(it.comissao_pct)}</td>
                 <td class="text-right" style="font-weight:bold; color: #166534;">${R(it.comissao_valor)}</td>
               </tr>
@@ -422,6 +429,10 @@ export default function OficinaProdutividade() {
         </table>
 
         <div class="totais">
+          <div class="total-row">
+            <span>Total Mão de Obra (Serviços):</span>
+            <strong style="color:#1d4ed8;">${R(alvo ? alvo.total_servicos : (dadosProdutividade?.resumo.faturamento_servicos || 0))}</strong>
+          </div>
           <div class="total-row">
             <span>Total Produzido no Período:</span>
             <strong>${R(alvo ? alvo.total_produzido : dadosProdutividade?.resumo.faturamento_total || 0)}</strong>
@@ -736,7 +747,9 @@ export default function OficinaProdutividade() {
               {R(resumo?.total_comissoes || 0)}
             </p>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              {mecanicoFiltro !== 'todos' ? 'Crédito deste técnico' : 'Total a crédito'}
+              {typeof resumo?.total_comissao_servicos === 'number' && resumo.total_comissao_servicos > 0
+                ? `M.O.: ${R(resumo.total_comissao_servicos)}`
+                : (mecanicoFiltro !== 'todos' ? 'Crédito deste técnico' : 'Total a crédito')}
             </p>
           </div>
         </div>
@@ -1086,8 +1099,13 @@ export default function OficinaProdutividade() {
                         </td>
 
                         {/* Comissão Gerada */}
-                        <td className="px-4 py-3 text-right font-mono font-bold text-purple-300">
-                          {R(m.total_comissao)}
+                        <td className="px-4 py-3 text-right font-mono">
+                          <span className="font-bold text-purple-300 block">{R(m.total_comissao)}</span>
+                          {m.comissao_servicos > 0 && (
+                            <span className="text-[10px] text-indigo-400 block font-sans font-medium" title="Comissão gerada sobre Mão de Obra">
+                              M.O.: {R(m.comissao_servicos)}
+                            </span>
+                          )}
                         </td>
 
                         {/* Já Pago */}
@@ -1214,11 +1232,19 @@ export default function OficinaProdutividade() {
                   Mostrando {extratoFiltrado.length} de {dadosProdutividade?.extrato.length || 0} registros
                 </p>
               </div>
-              <div className="text-xs text-slate-400 font-mono">
-                Total Comissão no Extrato:{' '}
-                <strong className="text-purple-400">
-                  {R(extratoFiltrado.reduce((acc, it) => acc + (it.comissao_valor || 0), 0))}
-                </strong>
+              <div className="flex items-center gap-4 text-xs font-mono">
+                <div className="text-slate-400">
+                  Total Mão de Obra:{' '}
+                  <strong className="text-indigo-400">
+                    {R(extratoFiltrado.reduce((acc, it) => acc + getMaoDeObra(it), 0))}
+                  </strong>
+                </div>
+                <div className="text-slate-400">
+                  Total Comissão:{' '}
+                  <strong className="text-purple-400">
+                    {R(extratoFiltrado.reduce((acc, it) => acc + (it.comissao_valor || 0), 0))}
+                  </strong>
+                </div>
               </div>
             </div>
 
@@ -1235,6 +1261,7 @@ export default function OficinaProdutividade() {
                     <th className="px-4 py-3">Descrição do Item</th>
                     <th className="px-4 py-3 text-right">Qtd</th>
                     <th className="px-4 py-3 text-right">Valor Base</th>
+                    <th className="px-4 py-3 text-right text-indigo-400 font-bold">Mão de Obra</th>
                     <th className="px-4 py-3 text-right">% Com.</th>
                     <th className="px-4 py-3 text-right">Comissão R$</th>
                     <th className="px-4 py-3 text-center">Status OS</th>
@@ -1243,13 +1270,13 @@ export default function OficinaProdutividade() {
                 <tbody className="divide-y divide-slate-800">
                   {loadingProdutividade ? (
                     <tr>
-                      <td colSpan={12} className="py-12 text-center text-slate-500">
+                      <td colSpan={13} className="py-12 text-center text-slate-500">
                         Carregando extrato de serviços e comissões…
                       </td>
                     </tr>
                   ) : !extratoFiltrado.length ? (
                     <tr>
-                      <td colSpan={12} className="py-12 text-center text-slate-500">
+                      <td colSpan={13} className="py-12 text-center text-slate-500">
                         Nenhum item localizado com os filtros aplicados.
                       </td>
                     </tr>
@@ -1328,6 +1355,10 @@ export default function OficinaProdutividade() {
                           {R(it.valor_base)}
                         </td>
 
+                        <td className="px-4 py-3 text-right font-mono font-bold text-indigo-300">
+                          {R(getMaoDeObra(it))}
+                        </td>
+
                         <td className="px-4 py-3 text-right font-mono font-bold text-slate-400">
                           {P(it.comissao_pct)}
                         </td>
@@ -1357,6 +1388,26 @@ export default function OficinaProdutividade() {
                     ))
                   )}
                 </tbody>
+                {extratoFiltrado.length > 0 && (
+                  <tfoot className="bg-slate-950 text-slate-300 font-semibold border-t-2 border-slate-700">
+                    <tr>
+                      <td colSpan={8} className="px-4 py-3 text-right uppercase text-[10px] tracking-wider text-slate-400">
+                        Totais do Período Filtrado ({extratoFiltrado.length} itens):
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono font-bold text-white">
+                        {R(extratoFiltrado.reduce((acc, it) => acc + (it.valor_base || 0), 0))}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono font-bold text-indigo-300">
+                        {R(extratoFiltrado.reduce((acc, it) => acc + getMaoDeObra(it), 0))}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-500">—</td>
+                      <td className="px-4 py-3 text-right font-mono font-bold text-purple-400">
+                        {R(extratoFiltrado.reduce((acc, it) => acc + (it.comissao_valor || 0), 0))}
+                      </td>
+                      <td className="px-4 py-3"></td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </div>

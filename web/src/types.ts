@@ -969,6 +969,7 @@ export interface ExtratoItemComissao {
   total_item: number
   valor_base: number
   valor_total_linha: number
+  valor_mao_de_obra?: number
   mecanico_id: number | null
   mecanico_nome: string
   auxiliar_id?: number | null
@@ -991,6 +992,8 @@ export interface ProdutividadeOficinaResponse {
     faturamento_servicos: number
     faturamento_pecas: number
     total_comissoes: number
+    total_comissao_servicos?: number
+    total_comissao_pecas?: number
     total_comissoes_pagas: number
     saldo_comissoes_pendente: number
     qtd_os: number
