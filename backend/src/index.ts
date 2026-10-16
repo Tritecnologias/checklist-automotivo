@@ -177,16 +177,38 @@ async function runMigrations() {
       console.log('[migration] Índice idx_os_orders_venda_controle adicionado');
     }
 
-    // Sincroniza total_amount e discount_amount de OSs que foram faturadas anteriormente no PDV
+    // Corrige vendas e lançamentos do PDV onde o vr_total foi indevidamente inflado pelo valor bruto da OS antes do desconto
+    await pool.query(`
+      UPDATE mv_vendas
+      SET vr_total = (COALESCE(vr_dinheiro,0) + COALESCE(vr_cartao,0) + COALESCE(vr_pix,0) + COALESCE(vr_nota,0) + COALESCE(vr_cheque,0) + COALESCE(vr_carne,0) + COALESCE(vr_ticket,0))
+      WHERE (em_aberto = 0 OR em_aberto IS NULL)
+        AND (COALESCE(vr_dinheiro,0) + COALESCE(vr_cartao,0) + COALESCE(vr_pix,0) + COALESCE(vr_nota,0) + COALESCE(vr_cheque,0) + COALESCE(vr_carne,0) + COALESCE(vr_ticket,0)) > 0
+        AND vr_total > (COALESCE(vr_dinheiro,0) + COALESCE(vr_cartao,0) + COALESCE(vr_pix,0) + COALESCE(vr_nota,0) + COALESCE(vr_cheque,0) + COALESCE(vr_carne,0) + COALESCE(vr_ticket,0))
+    `);
+
+    await pool.query(`
+      UPDATE cad_lancamentos cl
+      JOIN mv_vendas v ON v.id = cl.id_venda
+      SET cl.vr_parcela = v.vr_total,
+          cl.vr_saldo = 0
+      WHERE (v.em_aberto = 0 OR v.em_aberto IS NULL)
+        AND cl.vr_parcela > v.vr_total
+    `);
+
+    // Sincroniza total_amount e discount_amount de OSs que foram faturadas no PDV
     await pool.query(`
       UPDATE os_orders o
       JOIN mv_vendas v ON CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
       SET o.total_amount = v.vr_total,
-          o.discount_amount = COALESCE(ABS(v.vr_adicional), o.discount_amount, 0)
-      WHERE o.venda_controle IS NOT NULL AND o.total_amount = 0
+          o.discount_amount = CASE
+            WHEN v.vr_adicional < 0 THEN ABS(v.vr_adicional)
+            ELSE COALESCE(o.discount_amount, 0)
+          END
+      WHERE o.venda_controle IS NOT NULL
+        AND (o.total_amount = 0 OR o.total_amount > v.vr_total)
     `);
   } catch (idxErr) {
-    console.warn('[migration] Aviso ao configurar índices/totais de os_orders:', idxErr);
+    console.warn('[migration] Aviso ao configurar índices/totais de os_orders e vendas:', idxErr);
   }
 
   // Tabela tenants

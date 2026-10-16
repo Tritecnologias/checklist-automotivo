@@ -210,28 +210,73 @@ export default function Vendas() {
                   </div>
                 </div>
 
-                <div className="border-t border-slate-800 pt-4 space-y-2">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Pagamento</p>
-                  {[
-                    { label: 'Dinheiro',       val: detalhe.vr_dinheiro },
-                    { label: 'Cartão',         val: detalhe.vr_cartao },
-                    { label: 'PIX CNPJ',       val: detalhe.vr_pix },
-                    { label: 'NOTA',           val: detalhe.vr_nota },
-                    { label: 'Cheque',         val: detalhe.vr_cheque },
-                    { label: 'Carnê',          val: detalhe.vr_carne },
-                    { label: 'Ticket / Outros', val: detalhe.vr_ticket },
-                    { label: 'Desconto/Ajust.', val: detalhe.vr_adicional },
-                  ].filter(x => Number(x.val) !== 0).map(({ label, val }) => (
-                    <div key={label} className="flex justify-between text-xs">
-                      <span className="text-slate-400">{label}</span>
-                      <span className={Number(val) < 0 ? 'text-amber-400' : 'text-slate-300'}>{R(Number(val))}</span>
+                {/* Resumo Financeiro da Venda & Pagamentos */}
+                {(() => {
+                  const subtotalItens = (detalhe.itens ?? []).reduce((acc, it) => acc + (Number(it.vr_total) || 0), 0)
+                  const vrAdicional = Number(detalhe.vr_adicional || 0)
+                  const vrTotal = Number(detalhe.vr_total || 0)
+                  const temAjuste = Math.abs(vrAdicional) >= 0.01
+
+                  const pagamentos = [
+                    { label: 'Dinheiro',        val: Number(detalhe.vr_dinheiro || 0) },
+                    { label: 'Cartão',          val: Number(detalhe.vr_cartao || 0) },
+                    { label: 'PIX CNPJ',        val: Number(detalhe.vr_pix || 0) },
+                    { label: 'NOTA',            val: Number(detalhe.vr_nota || 0) },
+                    { label: 'Cheque',          val: Number(detalhe.vr_cheque || 0) },
+                    { label: 'Carnê',           val: Number(detalhe.vr_carne || 0) },
+                    { label: 'Ticket / Outros', val: Number(detalhe.vr_ticket || 0) },
+                  ].filter(x => x.val > 0)
+
+                  const totalPago = pagamentos.reduce((acc, p) => acc + p.val, 0)
+
+                  return (
+                    <div className="space-y-3">
+                      {/* Resumo de Valores */}
+                      <div className="border-t border-slate-800 pt-3 space-y-1.5 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/80">
+                        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Resumo da Venda</p>
+                        <div className="flex justify-between text-xs text-slate-400">
+                          <span>Subtotal itens</span>
+                          <span className="font-mono text-slate-200">{R(subtotalItens > 0 ? subtotalItens : vrTotal)}</span>
+                        </div>
+                        {temAjuste && vrAdicional < 0 && (
+                          <div className="flex justify-between text-xs text-emerald-400 font-medium">
+                            <span>Desconto</span>
+                            <span className="font-mono">- {R(Math.abs(vrAdicional))}</span>
+                          </div>
+                        )}
+                        {temAjuste && vrAdicional > 0 && (
+                          <div className="flex justify-between text-xs text-amber-400 font-medium">
+                            <span>Acréscimo</span>
+                            <span className="font-mono">+ {R(vrAdicional)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between font-bold border-t border-slate-800/80 pt-1.5 mt-1">
+                          <span className="text-white text-xs">Total da Venda</span>
+                          <span className="text-emerald-400 font-mono text-sm">{R(vrTotal)}</span>
+                        </div>
+                      </div>
+
+                      {/* Meios de Pagamento */}
+                      <div className="border-t border-slate-800 pt-3 space-y-1.5">
+                        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Forma de Pagamento</p>
+                        {pagamentos.length > 0 ? (
+                          pagamentos.map(({ label, val }) => (
+                            <div key={label} className="flex justify-between text-xs">
+                              <span className="text-slate-400">{label}</span>
+                              <span className="text-slate-200 font-mono">{R(val)}</span>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-xs text-slate-500 italic">Sem registro de pagamento</p>
+                        )}
+                        <div className="flex justify-between font-bold border-t border-slate-800 pt-2 mt-1">
+                          <span className="text-white text-xs">Total Pago</span>
+                          <span className="text-emerald-400 font-mono text-sm">{R(totalPago > 0 ? totalPago : vrTotal)}</span>
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                  <div className="flex justify-between font-bold border-t border-slate-800 pt-2">
-                    <span className="text-white text-sm">Total</span>
-                    <span className="text-emerald-400">{R(Number(detalhe.vr_total))}</span>
-                  </div>
-                </div>
+                  )
+                })()}
 
                 <button
                   type="button"

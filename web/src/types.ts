@@ -145,6 +145,7 @@ export interface Venda {
   data_venda: string
   hora_venda: string
   vr_total: number
+  vr_itens?: number
   vr_adicional: number
   vr_dinheiro: number
   vr_cheque: number

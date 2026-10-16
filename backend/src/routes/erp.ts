@@ -1169,20 +1169,29 @@ router.get('/vendas', async (req, res) => {
     }
 
     res.json({
-      data: rows.map((r: any) => ({
-        ...r,
-        hora_venda: String(r.controle).slice(8, 10) + ':' + String(r.controle).slice(10, 12),
-        vr_total: Number(r.vr_total),
-        vr_adicional: Number(r.vr_adicional),
-        vr_dinheiro: Number(r.vr_dinheiro),
-        vr_cheque: Number(r.vr_cheque),
-        vr_cartao: Number(r.vr_cartao),
-        vr_carne: Number(r.vr_carne),
-        vr_ticket: Number(r.vr_ticket),
-        vr_pix: Number(r.vr_pix ?? 0),
-        vr_nota: Number(r.vr_nota ?? 0),
-        nome_cliente: r.nome_cliente ? stripPlate(r.nome_cliente) || r.nome_cliente : 'Consumidor final',
-      })),
+      data: rows.map((r: any) => {
+        const vrPago = Number(r.vr_dinheiro || 0) + Number(r.vr_cartao || 0) + Number(r.vr_pix || 0) +
+                       Number(r.vr_nota || 0) + Number(r.vr_cheque || 0) + Number(r.vr_carne || 0) +
+                       Number(r.vr_ticket || 0);
+        let vrTotal = Number(r.vr_total);
+        if (Number(r.em_aberto) === 0 && vrPago > 0 && vrTotal > vrPago) {
+          vrTotal = vrPago;
+        }
+        return {
+          ...r,
+          hora_venda: String(r.controle).slice(8, 10) + ':' + String(r.controle).slice(10, 12),
+          vr_total: vrTotal,
+          vr_adicional: Number(r.vr_adicional),
+          vr_dinheiro: Number(r.vr_dinheiro),
+          vr_cheque: Number(r.vr_cheque),
+          vr_cartao: Number(r.vr_cartao),
+          vr_carne: Number(r.vr_carne),
+          vr_ticket: Number(r.vr_ticket),
+          vr_pix: Number(r.vr_pix ?? 0),
+          vr_nota: Number(r.vr_nota ?? 0),
+          nome_cliente: r.nome_cliente ? stripPlate(r.nome_cliente) || r.nome_cliente : 'Consumidor final',
+        };
+      }),
       total: Number(total),
       pages: Math.ceil(total / limit),
     });
@@ -1273,7 +1282,14 @@ router.get('/vendas/:controle', async (req, res) => {
     }
 
     // 3. Fallback para venda avulsa direta sem itens
-    const totalVal = Number(venda.vr_total > 0 ? venda.vr_total : (venda.os_total_amount || 0));
+    const vrPago = Number(venda.vr_dinheiro || 0) + Number(venda.vr_cartao || 0) + Number(venda.vr_pix || 0) +
+                   Number(venda.vr_nota || 0) + Number(venda.vr_cheque || 0) + Number(venda.vr_carne || 0) +
+                   Number(venda.vr_ticket || 0);
+    let totalVal = Number(venda.vr_total > 0 ? venda.vr_total : (venda.os_total_amount || 0));
+    if (Number(venda.em_aberto) === 0 && vrPago > 0 && totalVal > vrPago) {
+      totalVal = vrPago;
+    }
+
     if (finalItens.length === 0 && totalVal > 0) {
       finalItens = [{
         id: 0,
@@ -1286,12 +1302,24 @@ router.get('/vendas/:controle', async (req, res) => {
     }
 
     const cleanNomeCliente = venda.nome_cliente ? stripPlate(venda.nome_cliente) || venda.nome_cliente : 'Consumidor final';
+    const subtotalItens = finalItens.reduce((acc: number, it: any) => acc + (Number(it.vr_total) || 0), 0);
+    const vrItens = Number(venda.vr_itens > 0 ? venda.vr_itens : subtotalItens);
+    const vrAdicional = (venda.vr_adicional !== undefined && venda.vr_adicional !== null && Number(venda.vr_adicional) !== 0)
+      ? Number(venda.vr_adicional)
+      : (subtotalItens > 0 && Math.abs(totalVal - subtotalItens) >= 0.01 ? (totalVal - subtotalItens) : 0);
 
     res.json({
       ...venda,
       nome_cliente: cleanNomeCliente,
       hora_venda: String(venda.controle).slice(8, 10) + ':' + String(venda.controle).slice(10, 12),
       vr_total: totalVal,
+      vr_itens: vrItens,
+      vr_adicional: vrAdicional,
+      vr_dinheiro: Number(venda.vr_dinheiro ?? 0),
+      vr_cartao: Number(venda.vr_cartao ?? 0),
+      vr_cheque: Number(venda.vr_cheque ?? 0),
+      vr_carne: Number(venda.vr_carne ?? 0),
+      vr_ticket: Number(venda.vr_ticket ?? 0),
       vr_pix: Number(venda.vr_pix ?? 0),
       vr_nota: Number(venda.vr_nota ?? 0),
       itens: finalItens.map((i: any) => ({
@@ -1686,10 +1714,9 @@ router.post('/vendas', async (req, res) => {
             }
           }
 
-          // Mantém todos os itens originais da OS para preservar o histórico e não zerar valores
+          // Mantém todos os itens originais da OS para preservar o histórico e salva o valor líquido faturado
           const discountAmount = Number(vr_adicional) < 0 ? Math.abs(Number(vr_adicional)) : 0;
           const finalLabor = osLabor > 0 ? osLabor : Number(osRow.labor_amount ?? 0);
-          const finalTotal = Math.max(Number(vr_total), Number(osRow.total_amount ?? 0));
 
           await pool.query(
             `UPDATE os_orders
@@ -1701,13 +1728,8 @@ router.post('/vendas', async (req, res) => {
                  discount_amount = ?,
                  updated_at = NOW()
              WHERE id = ? AND venda_controle IS NULL`,
-            [controle, finalTotal, finalLabor, discountAmount, id_os]
+            [controle, vr_total, finalLabor, discountAmount, id_os]
           );
-
-          if (finalTotal > vr_total) {
-            await pool.query('UPDATE mv_vendas SET vr_total = ? WHERE id = ?', [finalTotal, id_venda]);
-            await pool.query('UPDATE cad_lancamentos SET vr_parcela = ? WHERE id_venda = ?', [finalTotal, id_venda]);
-          }
         }
       } catch (osSyncErr) {
         console.error('Erro ao sincronizar OS com a venda:', osSyncErr);
@@ -6801,8 +6823,8 @@ router.get('/financeiro/dre', async (req: Request, res: Response) => {
       `SELECT
          COUNT(*) as total_vendas,
          COALESCE(SUM(vr_total), 0) as faturamento_bruto_vendas,
-         COALESCE(SUM(vr_desconto), 0) as total_descontos,
-         COALESCE(SUM(vr_adicional), 0) as total_acrescimos,
+         COALESCE(SUM(CASE WHEN vr_adicional < 0 THEN ABS(vr_adicional) ELSE 0 END), 0) as total_descontos,
+         COALESCE(SUM(CASE WHEN vr_adicional > 0 THEN vr_adicional ELSE 0 END), 0) as total_acrescimos,
          COALESCE(SUM(vr_cartao), 0) as total_cartao,
          COALESCE(SUM(vr_pix), 0) as total_pix,
          COALESCE(SUM(vr_dinheiro), 0) as total_dinheiro,
