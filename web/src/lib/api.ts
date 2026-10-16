@@ -38,6 +38,8 @@ export const api = {
     return request<Order[]>(`/orders${q}`)
   },
   getOrder: (id: string) => request<Order>(`/orders/${id}`),
+  deleteOrder: (id: string) =>
+    request<{ success: boolean; message: string }>(`/orders/${id}`, { method: 'DELETE' }),
   lookupPlate: (plate: string) =>
     request<{
       found: boolean
@@ -327,6 +329,9 @@ export const erpApi = {
 
   carregarOsPdv: (id: string) =>
     adminRequest<ImportarOsPdvResponse>(`/erp/pdv/os/${id}`),
+
+  excluirOsPdv: (id: string) =>
+    adminRequest<{ success: boolean; message: string }>(`/erp/pdv/os/${id}`, { method: 'DELETE' }),
 
   contas: (params: {
     status?: string;

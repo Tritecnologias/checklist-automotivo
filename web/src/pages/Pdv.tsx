@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { SlidersHorizontal, Lock, Wallet, ArrowRight, Eye, EyeOff } from 'lucide-react'
+import { SlidersHorizontal, Lock, Wallet, ArrowRight, Eye, EyeOff, Trash2, AlertTriangle } from 'lucide-react'
 import { api, erpApi } from '../lib/api'
 import type { ProdutoPdv, ClientePdv, OsEncerradaPdv, OrderAdminUser } from '../types'
 import { useAuth } from '../contexts/AuthContext'
@@ -143,6 +143,14 @@ export default function Pdv() {
   const [osImportada, setOsImportada]               = useState<{ id: string; plate: string; model: string } | null>(null)
   const [importandoOsId, setImportandoOsId]         = useState<string | null>(null)
   const [osFeedback, setOsFeedback]                 = useState<string | null>(null)
+  const [osParaExcluir, setOsParaExcluir]           = useState<{
+    id: string
+    plate: string
+    model: string
+    totalAmount?: number
+    vendaControle?: string | null
+  } | null>(null)
+  const [excluindoOs, setExcluindoOs]               = useState(false)
 
   const { data: statusCaixa, isLoading: carregandoCaixa } = useQuery({
     queryKey: ['caixa-status', tid],
@@ -224,6 +232,34 @@ export default function Pdv() {
       alert(err.message || 'Erro ao importar OS para o PDV')
     } finally {
       setImportandoOsId(null)
+    }
+  }
+
+  const handleConfirmarExclusaoOs = async () => {
+    if (!osParaExcluir) return
+    setExcluindoOs(true)
+    try {
+      await erpApi.excluirOsPdv(osParaExcluir.id)
+
+      // Se a OS excluída for a que está atualmente importada no carrinho do PDV, limpa o carrinho e desvincula
+      if (osImportada?.id === osParaExcluir.id) {
+        setOsImportada(null)
+        setCart([])
+        setCliente(null)
+      }
+
+      qc.invalidateQueries({ queryKey: ['pdv-os-encerradas'] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['erp-clientes'] })
+      refetchOs()
+
+      setOsFeedback(`Ordem de Serviço ${osParaExcluir.plate} (${osParaExcluir.model}) excluída com sucesso!`)
+      setTimeout(() => setOsFeedback(null), 5000)
+      setOsParaExcluir(null)
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao excluir Ordem de Serviço no PDV.')
+    } finally {
+      setExcluindoOs(false)
     }
   }
 
@@ -654,20 +690,32 @@ export default function Pdv() {
 
           {/* Aviso se itens pertencem a uma OS importada */}
           {osImportada && (
-            <div className="bg-indigo-950/50 border-b border-indigo-800/60 px-4 py-2.5 flex items-center justify-between">
+            <div className="bg-indigo-950/50 border-b border-indigo-800/60 px-4 py-2.5 flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-base">🚗</span>
                 <span className="text-xs text-indigo-200">
                   Itens importados da OS <strong className="text-white font-mono font-bold">{osImportada.plate}</strong> ({osImportada.model})
                 </span>
               </div>
-              <button
-                onClick={() => setOsImportada(null)}
-                className="text-[11px] text-indigo-400 hover:text-indigo-200 underline"
-                title="Desvincular da OS (mantém os itens no carrinho)"
-              >
-                Desvincular OS
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setOsImportada(null)}
+                  className="text-[11px] text-indigo-400 hover:text-indigo-200 underline"
+                  title="Desvincular da OS (mantém os itens no carrinho)"
+                >
+                  Desvincular OS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOsParaExcluir({ id: osImportada.id, plate: osImportada.plate, model: osImportada.model, totalAmount: total })}
+                  className="text-[11px] text-red-400 hover:text-red-200 font-semibold px-2.5 py-1 rounded-lg bg-red-950/60 hover:bg-red-900/80 border border-red-800/70 flex items-center gap-1 transition-colors shadow-sm"
+                  title="Excluir esta Ordem de Serviço permanentemente"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Excluir OS</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -1162,34 +1210,57 @@ export default function Pdv() {
                           )}
                         </div>
 
-                        {jaFaturada ? (
-                          <button
-                            type="button"
-                            disabled
-                            className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-500 border border-slate-700/60 cursor-not-allowed flex items-center gap-1.5 shrink-0"
-                            title={`Esta OS já foi finalizada na Venda #${os.vendaControle} e não pode ser finalizada novamente.`}
-                          >
-                            <span>🔒 Já Finalizada</span>
-                          </button>
-                        ) : os.totalAmount <= 0 ? (
-                          <button
-                            type="button"
-                            disabled
-                            className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-500 border border-slate-700/60 cursor-not-allowed flex items-center gap-1.5 shrink-0"
-                            title="Esta OS está zerada (R$ 0,00) e não pode ser faturada."
-                          >
-                            <span>⚠️ OS Zerada</span>
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleImportarOs(os.id)}
-                            disabled={importandoEste || !isCaixaAberto}
-                            title={!isCaixaAberto ? 'O caixa está fechado. Abra o caixa antes de importar.' : undefined}
-                            className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/50 transition-all shadow-md flex items-center gap-1.5 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <span>{importandoEste ? 'Carregando…' : 'Importar para PDV →'}</span>
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {!jaFaturada && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setOsParaExcluir({
+                                  id: os.id,
+                                  plate: os.plate,
+                                  model: os.model,
+                                  totalAmount: os.totalAmount,
+                                  vendaControle: os.vendaControle,
+                                })
+                              }}
+                              className="px-3 py-2 rounded-xl text-xs font-semibold bg-red-950/40 hover:bg-red-900/70 text-red-400 hover:text-red-200 border border-red-800/60 transition-all flex items-center gap-1.5 shadow-sm"
+                              title="Excluir permanentemente esta Ordem de Serviço"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                              <span className="hidden sm:inline">Excluir</span>
+                            </button>
+                          )}
+
+                          {jaFaturada ? (
+                            <button
+                              type="button"
+                              disabled
+                              className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-500 border border-slate-700/60 cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                              title={`Esta OS já foi finalizada na Venda #${os.vendaControle} e não pode ser finalizada novamente.`}
+                            >
+                              <span>🔒 Já Finalizada</span>
+                            </button>
+                          ) : os.totalAmount <= 0 ? (
+                            <button
+                              type="button"
+                              disabled
+                              className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-500 border border-slate-700/60 cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                              title="Esta OS está zerada (R$ 0,00) e não pode ser faturada."
+                            >
+                              <span>⚠️ OS Zerada</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleImportarOs(os.id)}
+                              disabled={importandoEste || !isCaixaAberto}
+                              title={!isCaixaAberto ? 'O caixa está fechado. Abra o caixa antes de importar.' : undefined}
+                              className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/50 transition-all shadow-md flex items-center gap-1.5 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <span>{importandoEste ? 'Carregando…' : 'Importar para PDV →'}</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )
@@ -1203,6 +1274,78 @@ export default function Pdv() {
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm"
               >
                 Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: CONFIRMAÇÃO DE EXCLUSÃO DE OS NO PDV ── */}
+      {osParaExcluir && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4 animate-fade-in backdrop-blur-sm">
+          <div className="bg-slate-900 border border-red-800/80 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 rounded-xl bg-red-950/60 border border-red-800/80">
+                <AlertTriangle className="w-6 h-6 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Excluir Ordem de Serviço</h3>
+                <p className="text-xs text-red-400/90">Ação irreversível no PDV</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-300">
+              Tem certeza que deseja excluir permanentemente a Ordem de Serviço do veículo{' '}
+              <strong className="text-white font-mono font-bold bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">
+                {osParaExcluir.plate}
+              </strong>{' '}
+              ({osParaExcluir.model})?
+            </p>
+
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs space-y-1.5">
+              <div className="flex justify-between text-slate-400">
+                <span>Código da OS:</span>
+                <span className="font-mono text-slate-200">#{osParaExcluir.id.split('-')[0].toUpperCase()}</span>
+              </div>
+              {osParaExcluir.totalAmount !== undefined && osParaExcluir.totalAmount > 0 && (
+                <div className="flex justify-between text-slate-400">
+                  <span>Valor da OS:</span>
+                  <span className="font-mono text-emerald-400 font-semibold">{R(osParaExcluir.totalAmount)}</span>
+                </div>
+              )}
+              {osImportada?.id === osParaExcluir.id && (
+                <p className="text-amber-400 pt-1 border-t border-slate-800/80 text-[11px]">
+                  ⚠️ Esta OS está importada no carrinho atual. Ao confirmar, os itens serão removidos do PDV.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={excluindoOs}
+                onClick={() => setOsParaExcluir(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={excluindoOs}
+                onClick={handleConfirmarExclusaoOs}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-red-950/50 flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {excluindoOs ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Excluindo…</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Confirmar Exclusão</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

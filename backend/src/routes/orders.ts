@@ -2148,4 +2148,54 @@ router.patch('/:id/client', async (req: Request, res: Response) => {
   }
 });
 
+router.delete('/:id', async (req: Request, res: Response) => {
+  const user = req.user as JwtPayload;
+  const osId = String(req.params.id);
+  const conn = await pool.getConnection();
+  try {
+    const { clause: tenantClause, params: tenantParams } = tenantWhereClause(user, req, false, 'tenant_id');
+    const whereStr = tenantClause ? ` WHERE id = ? AND ${tenantClause.replace(/^\s*WHERE\s*/i, '')}` : ' WHERE id = ?';
+    const [[order]] = await pool.query<any>(
+      `SELECT id, plate, model, venda_controle, tenant_id FROM os_orders${whereStr}`,
+      [osId, ...tenantParams]
+    );
+
+    if (!order) {
+      res.status(404).json({ message: 'Ordem de serviço não encontrada.' });
+      return;
+    }
+
+    if (order.venda_controle) {
+      res.status(422).json({
+        message: `Não é possível excluir a Ordem de Serviço ${order.plate} pois ela já foi finalizada no caixa na Venda #${order.venda_controle}. Para estorná-la, cancele a venda correspondente no Caixa.`
+      });
+      return;
+    }
+
+    await conn.beginTransaction();
+
+    await conn.query('DELETE FROM os_item_executantes WHERE order_id = ?', [osId]).catch(() => {});
+    await conn.query(
+      'DELETE FROM os_item_executantes WHERE item_id IN (SELECT id FROM os_order_items WHERE order_id = ?)',
+      [osId]
+    ).catch(() => {});
+
+    await conn.query('DELETE FROM os_order_items WHERE order_id = ?', [osId]);
+    await conn.query('DELETE FROM os_orders WHERE id = ?', [osId]);
+
+    await conn.commit();
+
+    res.json({
+      success: true,
+      message: `Ordem de Serviço ${order.plate} (${order.model}) excluída com sucesso.`
+    });
+  } catch (err: any) {
+    await conn.rollback();
+    console.error('DELETE /orders/:id error:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao excluir ordem de serviço' });
+  } finally {
+    conn.release();
+  }
+});
+
 export default router;
