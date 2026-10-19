@@ -134,7 +134,7 @@ export default function OficinaProdutividade() {
     comissao_peca_pct: 0,
     ativo: true,
     is_auxiliar: false,
-    todas_lojas: true,
+    todas_lojas: false,
     tenant_ids: [],
     user_id: '',
   })
@@ -218,6 +218,7 @@ export default function OficinaProdutividade() {
       if (!mecanicoForm.nome.trim()) throw new Error('Nome do mecânico / técnico é obrigatório')
       const payload = {
         ...mecanicoForm,
+        tenant_id: mecanicoForm.tenant_ids.length > 0 ? mecanicoForm.tenant_ids[0] : (tid || undefined),
         user_id: mecanicoForm.user_id ? Number(mecanicoForm.user_id) : null,
       }
       if (editingMecanico) {
@@ -1437,8 +1438,8 @@ export default function OficinaProdutividade() {
                   comissao_peca_pct: 0,
                   ativo: true,
                   is_auxiliar: false,
-                  todas_lojas: true,
-                  tenant_ids: tenants?.map((t) => t.id) ?? [],
+                  todas_lojas: false,
+                  tenant_ids: tid ? [tid] : (tenants?.[0]?.id ? [tenants[0].id] : []),
                   user_id: '',
                 })
                 setMecanicoFormError('')
@@ -1590,8 +1591,8 @@ export default function OficinaProdutividade() {
                           comissao_peca_pct: Number(m.comissao_peca_pct || 0),
                           ativo: m.ativo,
                           is_auxiliar: Boolean(m.is_auxiliar),
-                          todas_lojas: m.todas_lojas !== false,
-                          tenant_ids: m.tenant_ids && m.tenant_ids.length > 0 ? m.tenant_ids : (m.tenant_id ? [m.tenant_id] : (tenants?.map((t) => t.id) ?? [])),
+                          todas_lojas: Boolean(m.todas_lojas),
+                          tenant_ids: m.tenant_ids && m.tenant_ids.length > 0 ? m.tenant_ids : (m.tenant_id ? [m.tenant_id] : (tid ? [tid] : [])),
                           user_id: m.user_id || '',
                         })
                         setMecanicoFormError('')

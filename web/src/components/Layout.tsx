@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LayoutDashboard, ClipboardList, FileText, Store, Shield, LogOut, Wrench, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, ClipboardList, FileText, Store, Shield, LogOut, Wrench, ChevronDown, Check, type LucideIcon } from 'lucide-react'
 
 type NavItem = {
   to: string
@@ -48,7 +49,8 @@ const nav: NavItem[] = [
 
 export default function Layout() {
   const navigate = useNavigate()
-  const { user, currentTenant, logout, hasPermission, isOwner } = useAuth()
+  const { user, currentTenant, switchTenant, tenants, logout, hasPermission, isOwner } = useAuth()
+  const [tenantOpen, setTenantOpen] = useState(false)
 
   function handleLogout() {
     logout()
@@ -90,25 +92,57 @@ export default function Layout() {
             </nav>
           </div>
 
-          {/* User info & Logout */}
-          <div className="flex items-center gap-4">
-            {user && (
-              <div className="hidden sm:flex flex-col text-right">
-                <span className="text-xs font-semibold text-white leading-tight">{user.nome}</span>
-                {currentTenant && (
-                  <span className="text-[10px] text-slate-400 leading-tight">{currentTenant.nome}</span>
+            {/* Store switcher (quando multi-loja) */}
+            {tenants && tenants.length > 1 && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setTenantOpen(o => !o)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-white transition-colors"
+                >
+                  <Store className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="max-w-[140px] truncate">{currentTenant?.nome ?? 'Selecione a Loja'}</span>
+                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${tenantOpen ? 'rotate-180 text-blue-400' : ''}`} />
+                </button>
+                {tenantOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-700/50">
+                    {tenants.map(t => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => { switchTenant(t); setTenantOpen(false) }}
+                        className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-slate-700/80 transition-colors flex items-center justify-between ${
+                          t.id === currentTenant?.id ? 'text-blue-400 bg-blue-600/10 font-semibold' : 'text-slate-200'
+                        }`}
+                      >
+                        <span className="truncate">{t.nome}</span>
+                        {t.id === currentTenant?.id && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             )}
-            <button
-              onClick={handleLogout}
-              className="text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
-              title="Sair do sistema"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Sair</span>
-            </button>
-          </div>
+
+            {/* User info & Logout */}
+            <div className="flex items-center gap-4">
+              {user && (
+                <div className="hidden sm:flex flex-col text-right">
+                  <span className="text-xs font-semibold text-white leading-tight">{user.nome}</span>
+                  {(!tenants || tenants.length <= 1) && currentTenant && (
+                    <span className="text-[10px] text-slate-400 leading-tight">{currentTenant.nome}</span>
+                  )}
+                </div>
+              )}
+              <button
+                onClick={handleLogout}
+                className="text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                title="Sair do sistema"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Sair</span>
+              </button>
+            </div>
         </div>
       </header>
 

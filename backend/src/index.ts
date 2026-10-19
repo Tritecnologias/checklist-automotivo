@@ -898,31 +898,130 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
-  // Vincula mecânicos que possuem login ao tenant_id do usuário, caso tenant_id do mecânico seja nulo
-  await pool.query(`
-    UPDATE cad_mecanicos m
-    JOIN users u ON u.id = m.user_id
-    SET m.tenant_id = u.tenant_id
-    WHERE m.tenant_id IS NULL AND u.tenant_id IS NOT NULL
-  `).catch(() => {});
+  // ── Sincronização e Isolamento de Mecânicos / Técnicos por Loja ──────────────
+  try {
+    // 1. Sincroniza usuários do sistema com perfil 'mecanico' para a tabela cad_mecanicos
+    const [mecanicoUsers] = await pool.query<any>(`
+      SELECT u.id, u.nome, u.tenant_id, u.ativo,
+             (SELECT GROUP_CONCAT(ut.tenant_id) FROM user_tenants ut WHERE ut.user_id = u.id) as tenant_ids_str
+      FROM users u
+      WHERE u.role = 'mecanico'
+    `);
 
-  // Remove vínculos cruzados espúrios de lojas onde o mecânico não pertence
-  await pool.query(`
-    DELETE mt FROM mecanico_tenants mt
-    JOIN cad_mecanicos m ON m.id = mt.mecanico_id
-    WHERE m.tenant_id IS NOT NULL AND m.tenant_id > 0 AND mt.tenant_id <> m.tenant_id
-  `).catch(() => {});
+    for (const u of mecanicoUsers) {
+      const [[existingMec]] = await pool.query<any>(
+        'SELECT id, tenant_id FROM cad_mecanicos WHERE user_id = ? OR LOWER(TRIM(nome)) = LOWER(TRIM(?)) LIMIT 1',
+        [u.id, u.nome]
+      );
 
-  // Garante que cada mecânico com loja fixa fique restrito à sua respectiva loja (todas_lojas = 0)
-  await pool.query(`
-    UPDATE cad_mecanicos SET todas_lojas = 0 WHERE tenant_id IS NOT NULL AND tenant_id > 0
-  `).catch(() => {});
+      let mecId: number;
+      if (existingMec) {
+        mecId = existingMec.id;
+        await pool.query(
+          'UPDATE cad_mecanicos SET user_id = ?, tenant_id = COALESCE(?, tenant_id), ativo = ?, todas_lojas = 0, updated_at = NOW() WHERE id = ?',
+          [u.id, u.tenant_id, u.ativo ? 1 : 0, mecId]
+        );
+      } else {
+        const [ins] = await pool.query<any>(
+          `INSERT INTO cad_mecanicos (tenant_id, user_id, nome, apelido, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, todas_lojas)
+           VALUES (?, ?, ?, NULL, 0, 0, ?, 0, 0)`,
+          [u.tenant_id, u.id, String(u.nome).trim(), u.ativo ? 1 : 0]
+        );
+        mecId = ins.insertId;
+        console.log(`[migration] Mecânico sincronizado de users: "${u.nome}" (ID ${mecId}, Loja ${u.tenant_id})`);
+      }
 
-  // Assegura o vínculo do mecânico com a sua loja principal
-  await pool.query(`
-    INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
-    SELECT id, tenant_id FROM cad_mecanicos WHERE tenant_id IS NOT NULL AND tenant_id > 0
-  `).catch(() => {});
+      // Sincronizar mecanico_tenants para este mecânico
+      const userTenants = [
+        ...(u.tenant_id ? [Number(u.tenant_id)] : []),
+        ...(u.tenant_ids_str ? String(u.tenant_ids_str).split(',').map(Number) : [])
+      ].filter(Boolean);
+
+      if (userTenants.length > 0) {
+        await pool.query('DELETE FROM mecanico_tenants WHERE mecanico_id = ?', [mecId]).catch(() => {});
+        const rows = userTenants.map(tid => [mecId, tid]);
+        await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES ?', [rows]).catch(() => {});
+      }
+    }
+
+    // 2. Vincula mecânicos que possuem nome idêntico a usuários no sistema
+    await pool.query(`
+      UPDATE cad_mecanicos m
+      JOIN users u ON LOWER(TRIM(u.nome)) = LOWER(TRIM(m.nome))
+      SET m.user_id = u.id,
+          m.tenant_id = COALESCE(u.tenant_id, m.tenant_id)
+      WHERE m.user_id IS NULL
+    `).catch(() => {});
+
+    // 3. Atualiza tenant_id em cad_mecanicos para bater com o tenant_id do usuário vinculado
+    await pool.query(`
+      UPDATE cad_mecanicos m
+      JOIN users u ON u.id = m.user_id
+      SET m.tenant_id = u.tenant_id
+      WHERE u.tenant_id IS NOT NULL AND u.tenant_id > 0 AND (m.tenant_id <> u.tenant_id OR m.tenant_id IS NULL)
+    `).catch(() => {});
+
+    // 4. Reconhecimento automático de loja por nome de mecânico padrão da rede (ex: "VENDAS (SÃO PEDRO)", "VENDAS (MELO VIANA)", "VENDAS (VENEZA)")
+    const [allTenants] = await pool.query<any>('SELECT id, nome, slug FROM tenants');
+    for (const t of allTenants) {
+      const tName = (t.nome || '').toLowerCase();
+      const tSlug = (t.slug || '').toLowerCase();
+      if (tName.includes('são pedro') || tName.includes('sao pedro') || tSlug.includes('sao-pedro')) {
+        await pool.query(
+          "UPDATE cad_mecanicos SET tenant_id = ?, todas_lojas = 0 WHERE nome LIKE '%São Pedro%' OR nome LIKE '%Sao Pedro%'",
+          [t.id]
+        ).catch(() => {});
+      } else if (tName.includes('melo viana') || tSlug.includes('melo-viana')) {
+        await pool.query(
+          "UPDATE cad_mecanicos SET tenant_id = ?, todas_lojas = 0 WHERE nome LIKE '%Melo Viana%'",
+          [t.id]
+        ).catch(() => {});
+      } else if (tName.includes('veneza') || tSlug.includes('veneza')) {
+        await pool.query(
+          "UPDATE cad_mecanicos SET tenant_id = ?, todas_lojas = 0 WHERE nome LIKE '%Veneza%'",
+          [t.id]
+        ).catch(() => {});
+      }
+    }
+
+    // 5. Se o mecânico foi configurado com uma única loja específica em mecanico_tenants, ajusta tenant_id principal
+    await pool.query(`
+      UPDATE cad_mecanicos m
+      SET m.tenant_id = (SELECT mt.tenant_id FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id LIMIT 1)
+      WHERE (SELECT COUNT(*) FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id) = 1
+        AND m.tenant_id <> (SELECT mt.tenant_id FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id LIMIT 1)
+    `).catch(() => {});
+
+    // 6. Remove vínculos cruzados espúrios de lojas onde o mecânico não atua (todas_lojas = 0)
+    await pool.query(`
+      DELETE mt FROM mecanico_tenants mt
+      JOIN cad_mecanicos m ON m.id = mt.mecanico_id
+      WHERE m.todas_lojas = 0
+        AND m.tenant_id IS NOT NULL 
+        AND m.tenant_id > 0 
+        AND mt.tenant_id <> m.tenant_id
+        AND NOT EXISTS (
+          SELECT 1 FROM users u 
+          JOIN user_tenants ut ON ut.user_id = u.id 
+          WHERE u.id = m.user_id AND ut.tenant_id = mt.tenant_id
+        )
+    `).catch(() => {});
+
+    // 7. Garante que cada mecânico com loja fixa fique com todas_lojas = 0
+    await pool.query(`
+      UPDATE cad_mecanicos SET todas_lojas = 0 WHERE tenant_id IS NOT NULL AND tenant_id > 0
+    `).catch(() => {});
+
+    // 8. Assegura o vínculo do mecânico com a sua loja principal em mecanico_tenants
+    await pool.query(`
+      INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
+      SELECT id, tenant_id FROM cad_mecanicos WHERE tenant_id IS NOT NULL AND tenant_id > 0
+    `).catch(() => {});
+
+    console.log('[migration] Mecânicos sincronizados e isolados por loja com sucesso');
+  } catch (mecSyncErr) {
+    console.error('[migration] Erro ao sincronizar/isolar mecânicos:', mecSyncErr);
+  }
 
 
   // Índices para otimização extrema de relatórios, Curva ABC, DRE e vendas

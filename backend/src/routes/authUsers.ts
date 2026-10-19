@@ -68,12 +68,22 @@ router.post('/login', async (req, res) => {
        LIMIT 1`,
       [user.id, user.nome]
     );
-    const mecVinculado = mecRows[0] || null;
+    let mecVinculado = mecRows[0] || null;
+    if (!mecVinculado && user.role === 'mecanico') {
+      const [insRes] = await pool.query<any>(
+        `INSERT INTO cad_mecanicos (tenant_id, user_id, nome, apelido, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, todas_lojas)
+         VALUES (?, ?, ?, NULL, 0, 0, 1, 0, 0)`,
+        [user.tenant_id, user.id, user.nome]
+      );
+      mecVinculado = { id: insRes.insertId, nome: user.nome, apelido: null, user_id: user.id };
+      if (user.tenant_id) {
+        await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES (?, ?)', [insRes.insertId, user.tenant_id]).catch(() => {});
+      }
+    } else if (mecVinculado && !mecVinculado.user_id) {
+      await pool.query('UPDATE cad_mecanicos SET user_id = ?, tenant_id = COALESCE(?, tenant_id) WHERE id = ?', [user.id, user.tenant_id, mecVinculado.id]).catch(() => {});
+    }
     const mecanicoId = mecVinculado ? Number(mecVinculado.id) : null;
     const mecanicoNome = mecVinculado ? (mecVinculado.apelido || mecVinculado.nome) : null;
-    if (mecVinculado && !mecVinculado.user_id) {
-      await pool.query('UPDATE cad_mecanicos SET user_id = ? WHERE id = ?', [user.id, mecVinculado.id]).catch(() => {});
-    }
 
     const permissions = await getUserPermissions(user.id, user.role);
 
@@ -170,12 +180,22 @@ router.get('/me', requireAuth, async (req, res) => {
        LIMIT 1`,
       [user.id, user.nome]
     );
-    const mecVinculado = mecRows[0] || null;
+    let mecVinculado = mecRows[0] || null;
+    if (!mecVinculado && user.role === 'mecanico') {
+      const [insRes] = await pool.query<any>(
+        `INSERT INTO cad_mecanicos (tenant_id, user_id, nome, apelido, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, todas_lojas)
+         VALUES (?, ?, ?, NULL, 0, 0, 1, 0, 0)`,
+        [user.tenant_id, user.id, user.nome]
+      );
+      mecVinculado = { id: insRes.insertId, nome: user.nome, apelido: null, user_id: user.id };
+      if (user.tenant_id) {
+        await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES (?, ?)', [insRes.insertId, user.tenant_id]).catch(() => {});
+      }
+    } else if (mecVinculado && !mecVinculado.user_id) {
+      await pool.query('UPDATE cad_mecanicos SET user_id = ?, tenant_id = COALESCE(?, tenant_id) WHERE id = ?', [user.id, user.tenant_id, mecVinculado.id]).catch(() => {});
+    }
     const mecanicoId = mecVinculado ? Number(mecVinculado.id) : null;
     const mecanicoNome = mecVinculado ? (mecVinculado.apelido || mecVinculado.nome) : null;
-    if (mecVinculado && !mecVinculado.user_id) {
-      await pool.query('UPDATE cad_mecanicos SET user_id = ? WHERE id = ?', [user.id, mecVinculado.id]).catch(() => {});
-    }
 
     const [tenants] = await pool.query<any>(tenantsQuery, tenantsParams);
     const permissions = await getUserPermissions(user.id, user.role);
@@ -245,6 +265,22 @@ router.post('/users', requireAuth, requireRole('owner', 'manager'), async (req, 
     if (Array.isArray(tenant_ids) && tenant_ids.length > 0) {
       const vals = tenant_ids.map(tid => [userId, tid]);
       await pool.query('INSERT IGNORE INTO user_tenants (user_id, tenant_id) VALUES ?', [vals]);
+    }
+
+    // Se o usuário foi criado com perfil mecânico, cadastra automaticamente na oficina
+    if (role === 'mecanico') {
+      const mecTenant = tenant_id ?? (Array.isArray(tenant_ids) && tenant_ids.length > 0 ? tenant_ids[0] : null);
+      const [mecRes] = await pool.query<any>(
+        `INSERT INTO cad_mecanicos (tenant_id, user_id, nome, apelido, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, todas_lojas)
+         VALUES (?, ?, ?, NULL, 0, 0, 1, 0, 0)`,
+        [mecTenant, userId, String(nome).trim()]
+      );
+      const mecId = mecRes.insertId;
+      const tidsToLink = Array.isArray(tenant_ids) && tenant_ids.length > 0 ? tenant_ids : (mecTenant ? [mecTenant] : []);
+      if (tidsToLink.length > 0) {
+        const mtRows = tidsToLink.map(tid => [mecId, tid]);
+        await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES ?', [mtRows]).catch(() => {});
+      }
     }
 
     res.status(201).json({ id: userId, nome, email, role });
@@ -367,6 +403,47 @@ router.patch('/users/:id', requireAuth, requireRole('owner'), async (req, res) =
         const rows = tenant_ids.map(tid => [Number(req.params.id), tid]);
         await pool.query('INSERT IGNORE INTO user_tenants (user_id, tenant_id) VALUES ?', [rows]);
       }
+    }
+
+    // Sincronizar cad_mecanicos se o usuário é ou tornou-se mecânico
+    const targetUserId = Number(req.params.id);
+    const [[currentUserRow]] = await pool.query<any>('SELECT * FROM users WHERE id = ?', [targetUserId]);
+    const finalRole = role !== undefined ? role : currentUserRow?.role;
+    const finalNome = nome !== undefined ? nome : currentUserRow?.nome;
+    const finalAtivo = ativo !== undefined ? (ativo ? 1 : 0) : currentUserRow?.ativo;
+    const finalTenant = tenant_id !== undefined ? tenant_id : (Array.isArray(tenant_ids) && tenant_ids.length > 0 ? tenant_ids[0] : currentUserRow?.tenant_id);
+
+    if (finalRole === 'mecanico') {
+      const [[mecRow]] = await pool.query<any>('SELECT id FROM cad_mecanicos WHERE user_id = ? LIMIT 1', [targetUserId]);
+      if (mecRow) {
+        await pool.query(
+          `UPDATE cad_mecanicos 
+           SET nome = ?, tenant_id = ?, ativo = ?, todas_lojas = 0, updated_at = NOW() 
+           WHERE id = ?`,
+          [String(finalNome).trim(), finalTenant, finalAtivo, mecRow.id]
+        );
+        // Sincronizar mecanico_tenants
+        await pool.query('DELETE FROM mecanico_tenants WHERE mecanico_id = ?', [mecRow.id]);
+        const tidsToLink = Array.isArray(tenant_ids) && tenant_ids.length > 0 ? tenant_ids : (finalTenant ? [finalTenant] : []);
+        if (tidsToLink.length > 0) {
+          const mtRows = tidsToLink.map(tid => [mecRow.id, tid]);
+          await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES ?', [mtRows]).catch(() => {});
+        }
+      } else {
+        const [mecRes] = await pool.query<any>(
+          `INSERT INTO cad_mecanicos (tenant_id, user_id, nome, apelido, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, todas_lojas)
+           VALUES (?, ?, ?, NULL, 0, 0, ?, 0, 0)`,
+          [finalTenant, targetUserId, String(finalNome).trim(), finalAtivo]
+        );
+        const newMecId = mecRes.insertId;
+        const tidsToLink = Array.isArray(tenant_ids) && tenant_ids.length > 0 ? tenant_ids : (finalTenant ? [finalTenant] : []);
+        if (tidsToLink.length > 0) {
+          const mtRows = tidsToLink.map(tid => [newMecId, tid]);
+          await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES ?', [mtRows]).catch(() => {});
+        }
+      }
+    } else if (currentUserRow && currentUserRow.role !== 'mecanico') {
+      await pool.query('UPDATE cad_mecanicos SET ativo = 0 WHERE user_id = ?', [targetUserId]).catch(() => {});
     }
 
     res.json({ ok: true });

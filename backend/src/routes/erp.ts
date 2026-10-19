@@ -5732,16 +5732,32 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
     if (targetTid && targetTid > 0) {
       if (apenasDoTenant === 'true') {
         // Filtro estrito: apenas vinculado à unidade
-        conditions.push(`(m.tenant_id = ? OR EXISTS (SELECT 1 FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id AND mt.tenant_id = ?))`);
-        queryParams.push(targetTid, targetTid);
+        conditions.push(`(
+          EXISTS (SELECT 1 FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id AND mt.tenant_id = ?)
+          OR (
+            NOT EXISTS (SELECT 1 FROM mecanico_tenants mt_all WHERE mt_all.mecanico_id = m.id)
+            AND COALESCE(u.tenant_id, m.tenant_id) = ?
+          )
+          OR (
+            m.user_id IS NOT NULL 
+            AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = m.user_id AND ut.tenant_id = ?)
+          )
+        )`);
+        queryParams.push(targetTid, targetTid, targetTid);
       } else {
         // Multi-loja padrão da rede 4 Rodas:
-        // Mecânico que atende Todas as Lojas (todas_lojas = 1), ou é da unidade, ou tem vínculo via mecanico_tenants ou login user_tenants
+        // Mecânico que atende Todas as Lojas (todas_lojas = 1), ou é da unidade via mecanico_tenants / tenant_id / user_tenants
         conditions.push(`(
           m.todas_lojas = 1
-          OR m.tenant_id = ?
           OR EXISTS (SELECT 1 FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id AND mt.tenant_id = ?)
-          OR (m.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = m.user_id AND ut.tenant_id = ?))
+          OR (
+            NOT EXISTS (SELECT 1 FROM mecanico_tenants mt_all WHERE mt_all.mecanico_id = m.id)
+            AND COALESCE(u.tenant_id, m.tenant_id) = ?
+          )
+          OR (
+            m.user_id IS NOT NULL 
+            AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = m.user_id AND ut.tenant_id = ?)
+          )
         )`);
         queryParams.push(targetTid, targetTid, targetTid);
       }
@@ -5841,12 +5857,14 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
       return;
     }
 
-    const tId = tenant_id && Number(tenant_id) > 0 ? Number(tenant_id) : getErpWriteTenantId(req);
+    const tId = tenant_id && Number(tenant_id) > 0
+      ? Number(tenant_id)
+      : (Array.isArray(tenant_ids) && tenant_ids.length > 0 ? Number(tenant_ids[0]) : getErpWriteTenantId(req));
     const servPct = Math.max(0, parseFloat(String(comissao_servico_pct ?? 0)) || 0);
     const pecaPct = Math.max(0, parseFloat(String(comissao_peca_pct ?? 0)) || 0);
     const linkedUserId = user_id && Number(user_id) > 0 ? Number(user_id) : null;
     const isAux = is_auxiliar ? 1 : 0;
-    const todasLojasVal = todas_lojas === false || todas_lojas === 0 ? 0 : 1;
+    const todasLojasVal = todas_lojas === true || todas_lojas === 1 ? 1 : 0;
 
     const [result] = await pool.query<any>(
       `INSERT INTO cad_mecanicos
@@ -5879,6 +5897,8 @@ router.post('/mecanicos', requireManagerUp, async (req: Request, res: Response) 
         INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
         SELECT ?, id FROM tenants WHERE ativo = 1
       `, [insertedId]).catch(() => {});
+    } else if (tId && tId > 0) {
+      await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES (?, ?)', [insertedId, tId]).catch(() => {});
     }
 
     const [[created]] = await pool.query<any>(
@@ -5934,8 +5954,8 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
     const pecaPct = comissao_peca_pct !== undefined ? Math.max(0, parseFloat(String(comissao_peca_pct)) || 0) : Number(existing.comissao_peca_pct);
     const isAtivo = ativo !== undefined ? (Boolean(ativo) ? 1 : 0) : existing.ativo;
     const isAux = is_auxiliar !== undefined ? (Boolean(is_auxiliar) ? 1 : 0) : (existing.is_auxiliar ?? 0);
-    const todasLojasVal = todas_lojas !== undefined ? (todas_lojas ? 1 : 0) : (existing.todas_lojas ?? 1);
-    const finalTenant = tenant_id ? Number(tenant_id) : existing.tenant_id;
+    const todasLojasVal = todas_lojas !== undefined ? (todas_lojas ? 1 : 0) : (existing.todas_lojas ?? 0);
+    const finalTenant = tenant_id ? Number(tenant_id) : (Array.isArray(tenant_ids) && tenant_ids.length > 0 ? Number(tenant_ids[0]) : existing.tenant_id);
     const linkedUserId = user_id !== undefined ? (user_id && Number(user_id) > 0 ? Number(user_id) : null) : existing.user_id;
 
     await pool.query(
@@ -5972,12 +5992,16 @@ router.put('/mecanicos/:id', requireManagerUp, async (req: Request, res: Respons
           INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
           SELECT ?, id FROM tenants WHERE ativo = 1
         `, [id]).catch(() => {});
+      } else if (finalTenant && finalTenant > 0) {
+        await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES (?, ?)', [id, finalTenant]).catch(() => {});
       }
     } else if (todasLojasVal === 1) {
       await pool.query(`
         INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id)
         SELECT ?, id FROM tenants WHERE ativo = 1
       `, [id]).catch(() => {});
+    } else if (finalTenant && finalTenant > 0) {
+      await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES (?, ?)', [id, finalTenant]).catch(() => {});
     }
 
     // Se o nome foi alterado, atualiza também a desnormalização de nome nas OSs e Itens
@@ -6150,10 +6174,13 @@ router.get('/oficina/produtividade', async (req: Request, res: Response) => {
 
     if (targetProdTid && targetProdTid > 0) {
       mecTenantClause = `WHERE (
-        todas_lojas = 1
-        OR tenant_id = ?
+        cad_mecanicos.todas_lojas = 1
         OR EXISTS (SELECT 1 FROM mecanico_tenants mt WHERE mt.mecanico_id = cad_mecanicos.id AND mt.tenant_id = ?)
-        OR (user_id IS NOT NULL AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = cad_mecanicos.user_id AND ut.tenant_id = ?))
+        OR (
+          NOT EXISTS (SELECT 1 FROM mecanico_tenants mt_all WHERE mt_all.mecanico_id = cad_mecanicos.id)
+          AND COALESCE((SELECT u.tenant_id FROM users u WHERE u.id = cad_mecanicos.user_id), cad_mecanicos.tenant_id) = ?
+        )
+        OR (cad_mecanicos.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = cad_mecanicos.user_id AND ut.tenant_id = ?))
       )`;
       mecTenantParams.push(targetProdTid, targetProdTid, targetProdTid);
     }

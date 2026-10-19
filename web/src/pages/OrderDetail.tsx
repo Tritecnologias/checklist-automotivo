@@ -224,9 +224,10 @@ export default function OrderDetail() {
   })
 
   // Lista de Mecânicos / Técnicos
+  const orderTargetTid = order?.tenantId || tid
   const { data: mecanicos = [] } = useQuery<Mecanico[]>({
-    queryKey: ['mecanicos', tid],
-    queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true, tenantId: tid }),
+    queryKey: ['mecanicos', orderTargetTid],
+    queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true, tenantId: orderTargetTid }),
   })
 
   // ── Mutações ──────────────────────────────────────────────────────────────
