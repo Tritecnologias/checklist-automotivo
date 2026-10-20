@@ -11,6 +11,7 @@ import tenantsRouter   from './routes/tenants';
 import adminRouter     from './routes/admin';
 import erpRouter       from './routes/erp';
 import { DEFAULT_ROLE_PERMISSIONS } from './lib/permissions';
+import { syncColaboradoresToMecanicos } from './lib/mecanicosSync';
 
 const app  = express();
 
@@ -900,49 +901,8 @@ async function runMigrations() {
 
   // ── Sincronização e Isolamento de Mecânicos / Técnicos por Loja ──────────────
   try {
-    // 1. Sincroniza usuários do sistema com perfil 'mecanico' para a tabela cad_mecanicos
-    const [mecanicoUsers] = await pool.query<any>(`
-      SELECT u.id, u.nome, u.tenant_id, u.ativo,
-             (SELECT GROUP_CONCAT(ut.tenant_id) FROM user_tenants ut WHERE ut.user_id = u.id) as tenant_ids_str
-      FROM users u
-      WHERE u.role = 'mecanico'
-    `);
-
-    for (const u of mecanicoUsers) {
-      const [[existingMec]] = await pool.query<any>(
-        'SELECT id, tenant_id FROM cad_mecanicos WHERE user_id = ? OR LOWER(TRIM(nome)) = LOWER(TRIM(?)) LIMIT 1',
-        [u.id, u.nome]
-      );
-
-      let mecId: number;
-      if (existingMec) {
-        mecId = existingMec.id;
-        await pool.query(
-          'UPDATE cad_mecanicos SET user_id = ?, tenant_id = COALESCE(?, tenant_id), ativo = ?, todas_lojas = 0, updated_at = NOW() WHERE id = ?',
-          [u.id, u.tenant_id, u.ativo ? 1 : 0, mecId]
-        );
-      } else {
-        const [ins] = await pool.query<any>(
-          `INSERT INTO cad_mecanicos (tenant_id, user_id, nome, apelido, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, todas_lojas)
-           VALUES (?, ?, ?, NULL, 0, 0, ?, 0, 0)`,
-          [u.tenant_id, u.id, String(u.nome).trim(), u.ativo ? 1 : 0]
-        );
-        mecId = ins.insertId;
-        console.log(`[migration] Mecânico sincronizado de users: "${u.nome}" (ID ${mecId}, Loja ${u.tenant_id})`);
-      }
-
-      // Sincronizar mecanico_tenants para este mecânico
-      const userTenants = [
-        ...(u.tenant_id ? [Number(u.tenant_id)] : []),
-        ...(u.tenant_ids_str ? String(u.tenant_ids_str).split(',').map(Number) : [])
-      ].filter(Boolean);
-
-      if (userTenants.length > 0) {
-        await pool.query('DELETE FROM mecanico_tenants WHERE mecanico_id = ?', [mecId]).catch(() => {});
-        const rows = userTenants.map(tid => [mecId, tid]);
-        await pool.query('INSERT IGNORE INTO mecanico_tenants (mecanico_id, tenant_id) VALUES ?', [rows]).catch(() => {});
-      }
-    }
+    // 1. Sincroniza colaboradores do sistema (mecanico, manager, operator) para a tabela cad_mecanicos
+    await syncColaboradoresToMecanicos(pool);
 
     // 2. Vincula mecânicos que possuem nome idêntico a usuários no sistema
     await pool.query(`
@@ -1007,10 +967,16 @@ async function runMigrations() {
         )
     `).catch(() => {});
 
-    // 7. Garante que cada mecânico com loja fixa fique com todas_lojas = 0
-    await pool.query(`
-      UPDATE cad_mecanicos SET todas_lojas = 0 WHERE tenant_id IS NOT NULL AND tenant_id > 0
-    `).catch(() => {});
+    // 7. Atualiza flag todas_lojas: se o colaborador atende todas as lojas ativas da rede, todas_lojas = 1, senão 0
+    const [[tenantTotRow]] = await pool.query<any>('SELECT COUNT(*) as totalTenantsCnt FROM tenants WHERE ativo = 1');
+    const totalTenantsCnt = Number(tenantTotRow?.totalTenantsCnt || 0);
+    if (totalTenantsCnt > 0) {
+      await pool.query(`
+        UPDATE cad_mecanicos m
+        SET m.todas_lojas = IF((SELECT COUNT(DISTINCT mt.tenant_id) FROM mecanico_tenants mt WHERE mt.mecanico_id = m.id) >= ?, 1, 0)
+        WHERE m.user_id IS NOT NULL
+      `, [totalTenantsCnt]).catch(() => {});
+    }
 
     // 8. Assegura o vínculo do mecânico com a sua loja principal em mecanico_tenants
     await pool.query(`
@@ -1018,7 +984,7 @@ async function runMigrations() {
       SELECT id, tenant_id FROM cad_mecanicos WHERE tenant_id IS NOT NULL AND tenant_id > 0
     `).catch(() => {});
 
-    console.log('[migration] Mecânicos sincronizados e isolados por loja com sucesso');
+    console.log('[migration] Mecânicos e colaboradores sincronizados por loja com sucesso');
   } catch (mecSyncErr) {
     console.error('[migration] Erro ao sincronizar/isolar mecânicos:', mecSyncErr);
   }

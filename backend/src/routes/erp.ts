@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { pool } from '../db';
 import { JWT_SECRET, type JwtPayload } from '../middleware/auth';
 import { getUserPermissions, userHasPermission } from '../lib/permissions';
+import { ensureOperationalMecanicosSync } from '../lib/mecanicosSync';
 
 // ── Tenant helpers ────────────────────────────────────────────────────────────
 
@@ -5709,6 +5710,9 @@ router.post('/estoque/movimentacao', requireManagerUp, async (req, res) => {
 // ── GET /erp/mecanicos ────────────────────────────────────────────────────────
 router.get('/mecanicos', async (req: Request, res: Response) => {
   try {
+    // Sincroniza colaboradores (gerentes, operadores, mecânicos) sob demanda
+    await ensureOperationalMecanicosSync(pool);
+
     const user = req.user as JwtPayload | undefined;
     const headerTid = Number(req.headers['x-tenant-id']);
     const queryTid = req.query.tenant_id ? Number(req.query.tenant_id) : undefined;
@@ -5822,6 +5826,7 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
 // Retorna os usuários do sistema ativos para seleção de vínculo com mecânico
 router.get('/mecanicos/usuarios-sistema', requireManagerUp, async (req: Request, res: Response) => {
   try {
+    await ensureOperationalMecanicosSync(pool);
     const [rows] = await pool.query<any>(`
       SELECT u.id, u.nome, u.email, u.role, u.ativo, m.id as mecanico_id, m.nome as mecanico_nome
       FROM users u
