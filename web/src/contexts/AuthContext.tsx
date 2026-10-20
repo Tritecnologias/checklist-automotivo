@@ -26,7 +26,7 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (token: string, user: AuthUser, tenants: Tenant[]) => void
+  login: (token: string, user: AuthUser, tenants: Tenant[], selectedTenant?: Tenant | null) => void
   logout: () => void
   switchTenant: (tenant: Tenant) => void
   refreshUser: () => Promise<void>
@@ -78,9 +78,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear()
   }, [])
 
-  const login = useCallback((token: string, user: AuthUser, tenants: Tenant[]) => {
-    // owner sem tenants específicos pode ver todos — escolhe a primeira loja disponível
-    const defaultTenant = tenants[0] ?? null
+  const login = useCallback((token: string, user: AuthUser, tenants: Tenant[], selectedTenant?: Tenant | null) => {
+    // owner sem tenants específicos pode ver todos — escolhe a primeira loja disponível ou a loja selecionada
+    const defaultTenant = selectedTenant ?? tenants[0] ?? null
     localStorage.setItem(STORAGE_TOKEN,   token)
     localStorage.setItem(STORAGE_USER,    JSON.stringify(user))
     localStorage.setItem(STORAGE_TENANTS, JSON.stringify(tenants))

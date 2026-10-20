@@ -67,8 +67,7 @@ export default function Login() {
 
   function handleSelectTenant(tenant: Tenant) {
     if (!pendingToken || !pendingUser) return
-    login(pendingToken, pendingUser, pendingTenants)
-    localStorage.setItem('erp_current_tenant', JSON.stringify(tenant))
+    login(pendingToken, pendingUser, pendingTenants, tenant)
     const hasErpAccess = pendingUser.role !== 'operator' || Boolean(pendingUser.permissions?.some((p: string) => p !== 'os_orders' && p !== 'quotes'))
     navigate(hasErpAccess ? '/erp' : '/')
   }

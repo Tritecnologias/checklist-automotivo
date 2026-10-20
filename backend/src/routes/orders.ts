@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { pool } from '../db';
 import { requireAuth, allowedTenants, type JwtPayload } from '../middleware/auth';
+import { ensureOperationalMecanicosSync } from '../lib/mecanicosSync';
 
 const router = Router();
 
@@ -177,6 +178,12 @@ function tenantWhereClause(
   if (ids.length === 0) {
     return { clause: `${prefix}1=0`, params: [] };
   }
+
+  // Se o usuário selecionou uma loja específica no frontend e tem acesso a ela:
+  if (headerTenant > 0 && ids.includes(headerTenant)) {
+    return { clause: `${prefix}${column} = ?`, params: [headerTenant] };
+  }
+
   if (ids.length === 1) {
     return { clause: `${prefix}${column} = ?`, params: [ids[0]] };
   }
@@ -362,6 +369,8 @@ router.get('/', async (req: Request, res: Response) => {
   const user = req.user!;
 
   try {
+    await ensureOperationalMecanicosSync(pool);
+
     const whereParts: string[] = [];
     const params: any[] = [];
 

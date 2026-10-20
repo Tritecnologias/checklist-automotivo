@@ -512,6 +512,7 @@ router.put('/users/:id/permissions', requireAuth, requireRole('owner'), async (r
   }
   try {
     await setUserPermissions(userId, permissions ?? [], Boolean(custom));
+    await syncColaboradoresToMecanicos(pool, userId);
     const updated = await getUserPermissionsDetail(userId);
     res.json({ ok: true, user: updated });
   } catch (err: any) {

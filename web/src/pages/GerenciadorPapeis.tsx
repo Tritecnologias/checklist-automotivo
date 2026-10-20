@@ -204,6 +204,8 @@ export default function GerenciadorPapeis() {
     onSuccess: () => {
       refetchRoles()
       qc.invalidateQueries({ queryKey: ['roles-permissions'] })
+      qc.invalidateQueries({ queryKey: ['mecanicos'] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
       refreshUser()
       setIsDirty(false)
       showToast(`Permissões do perfil "${ROLE_INFO[selectedRole]?.label || selectedRole}" salvas com sucesso!`)
@@ -220,6 +222,9 @@ export default function GerenciadorPapeis() {
       refetchUserDetail()
       qc.invalidateQueries({ queryKey: ['user-permissions', selectedUserId] })
       qc.invalidateQueries({ queryKey: ['users'] })
+      qc.invalidateQueries({ queryKey: ['mecanicos'] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['oficina-produtividade'] })
       refreshUser()
       setIsDirty(false)
       setIsCustomMode(data.user.custom_permissions)
