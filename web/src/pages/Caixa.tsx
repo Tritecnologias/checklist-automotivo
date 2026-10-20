@@ -144,7 +144,7 @@ export default function Caixa() {
   })
 
   // Histórico de sessões de caixa (filtrado por tenant, período e forma de pagamento)
-  const { data: hist, isLoading: loadingHist } = useQuery({
+  const { data: hist, isLoading: loadingHist, isError: errorHist, refetch: refetchHist } = useQuery({
     queryKey: ['caixa-hist', tid, page, dataInicio, dataFim, formaPagto],
     queryFn: () => erpApi.caixaList({
       page,
@@ -155,7 +155,7 @@ export default function Caixa() {
   })
 
   // Lista de vendas/movimentações no período e forma de pagamento
-  const { data: vendasRes, isLoading: loadingVendas } = useQuery({
+  const { data: vendasRes, isLoading: loadingVendas, isError: errorVendas, refetch: refetchVendas } = useQuery({
     queryKey: ['caixa-vendas', tid, pageVendas, dataInicio, dataFim, formaPagto, debouncedSearchVendas],
     queryFn: () => erpApi.caixaVendas({
       page: pageVendas,
@@ -750,7 +750,7 @@ export default function Caixa() {
               Mês Anterior
             </button>
             <button
-              onClick={() => { setDataPreset('todos'); setDataInicio(''); setDataFim(''); setPage(1); setPageVendas(1) }}
+              onClick={() => aplicarPreset('todos')}
               className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
                 dataPreset === 'todos' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
               }`}
@@ -1037,6 +1037,17 @@ export default function Caixa() {
 
           {loadingHist ? (
             <div className="py-12 text-center text-slate-500 text-sm">Carregando sessões…</div>
+          ) : errorHist ? (
+            <div className="py-12 text-center text-rose-400 text-sm space-y-2">
+              <p>Erro ao carregar o histórico de sessões de caixa.</p>
+              <button
+                type="button"
+                onClick={() => refetchHist()}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-white font-medium rounded-lg border border-slate-700 transition-colors shadow-sm"
+              >
+                Tentar novamente
+              </button>
+            </div>
           ) : (hist?.data ?? []).length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-sm space-y-1">
               <p>Nenhuma sessão de caixa encontrada para os filtros selecionados.</p>
@@ -1238,6 +1249,17 @@ export default function Caixa() {
 
           {loadingVendas ? (
             <div className="py-12 text-center text-slate-500 text-sm">Carregando vendas…</div>
+          ) : errorVendas ? (
+            <div className="py-12 text-center text-rose-400 text-sm space-y-2">
+              <p>Erro ao carregar as movimentações de vendas.</p>
+              <button
+                type="button"
+                onClick={() => refetchVendas()}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-white font-medium rounded-lg border border-slate-700 transition-colors shadow-sm"
+              >
+                Tentar novamente
+              </button>
+            </div>
           ) : (vendasRes?.data ?? []).length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-sm space-y-1">
               <p>Nenhuma venda encontrada para os filtros selecionados.</p>

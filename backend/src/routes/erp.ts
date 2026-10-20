@@ -211,25 +211,25 @@ router.get('/caixa', async (req, res) => {
     }
 
     if (dataInicio) {
-      whereParts.push('(c.data_abertura >= ? OR DATE(c.data_abertura) >= ?)');
-      params.push(dataInicio, dataInicio);
+      whereParts.push('(c.data_abertura >= ? OR DATE(c.data_abertura) >= ? OR (c.data_fechamento IS NOT NULL AND (c.data_fechamento >= ? OR DATE(c.data_fechamento) >= ?)))');
+      params.push(dataInicio, dataInicio, dataInicio, dataInicio);
     }
 
     if (dataFim) {
-      whereParts.push("(c.data_abertura <= ? OR c.data_abertura <= CONCAT(?, ' 23:59:59'))");
-      params.push(dataFim, dataFim);
+      whereParts.push("(c.data_abertura <= ? OR DATE(c.data_abertura) <= ? OR c.data_abertura <= CONCAT(?, ' 23:59:59') OR (c.data_fechamento IS NOT NULL AND (c.data_fechamento <= ? OR DATE(c.data_fechamento) <= ?)))");
+      params.push(dataFim, dataFim, dataFim, dataFim, dataFim);
     }
 
     if (formaPagto === 'dinheiro') {
-      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_dinheiro, 0) > 0)');
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_dinheiro, 0) > 0)');
     } else if (formaPagto === 'cartao') {
-      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_cartao, 0) > 0)');
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_cartao, 0) > 0)');
     } else if (formaPagto === 'pix') {
-      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_pix, 0) > 0)');
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_pix, 0) > 0)');
     } else if (formaPagto === 'prazo') {
-      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND (COALESCE(v.vr_nota, 0) > 0 OR COALESCE(v.vr_carne, 0) > 0))');
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND (COALESCE(v.vr_nota, 0) > 0 OR COALESCE(v.vr_carne, 0) > 0))');
     } else if (formaPagto === 'outros') {
-      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_ticket, 0) > 0)');
+      whereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_ticket, 0) > 0)');
     }
 
     const whereSql = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
@@ -268,7 +268,7 @@ router.get('/caixa', async (req, res) => {
            COALESCE(SUM(COALESCE(v.vr_ticket, 0)), 0) as vr_outros,
            COUNT(v.id) as qtd_vendas
          FROM mv_caixa c
-         LEFT JOIN mv_vendas v ON (v.tenant_id = c.tenant_id AND (v.id_caixa = c.id OR (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)))
+         LEFT JOIN mv_vendas v ON (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND (v.id_caixa IS NULL AND v.data_venda = c.data_abertura)))
          WHERE c.id IN (${placeholders})
          GROUP BY c.id`,
         sessionIds
@@ -379,8 +379,8 @@ router.get('/caixa', async (req, res) => {
       vParams.push(dataInicio, dataInicio);
     }
     if (dataFim) {
-      vWhereParts.push("(v.data_venda <= ? OR v.data_venda <= CONCAT(?, ' 23:59:59'))");
-      vParams.push(dataFim, dataFim);
+      vWhereParts.push("(v.data_venda <= ? OR DATE(v.data_venda) <= ? OR v.data_venda <= CONCAT(?, ' 23:59:59'))");
+      vParams.push(dataFim, dataFim, dataFim);
     }
     const vWhereSql = vWhereParts.length ? 'WHERE ' + vWhereParts.join(' AND ') : '';
 
@@ -406,12 +406,23 @@ router.get('/caixa', async (req, res) => {
       cParams.push(...cTenantParams);
     }
     if (dataInicio) {
-      cWhereParts.push('(c.data_abertura >= ? OR DATE(c.data_abertura) >= ?)');
-      cParams.push(dataInicio, dataInicio);
+      cWhereParts.push('(c.data_abertura >= ? OR DATE(c.data_abertura) >= ? OR (c.data_fechamento IS NOT NULL AND (c.data_fechamento >= ? OR DATE(c.data_fechamento) >= ?)))');
+      cParams.push(dataInicio, dataInicio, dataInicio, dataInicio);
     }
     if (dataFim) {
-      cWhereParts.push("(c.data_abertura <= ? OR c.data_abertura <= CONCAT(?, ' 23:59:59'))");
-      cParams.push(dataFim, dataFim);
+      cWhereParts.push("(c.data_abertura <= ? OR DATE(c.data_abertura) <= ? OR c.data_abertura <= CONCAT(?, ' 23:59:59') OR (c.data_fechamento IS NOT NULL AND (c.data_fechamento <= ? OR DATE(c.data_fechamento) <= ?)))");
+      cParams.push(dataFim, dataFim, dataFim, dataFim, dataFim);
+    }
+    if (formaPagto === 'dinheiro') {
+      cWhereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_dinheiro, 0) > 0)');
+    } else if (formaPagto === 'cartao') {
+      cWhereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_cartao, 0) > 0)');
+    } else if (formaPagto === 'pix') {
+      cWhereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_pix, 0) > 0)');
+    } else if (formaPagto === 'prazo') {
+      cWhereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND (COALESCE(v.vr_nota, 0) > 0 OR COALESCE(v.vr_carne, 0) > 0))');
+    } else if (formaPagto === 'outros') {
+      cWhereParts.push('EXISTS (SELECT 1 FROM mv_vendas v WHERE (v.id_caixa = c.id OR (v.tenant_id = c.tenant_id AND v.data_venda = c.data_abertura)) AND COALESCE(v.vr_ticket, 0) > 0)');
     }
     const cWhereSql = cWhereParts.length ? 'WHERE ' + cWhereParts.join(' AND ') : '';
 
@@ -448,15 +459,15 @@ router.get('/caixa', async (req, res) => {
       dParams.push(dataInicio, dataInicio);
     }
     if (dataFim) {
-      dWhereParts.push("(COALESCE(l.data_confirmacao, l.data_vencimento) <= ? OR COALESCE(l.data_confirmacao, l.data_vencimento) <= CONCAT(?, ' 23:59:59'))");
-      dParams.push(dataFim, dataFim);
+      dWhereParts.push("(COALESCE(l.data_confirmacao, l.data_vencimento) <= ? OR DATE(COALESCE(l.data_confirmacao, l.data_vencimento)) <= ? OR COALESCE(l.data_confirmacao, l.data_vencimento) <= CONCAT(?, ' 23:59:59'))");
+      dParams.push(dataFim, dataFim, dataFim);
     }
     const dWhereSql = 'WHERE ' + dWhereParts.join(' AND ');
 
     const [[totaisDespesasPeriodo]] = await pool.query<any>(
       `SELECT 
          COALESCE(SUM(l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)), 0) as total_despesas,
-         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 OR l.id_caixa = ? THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
+         COALESCE(SUM(CASE WHEN l.id_modo_lancamento = 1 OR l.id_caixa IS NOT NULL THEN (l.vr_parcela - COALESCE(l.vr_abatimentos, 0) + COALESCE(l.vr_acrescimo, 0)) ELSE 0 END), 0) as despesas_dinheiro,
          COUNT(l.id) as qtd_despesas
        FROM cad_lancamentos l
        LEFT JOIN cad_planejamento pl ON pl.id = l.id_planejamento
@@ -520,8 +531,8 @@ router.get('/caixa/vendas', async (req, res) => {
       params.push(dataInicio, dataInicio);
     }
     if (dataFim) {
-      whereParts.push("(v.data_venda <= ? OR v.data_venda <= CONCAT(?, ' 23:59:59'))");
-      params.push(dataFim, dataFim);
+      whereParts.push("(v.data_venda <= ? OR DATE(v.data_venda) <= ? OR v.data_venda <= CONCAT(?, ' 23:59:59'))");
+      params.push(dataFim, dataFim, dataFim);
     }
     if (search.length >= 2) {
       whereParts.push('(c.nome_cliente LIKE ? OR v.controle LIKE ?)');
