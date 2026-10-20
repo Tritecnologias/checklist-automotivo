@@ -363,6 +363,7 @@ export interface ClienteHistorico {
     clientAddress?: string | null
     tenantId?: number
     nomeLoja?: string | null
+    vendaControle?: string | null
   }[]
 }
 

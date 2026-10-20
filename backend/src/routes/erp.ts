@@ -3362,6 +3362,9 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
 
     const clientIds: number[] = rows.map((r: any) => Number(r.id));
     const clientDocs: string[] = rows.map((r: any) => String(r.cpf_cnpj || '').trim()).filter((d: string) => d.length >= 8);
+    const cleanClientDocs: string[] = rows
+      .map((r: any) => String(r.cpf_cnpj || '').replace(/\D/g, ''))
+      .filter((d: string) => d.length >= 8);
 
     // Consultas em lote ultra-rápidas para as 30 linhas retornadas
     const [lojasRows, vendasRows, osRows] = await Promise.all([
@@ -3386,12 +3389,17 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
       ).then(([r]) => r as any[]).catch(() => []),
 
       pool.query<any>(
-        `SELECT o.id, o.client_id, o.client_document, o.plate, o.model, o.total_amount, o.created_at, o.venda_controle
+        `SELECT o.id, o.client_id, o.client_name, o.client_phone, o.client_document, o.plate, o.model, o.total_amount, o.created_at, o.venda_controle
          FROM os_orders o
          WHERE o.client_id IN (?)
             ${clientDocs.length > 0 ? 'OR (o.client_document IN (?) AND o.client_document IS NOT NULL AND o.client_document != "")' : ''}
+            ${cleanClientDocs.length > 0 ? 'OR (REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(o.client_document, ""), ".", ""), "-", ""), "/", ""), " ", "") IN (?))' : ''}
          ORDER BY o.created_at DESC`,
-        clientDocs.length > 0 ? [clientIds, clientDocs] : [clientIds]
+        [
+          clientIds,
+          ...(clientDocs.length > 0 ? [clientDocs] : []),
+          ...(cleanClientDocs.length > 0 ? [cleanClientDocs] : []),
+        ]
       ).then(([r]) => r as any[]).catch(() => []),
     ]);
 
@@ -3419,13 +3427,35 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
       if (cid && clientIds.includes(cid)) {
         if (!osMap.has(cid)) osMap.set(cid, []);
         osMap.get(cid)!.push(osItem);
-      } else if (osItem.client_document) {
-        const found = rows.find((r: any) => r.cpf_cnpj && String(r.cpf_cnpj).trim() === String(osItem.client_document).trim());
-        if (found) {
-          const fid = Number(found.id);
-          if (!osMap.has(fid)) osMap.set(fid, []);
-          osMap.get(fid)!.push(osItem);
+        continue;
+      }
+
+      const cleanOsDoc = String(osItem.client_document || '').replace(/\D/g, '');
+      const cleanOsPhone = String(osItem.client_phone || '').replace(/\D/g, '');
+      const cleanOsPlate = String(osItem.plate || '').replace(/[-\s]/g, '').toUpperCase();
+
+      const found = rows.find((r: any) => {
+        if (cleanOsDoc.length >= 8) {
+          const rDoc = String(r.cpf_cnpj || '').replace(/\D/g, '');
+          if (rDoc.length >= 8 && rDoc === cleanOsDoc) return true;
         }
+        if (cleanOsPlate.length === 7) {
+          const rPlate = extractPlate(r.nome_cliente);
+          if (rPlate && rPlate.replace(/[-\s]/g, '').toUpperCase() === cleanOsPlate) return true;
+        }
+        if (cleanOsPhone.length >= 8) {
+          const rTel = String(r.celular || r.telefone || '').replace(/\D/g, '');
+          if (rTel.length >= 8 && (rTel.endsWith(cleanOsPhone.slice(-8)) || cleanOsPhone.endsWith(rTel.slice(-8)))) {
+            return true;
+          }
+        }
+        return false;
+      });
+
+      if (found) {
+        const fid = Number(found.id);
+        if (!osMap.has(fid)) osMap.set(fid, []);
+        osMap.get(fid)!.push(osItem);
       }
     }
 
@@ -3517,12 +3547,35 @@ router.get('/clientes/:id', requireManagerUp, async (req, res) => {
     let placa = extractPlate(cliente.nome_cliente);
     let modelo = cliente.inf_adicional || '';
     if (!placa) {
+      const rawDoc = String(cliente.cpf_cnpj || '').trim();
+      const cleanDoc = rawDoc.replace(/\D/g, '');
+      const cleanTel = String(cliente.telefone || cliente.celular || '').replace(/\D/g, '');
+      const cleanNome = stripPlate(cliente.nome_cliente).trim();
+
+      const whereOr: string[] = ['client_id = ?'];
+      const paramsOr: any[] = [cliente.id];
+      if (cleanDoc.length >= 8) {
+        whereOr.push(`(
+          client_document = ?
+          OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_document, ''), '.', ''), '-', ''), '/', ''), ' ', '') = ?
+        )`);
+        paramsOr.push(rawDoc, cleanDoc);
+      }
+      if (cleanTel.length >= 8) {
+        whereOr.push("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_phone, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE ?");
+        paramsOr.push(`%${cleanTel.slice(-8)}%`);
+      }
+      if (cleanNome.length >= 4) {
+        whereOr.push("UPPER(TRIM(client_name)) = UPPER(?)");
+        paramsOr.push(cleanNome);
+      }
+
       const [[lastOs]] = await pool.query<any>(
         `SELECT plate, model FROM os_orders
-         WHERE client_id = ? OR (client_document IS NOT NULL AND client_document != '' AND client_document = ?)
+         WHERE (${whereOr.join(' OR ')})
          ORDER BY created_at DESC LIMIT 1`,
-        [cliente.id, cliente.cpf_cnpj]
-      );
+        paramsOr
+      ).catch(() => [[]]);
       if (lastOs?.plate) placa = lastOs.plate;
       if (!modelo && lastOs?.model) modelo = lastOs.model;
     }
@@ -3753,8 +3806,102 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
     );
     if (!cliente) { res.status(404).json({ message: 'Cliente não encontrado' }); return; }
 
-    let placa = extractPlate(cliente.nome_cliente);
-    const cleanPlaca = placa ? placa.replace(/[-\s]/g, '') : '';
+    const rawNomeCliente = String(cliente.nome_cliente || '').trim();
+    const cleanNomeCliente = stripPlate(rawNomeCliente).trim();
+    const rawDoc = String(cliente.cpf_cnpj || '').trim();
+    const cleanDoc = rawDoc.replace(/\D/g, '');
+    const cleanTel = String(cliente.telefone || '').replace(/\D/g, '');
+    const cleanCel = String(cliente.celular || '').replace(/\D/g, '');
+
+    const matchedClientIds = new Set<number>([Number(cliente.id)]);
+    const matchedPlates = new Set<string>();
+
+    // 1. Placa no próprio cadastro do cliente
+    const pNome = extractPlate(rawNomeCliente);
+    if (pNome) matchedPlates.add(pNome.replace(/[-\s]/g, '').toUpperCase());
+
+    const pInf = extractPlate(cliente.inf_adicional);
+    if (pInf) matchedPlates.add(pInf.replace(/[-\s]/g, '').toUpperCase());
+
+    // 2. Localizar cadastros correlatos em cad_clientes
+    // (a) Pelo mesmo CPF/CNPJ
+    if (cleanDoc.length >= 8) {
+      const [siblingsByDoc] = await pool.query<any>(
+        `SELECT id, nome_cliente, inf_adicional FROM cad_clientes
+         WHERE inativo = 0 AND (
+           REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cpf_cnpj, ''), '.', ''), '-', ''), '/', ''), ' ', '') = ?
+           OR cpf_cnpj = ?
+         )`,
+        [cleanDoc, rawDoc]
+      ).catch(() => [[]]);
+      for (const s of (siblingsByDoc || []) as any[]) {
+        matchedClientIds.add(Number(s.id));
+        const sp = extractPlate(s.nome_cliente) || extractPlate(s.inf_adicional);
+        if (sp) matchedPlates.add(sp.replace(/[-\s]/g, '').toUpperCase());
+      }
+    }
+
+    // (b) Pelo telefone/celular
+    const phoneDigits = cleanCel.length >= 8 ? cleanCel : (cleanTel.length >= 8 ? cleanTel : '');
+    if (phoneDigits.length >= 8) {
+      const phoneEnd = phoneDigits.slice(-8);
+      const [siblingsByPhone] = await pool.query<any>(
+        `SELECT id, nome_cliente, inf_adicional FROM cad_clientes
+         WHERE inativo = 0 AND (
+           REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefone, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE ?
+           OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(celular, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE ?
+         )`,
+        [`%${phoneEnd}%`, `%${phoneEnd}%`]
+      ).catch(() => [[]]);
+      for (const s of (siblingsByPhone || []) as any[]) {
+        matchedClientIds.add(Number(s.id));
+        const sp = extractPlate(s.nome_cliente) || extractPlate(s.inf_adicional);
+        if (sp) matchedPlates.add(sp.replace(/[-\s]/g, '').toUpperCase());
+      }
+    }
+
+    // (c) Por nome similar em cad_clientes (ex: 'ALEXANDRE CUNHA MARINHO HMF3652')
+    if (cleanNomeCliente.length >= 5) {
+      const [siblingsByName] = await pool.query<any>(
+        `SELECT id, nome_cliente, inf_adicional FROM cad_clientes
+         WHERE inativo = 0 AND UPPER(nome_cliente) LIKE ?`,
+        [`%${cleanNomeCliente.slice(0, 30)}%`]
+      ).catch(() => [[]]);
+      for (const s of (siblingsByName || []) as any[]) {
+        matchedClientIds.add(Number(s.id));
+        const sp = extractPlate(s.nome_cliente) || extractPlate(s.inf_adicional);
+        if (sp) matchedPlates.add(sp.replace(/[-\s]/g, '').toUpperCase());
+      }
+    }
+
+    // 3. Localizar placas gravadas em os_orders para este cliente, documento, telefone ou nome
+    const osPlatesWhere: string[] = ['client_id IN (?)'];
+    const osPlatesParams: any[] = [[...matchedClientIds]];
+    if (cleanDoc.length >= 8) {
+      osPlatesWhere.push("REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_document, ''), '.', ''), '-', ''), '/', ''), ' ', '') = ?");
+      osPlatesParams.push(cleanDoc);
+    }
+    if (phoneDigits.length >= 8) {
+      osPlatesWhere.push("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_phone, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE ?");
+      osPlatesParams.push(`%${phoneDigits.slice(-8)}%`);
+    }
+    if (cleanNomeCliente.length >= 5) {
+      osPlatesWhere.push("UPPER(TRIM(client_name)) = UPPER(?)");
+      osPlatesParams.push(cleanNomeCliente);
+    }
+
+    const [knownOsPlates] = await pool.query<any>(
+      `SELECT DISTINCT UPPER(REPLACE(REPLACE(plate, '-', ''), ' ', '')) as pl
+       FROM os_orders
+       WHERE plate IS NOT NULL AND plate != '' AND (${osPlatesWhere.join(' OR ')})
+       LIMIT 30`,
+      osPlatesParams
+    ).catch(() => [[]]);
+    for (const row of (knownOsPlates || []) as any[]) {
+      if (row.pl && row.pl.length >= 6) {
+        matchedPlates.add(row.pl);
+      }
+    }
 
     // Parâmetros de filtro
     const tenantIdQuery = req.query.tenant_id ? String(req.query.tenant_id).trim() : '';
@@ -3763,24 +3910,51 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
     const search = req.query.search ? String(req.query.search).trim() : '';
     const tipoFiltro = req.query.tipo ? String(req.query.tipo).trim() : 'todos'; // 'todos' | 'vendas' | 'os'
 
-    // 1. Condições de busca para OS vinculadas ao cliente
-    const osBaseWhere: string[] = ['o.client_id = ?'];
-    const osBaseParams: any[] = [cliente.id];
+    // 4. Montar osBaseWhere para buscar TODAS as ordens de serviço do cliente
+    const osBaseWhere: string[] = ['o.client_id IN (?)'];
+    const osBaseParams: any[] = [[...matchedClientIds]];
 
-    if (cliente.cpf_cnpj && String(cliente.cpf_cnpj).trim().length >= 8) {
-      osBaseWhere.push('o.client_document = ?');
-      osBaseParams.push(cliente.cpf_cnpj);
+    if (cleanDoc.length >= 8) {
+      osBaseWhere.push(`(
+        o.client_document = ?
+        OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(o.client_document, ''), '.', ''), '-', ''), '/', ''), ' ', '') = ?
+      )`);
+      osBaseParams.push(rawDoc, cleanDoc);
     }
-    if (cleanPlaca) {
-      osBaseWhere.push("REPLACE(REPLACE(UPPER(o.plate), '-', ''), ' ', '') = ?");
-      osBaseParams.push(cleanPlaca);
+
+    if (matchedPlates.size > 0) {
+      osBaseWhere.push("REPLACE(REPLACE(UPPER(o.plate), '-', ''), ' ', '') IN (?)");
+      osBaseParams.push([...matchedPlates]);
+    }
+
+    if (phoneDigits.length >= 8) {
+      osBaseWhere.push("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(o.client_phone, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE ?");
+      osBaseParams.push(`%${phoneDigits.slice(-8)}%`);
+    }
+
+    if (cleanNomeCliente.length >= 4) {
+      const nomeSemPrep = cleanNomeCliente.replace(/\b(DA|DE|DO|DOS|DAS)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+      osBaseWhere.push(`(
+        UPPER(TRIM(o.client_name)) = UPPER(?)
+        OR UPPER(TRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(o.client_name, ' DA ', ' '), ' DE ', ' '), ' DO ', ' '), ' DOS ', ' '), ' DAS ', ' '))) = UPPER(?)
+      )`);
+      osBaseParams.push(cleanNomeCliente, nomeSemPrep);
+
+      const nameWords = cleanNomeCliente.split(/\s+/).filter(w => w.length >= 3 && !['DOS', 'DAS', 'DE', 'DA', 'DO'].includes(w.toUpperCase()));
+      if (nameWords.length >= 3) {
+        const wordLikes = nameWords.map(() => 'UPPER(o.client_name) LIKE ?').join(' AND ');
+        osBaseWhere.push(`(${wordLikes})`);
+        for (const w of nameWords) {
+          osBaseParams.push(`%${w.toUpperCase()}%`);
+        }
+      }
     }
 
     const osWhereClauses: string[] = [`(${osBaseWhere.join(' OR ')})`];
     const osParams: any[] = [...osBaseParams];
 
     if (tenantIdQuery && tenantIdQuery !== 'todos' && tenantIdQuery !== 'all' && Number(tenantIdQuery) > 0) {
-      osWhereClauses.push('o.tenant_id = ?');
+      osWhereClauses.push('(o.tenant_id = ? OR o.tenant_id IS NULL)');
       osParams.push(Number(tenantIdQuery));
     }
     if (dataInicio) {
@@ -3800,7 +3974,7 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
     if (tipoFiltro !== 'vendas') {
       const [osRows] = await pool.query<any>(
         `SELECT o.id, o.plate, o.model, o.mileage, o.status, o.total_amount, o.labor_amount, o.created_at,
-                o.client_name, o.client_phone, o.client_document, o.client_address,
+                o.client_name, o.client_phone, o.client_document, o.client_address, o.venda_controle,
                 o.tenant_id, t.nome as nome_loja
          FROM os_orders o
          LEFT JOIN tenants t ON t.id = o.tenant_id
@@ -3828,6 +4002,7 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
           clientPhone: o.client_phone || null,
           clientDocument: o.client_document || null,
           clientAddress: o.client_address || null,
+          vendaControle: o.venda_controle || null,
           tenantId: o.tenant_id ? Number(o.tenant_id) : undefined,
           nomeLoja: o.nome_loja || null,
         };
@@ -3837,14 +4012,14 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
     // 2. Condições de busca para Vendas no ERP
     // Inclui vendas diretas do cliente e vendas originadas das OS deste cliente
     const vendasWhereClauses: string[] = [
-      `(v.id_cliente = ? OR EXISTS (
+      `(v.id_cliente IN (?) OR EXISTS (
          SELECT 1 FROM os_orders o
          WHERE (${osBaseWhere.join(' OR ')})
            AND o.venda_controle IS NOT NULL
            AND CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
        ))`
     ];
-    const vendasParams: any[] = [cliente.id, ...osBaseParams];
+    const vendasParams: any[] = [[...matchedClientIds], ...osBaseParams];
 
     if (tenantIdQuery && tenantIdQuery !== 'todos' && tenantIdQuery !== 'all' && Number(tenantIdQuery) > 0) {
       vendasWhereClauses.push('v.tenant_id = ?');
@@ -3899,8 +4074,12 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
       }));
     }
 
-    if (!placa && os.length > 0 && os[0].plate) {
-      placa = String(os[0].plate).toUpperCase().replace(/[-\s]/g, '');
+    let finalPlaca = extractPlate(rawNomeCliente);
+    if (!finalPlaca && matchedPlates.size > 0) {
+      finalPlaca = [...matchedPlates][0];
+    }
+    if (!finalPlaca && os.length > 0 && os[0].plate) {
+      finalPlaca = String(os[0].plate).toUpperCase().replace(/[-\s]/g, '');
     }
 
     const lastOs = os[0];
@@ -3910,7 +4089,7 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
         id: cliente.id,
         nome: stripPlate(cliente.nome_cliente),
         nome_original: cliente.nome_cliente,
-        placa,
+        placa: finalPlaca || null,
         modelo: cliente.inf_adicional || lastOs?.model || null,
         telefone: cliente.telefone || cliente.celular || lastOs?.clientPhone || null,
         celular: cliente.celular || null,

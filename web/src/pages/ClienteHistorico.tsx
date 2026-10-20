@@ -907,23 +907,35 @@ export default function ClienteHistorico() {
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {os.map(o => (
-                    <tr key={o.id} className="hover:bg-slate-800/60 transition-colors">
+                    <tr
+                      key={o.id}
+                      onClick={() => navigate(`/orders/${o.id}`)}
+                      className="hover:bg-slate-800/60 transition-colors cursor-pointer"
+                    >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
                           <p className="font-mono text-xs text-blue-400 font-bold">
                             #{o.id.split('-')[0].toUpperCase()}
                           </p>
                           <a
-                            href={`/os/${o.id}`}
+                            href={`/orders/${o.id}`}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
                             title="Abrir Ordem de Serviço em nova aba"
                             className="text-slate-500 hover:text-white p-0.5 rounded transition-colors"
                           >
                             <ExternalLink className="w-3 h-3" />
                           </a>
                         </div>
-                        <p className="text-xs text-amber-400 font-mono mt-0.5 font-semibold">{o.plate}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-xs text-amber-400 font-mono font-semibold">{o.plate}</span>
+                          {o.vendaControle && (
+                            <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-800/40">
+                              Venda #{o.vendaControle}
+                            </span>
+                          )}
+                        </div>
                         {o.clientName && o.clientName.trim() && o.clientName.toLowerCase() !== cliente.nome.toLowerCase() && (
                           <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1 font-medium bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 w-fit" title="Nome do cliente na OS">
                             👤 {o.clientName}

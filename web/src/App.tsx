@@ -102,6 +102,7 @@ export default function App() {
               <Route index element={<Dashboard />} />
               <Route path="orders"     element={<Orders />} />
               <Route path="orders/:id" element={<OrderDetail />} />
+              <Route path="os/:id"     element={<OrderDetail />} />
               <Route path="quotes"     element={<Quotes />} />
               <Route path="orcamentos" element={<Navigate to="/quotes" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />

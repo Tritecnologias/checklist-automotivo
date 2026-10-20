@@ -712,6 +712,29 @@ router.post('/', async (req: Request, res: Response) => {
           if (rows.length > 0) existingClient = rows[0];
         }
 
+        if (!existingClient && vehicle.plate) {
+          const cleanP = vehicle.plate.replace(/[-\s]/g, '').toUpperCase();
+          if (cleanP.length === 7) {
+            const [rows] = await pool.query<any>(
+              `SELECT id FROM cad_clientes
+               WHERE inativo = 0 AND REPLACE(REPLACE(UPPER(nome_cliente), '-', ''), ' ', '') LIKE ?
+               LIMIT 1`,
+              [`%${cleanP}%`]
+            );
+            if (rows.length > 0) existingClient = rows[0];
+          }
+        }
+
+        if (!existingClient && clientName && clientName.trim().length >= 5) {
+          const [rows] = await pool.query<any>(
+            `SELECT id FROM cad_clientes
+             WHERE inativo = 0 AND UPPER(TRIM(nome_cliente)) = UPPER(TRIM(?))
+             LIMIT 1`,
+            [clientName.trim()]
+          );
+          if (rows.length > 0) existingClient = rows[0];
+        }
+
         if (existingClient) {
           finalClientId = Number(existingClient.id);
           await pool.execute(
