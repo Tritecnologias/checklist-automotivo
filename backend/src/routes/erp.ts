@@ -93,6 +93,7 @@ async function requireManagerUp(req: Request, res: Response, next: NextFunction)
   else if (path.startsWith('/dre')) neededPerm = 'dre';
   else if (path.startsWith('/oficina') || path.startsWith('/mecanicos')) neededPerm = 'oficina';
   else if (path.startsWith('/relatorios/multi-lojas')) neededPerm = 'relatorio_multi_lojas';
+  else if (path.startsWith('/vendas')) neededPerm = 'vendas';
   else if (path.startsWith('/config/parametros')) neededPerm = 'config_parametros';
 
   if (neededPerm) {
@@ -1377,6 +1378,193 @@ router.get('/vendas/:controle', async (req, res) => {
   } catch (err: any) {
     console.error('Erro em GET /vendas/:controle:', err);
     res.status(500).json({ message: 'Erro ao carregar detalhes da venda' });
+  }
+});
+
+router.delete('/vendas/:controle', requireManagerUp, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const controle = String(req.params.controle).trim();
+    if (!controle) {
+      res.status(400).json({ message: 'Controle de venda não informado' });
+      return;
+    }
+
+    const tenantId = getErpWriteTenantId(req);
+    const user = req.user as JwtPayload | undefined;
+    const userId = user?.userId ?? null;
+    const userNome = user?.email ?? 'Usuário';
+
+    // 1. Busca os dados da venda existente
+    const [[venda]] = await conn.query<any>(
+      `SELECT * FROM mv_vendas WHERE controle = ? LIMIT 1`,
+      [controle]
+    );
+
+    if (!venda) {
+      res.status(404).json({ message: 'Venda não encontrada' });
+      return;
+    }
+
+    // Se o usuário não for proprietário/owner, verifica se tem acesso à loja da venda
+    if (user?.role !== 'owner' && user?.tenantIds && !user.tenantIds.includes(Number(venda.tenant_id))) {
+      res.status(403).json({ message: 'Você não tem permissão para excluir vendas desta loja' });
+      return;
+    }
+
+    const vendaTenantId = Number(venda.tenant_id || tenantId);
+
+    await conn.beginTransaction();
+
+    // 2. Busca todos os itens da venda em mv_vendas_movimento
+    const [itensMov] = await conn.query<any>(
+      `SELECT m.id, m.id_produto, m.quant, m.valor, m.vr_total,
+              p.nome_produto, p.controla_estoque, p.estoque as estoque_cad
+       FROM mv_vendas_movimento m
+       LEFT JOIN cad_produtos p ON p.id = m.id_produto
+       WHERE m.controle = ?`,
+      [controle]
+    );
+
+    const itensRestaurados: any[] = [];
+
+    // 3. Restaura o estoque de cada produto vendido
+    if (itensMov && itensMov.length > 0) {
+      for (const item of itensMov) {
+        const prodId = Number(item.id_produto);
+        const quant = Number(item.quant);
+
+        if (prodId > 0 && quant > 0) {
+          // Busca saldo anterior no tenant
+          const [[pstRow]] = await conn.query<any>(
+            `SELECT saldo FROM produto_saldo_tenant WHERE produto_id = ? AND tenant_id = ?`,
+            [prodId, vendaTenantId]
+          );
+
+          const saldoAnterior = pstRow ? Number(pstRow.saldo) : (vendaTenantId === 1 ? Number(item.estoque_cad || 0) : 0);
+          const novoSaldo = saldoAnterior + quant;
+
+          // Restaura saldo no tenant (adicionando de volta a quantidade vendida)
+          await conn.query(
+            `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo)
+             SELECT p.id, ?, (COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) + ?)
+             FROM cad_produtos p
+             LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+             WHERE p.id = ? AND COALESCE(p.controla_estoque, 1) = 1
+             ON DUPLICATE KEY UPDATE saldo = produto_saldo_tenant.saldo + ?`,
+            [vendaTenantId, vendaTenantId, quant, vendaTenantId, prodId, quant]
+          );
+
+          // Se for loja 1 (matriz), atualiza também cad_produtos.estoque
+          if (vendaTenantId === 1) {
+            await conn.query(
+              `UPDATE cad_produtos
+               SET estoque = estoque + ?
+               WHERE id = ? AND COALESCE(controla_estoque, 1) = 1`,
+              [quant, prodId]
+            );
+          }
+
+          // Grava no histórico/kardex em estoque_movimentacoes
+          try {
+            await conn.query(
+              `INSERT INTO estoque_movimentacoes 
+               (tenant_id, produto_id, tipo, origem, quantidade, saldo_anterior, saldo_posterior, documento_ref, motivo, user_id, user_nome)
+               VALUES (?, ?, 'entrada', 'cancelamento_venda', ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                vendaTenantId,
+                prodId,
+                quant,
+                saldoAnterior,
+                novoSaldo,
+                `Venda #${controle}`,
+                `Devolução por exclusão da venda #${controle} (+${quant})`,
+                userId,
+                userNome
+              ]
+            );
+          } catch (kardexErr) {
+            console.warn('[estoque_movimentacoes] Erro ao registrar cancelamento no kardex:', kardexErr);
+          }
+
+          itensRestaurados.push({
+            id_produto: prodId,
+            nome_produto: item.nome_produto || `Produto #${prodId}`,
+            quant,
+            saldo_anterior: saldoAnterior,
+            novo_saldo: novoSaldo,
+          });
+        }
+      }
+    }
+
+    // 4. Remove lançamentos financeiros vinculados em cad_lancamentos
+    await conn.query(
+      `DELETE FROM cad_lancamentos
+       WHERE id_venda = ? OR (controle = ? AND id_planejamento = 2)`,
+      [venda.id, controle]
+    );
+
+    // 5. Se houver OS vinculada a essa venda, desvincula a OS e reabre para não ficar em estado inconsistente
+    const [[osVinculada]] = await conn.query<any>(
+      `SELECT id, status FROM os_orders
+       WHERE CONVERT(venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+       LIMIT 1`,
+      [controle]
+    );
+
+    if (osVinculada) {
+      await conn.query(
+        `UPDATE os_orders
+         SET venda_controle = NULL,
+             status = IF(status = 'closed', 'open', status),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [osVinculada.id]
+      );
+    }
+
+    // 6. Exclui os itens do movimento da venda
+    await conn.query(
+      `DELETE FROM mv_vendas_movimento WHERE controle = ?`,
+      [controle]
+    );
+
+    // 7. Exclui o registro da venda
+    await conn.query(
+      `DELETE FROM mv_vendas WHERE id = ?`,
+      [venda.id]
+    );
+
+    // 8. Se vinculada a uma sessão de caixa, recalcula o total fechado do turno na sessão
+    if (venda.id_caixa) {
+      await conn.query(
+        `UPDATE mv_caixa c
+         SET vr_fechado_turno = COALESCE((
+           SELECT SUM(v.vr_total)
+           FROM mv_vendas v
+           WHERE v.id_caixa = c.id
+         ), 0)
+         WHERE c.id = ?`,
+        [venda.id_caixa]
+      );
+    }
+
+    await conn.commit();
+
+    res.json({
+      success: true,
+      message: `Venda ${controle} excluída com sucesso e estoque restaurado.`,
+      controle,
+      itens_restaurados: itensRestaurados,
+      os_reaberta_id: osVinculada?.id ?? null,
+    });
+  } catch (err: any) {
+    await conn.rollback();
+    console.error('Erro ao excluir venda e restaurar estoque:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao excluir venda e restaurar estoque' });
+  } finally {
+    conn.release();
   }
 });
 

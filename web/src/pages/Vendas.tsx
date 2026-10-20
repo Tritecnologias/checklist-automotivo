@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Trash2, AlertTriangle, RotateCcw, CheckCircle2, X } from 'lucide-react'
 import { erpApi } from '../lib/api'
 import type { Venda } from '../types'
 import { useAuth } from '../contexts/AuthContext'
@@ -9,12 +10,17 @@ const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency
 const today = () => new Date().toISOString().slice(0, 10)
 
 export default function Vendas() {
-  const { currentTenant, user } = useAuth()
+  const { currentTenant, user, isOwner, hasPermission } = useAuth()
+  const canDelete = isOwner || user?.role === 'manager' || hasPermission('vendas')
+  const queryClient = useQueryClient()
+
   const tid = currentTenant?.id ?? null
   const [data, setData] = useState(today())
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Venda | null>(null)
+  const [vendaParaExcluir, setVendaParaExcluir] = useState<Venda | null>(null)
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   const { data: res, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['vendas', tid, data, search, page],
@@ -25,6 +31,34 @@ export default function Vendas() {
     queryKey: ['venda', selected?.controle],
     queryFn: () => erpApi.venda(selected!.controle),
     enabled: !!selected,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (controle: string) => erpApi.excluirVenda(controle),
+    onSuccess: (dataResp, controle) => {
+      queryClient.invalidateQueries({ queryKey: ['vendas'] })
+      queryClient.invalidateQueries({ queryKey: ['venda'] })
+      queryClient.invalidateQueries({ queryKey: ['produtos'] })
+      queryClient.invalidateQueries({ queryKey: ['estoque'] })
+      queryClient.invalidateQueries({ queryKey: ['kardex'] })
+      queryClient.invalidateQueries({ queryKey: ['caixa-hist'] })
+      queryClient.invalidateQueries({ queryKey: ['caixa-status'] })
+      queryClient.invalidateQueries({ queryKey: ['os_orders'] })
+      if (selected?.controle === controle) {
+        setSelected(null)
+      }
+      setVendaParaExcluir(null)
+      setFeedback({
+        type: 'success',
+        message: dataResp?.message || `Venda #${controle} excluída com sucesso! Os produtos voltaram ao estoque.`,
+      })
+    },
+    onError: (err: any) => {
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'Erro ao excluir a venda e restaurar o estoque.',
+      })
+    },
   })
 
   const vendas = res?.data ?? []
@@ -41,6 +75,29 @@ export default function Vendas() {
             </p>
           </div>
         </div>
+
+        {feedback && (
+          <div className={`p-3 rounded-xl border flex items-center justify-between text-xs font-medium animate-in fade-in duration-200 ${
+            feedback.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+              : 'bg-red-500/10 border-red-500/20 text-red-300'
+          }`}>
+            <div className="flex items-center gap-2">
+              {feedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              )}
+              <span>{feedback.message}</span>
+            </div>
+            <button
+              onClick={() => setFeedback(null)}
+              className="text-slate-400 hover:text-white p-1 rounded-lg"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         <div className="flex gap-3">
           <input
@@ -83,6 +140,7 @@ export default function Vendas() {
                   <th className="px-4 py-3">Cliente / Veículo</th>
                   <th className="px-4 py-3">Hora</th>
                   <th className="px-4 py-3 text-right">Forma / Total</th>
+                  {canDelete && <th className="px-3 py-3 text-center w-12">Ações</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
@@ -125,6 +183,21 @@ export default function Vendas() {
                         </div>
                       </div>
                     </td>
+                    {canDelete && (
+                      <td className="px-3 py-3 text-center" onClick={e => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setVendaParaExcluir(v)
+                          }}
+                          title="Excluir venda e restaurar estoque"
+                          className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-500/20"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -326,8 +399,120 @@ export default function Vendas() {
                   <span>🖨️</span>
                   <span>{((detalhe.itens ?? []).some(i => (i.nome_produto || '').toUpperCase().includes('RECEBIMENTO DE NOTINHA'))) ? 'Imprimir 2ª Via do Recebimento (com Assinatura)' : 'Imprimir 2ª Via do Cupom'}</span>
                 </button>
+
+                {canDelete && (
+                  <button
+                    type="button"
+                    onClick={() => setVendaParaExcluir(detalhe as any)}
+                    className="w-full mt-2 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/50 hover:border-red-700/80 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-95"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                    <span>Excluir Venda e Devolver Estoque</span>
+                  </button>
+                )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão e Restauração de Estoque */}
+      {vendaParaExcluir && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full shadow-2xl overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+              <div className="flex items-center gap-2.5 text-red-400 font-semibold text-sm">
+                <div className="w-8 h-8 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <span>Excluir Venda e Restaurar Estoque</span>
+              </div>
+              <button
+                disabled={deleteMutation.isPending}
+                onClick={() => setVendaParaExcluir(null)}
+                className="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-40"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 text-sm">
+              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                  <span>Controle</span>
+                  <span className="font-mono text-slate-200 font-semibold">{vendaParaExcluir.controle}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                  <span>Cliente</span>
+                  <span className="text-slate-200 font-medium">{vendaParaExcluir.nome_cliente || 'Consumidor final'}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                  <span>Valor Total</span>
+                  <span className="text-emerald-400 font-bold font-mono text-sm">{R(Number(vendaParaExcluir.vr_total))}</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-2">
+                <p className="text-xs text-amber-300 font-medium flex items-center gap-1.5">
+                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                  Ao confirmar a exclusão desta venda:
+                </p>
+                <ul className="text-xs text-slate-300 space-y-1.5 list-disc list-inside leading-relaxed pl-1">
+                  <li>
+                    <strong className="text-amber-200">Estoque restaurado:</strong> Todos os produtos vendidos terão suas quantidades devolvidas e o saldo voltará a ficar positivo.
+                  </li>
+                  <li>
+                    <strong className="text-amber-200">Kardex de auditoria:</strong> Será gerado o registro automático de entrada/devolução por cancelamento de venda.
+                  </li>
+                  <li>
+                    <strong className="text-amber-200">Financeiro & Caixa:</strong> O lançamento a receber e o fechamento do turno do caixa serão recalculados.
+                  </li>
+                  {vendaParaExcluir.os_id && (
+                    <li>
+                      <strong className="text-blue-300">Ordem de Serviço:</strong> A OS #{vendaParaExcluir.os_plate || vendaParaExcluir.os_id} será desvinculada e reaberta.
+                    </li>
+                  )}
+                </ul>
+              </div>
+
+              {deleteMutation.isError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-300">
+                  {(deleteMutation.error as any)?.message || 'Erro ao excluir a venda. Tente novamente.'}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="px-5 py-4 border-t border-slate-800 bg-slate-950/40 flex justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={() => setVendaParaExcluir(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate(vendaParaExcluir.controle)}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-red-950/50 flex items-center gap-2 disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Restaurando estoque...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Confirmar e Devolver ao Estoque</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

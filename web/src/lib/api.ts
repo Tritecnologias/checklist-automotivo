@@ -307,6 +307,14 @@ export const erpApi = {
     return adminRequest<{ data: Venda[]; total: number; pages: number }>(`/erp/vendas?${q}`)
   },
   venda: (controle: string) => adminRequest<Venda>(`/erp/vendas/${controle}`),
+  excluirVenda: (controle: string) =>
+    adminRequest<{
+      success: boolean
+      message: string
+      controle: string
+      itens_restaurados?: { id_produto: number; nome_produto: string; quant: number; saldo_anterior: number; novo_saldo: number }[]
+      os_reaberta_id?: string | null
+    }>(`/erp/vendas/${controle}`, { method: 'DELETE' }),
   criarVenda: (data: {
     id_cliente?: number
     itens: { id_produto: number; valor: number; quant: number }[]
