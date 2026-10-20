@@ -11,7 +11,7 @@ const today = () => new Date().toISOString().slice(0, 10)
 
 export default function Vendas() {
   const { currentTenant, user, isOwner, hasPermission } = useAuth()
-  const canDelete = isOwner || user?.role === 'manager' || hasPermission('vendas')
+  const canDelete = isOwner || user?.role === 'owner' || user?.role === 'manager' || hasPermission('vendas')
   const queryClient = useQueryClient()
 
   const tid = currentTenant?.id ?? null
