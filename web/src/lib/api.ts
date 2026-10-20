@@ -600,8 +600,22 @@ export const erpApi = {
   },
   clienteDetalhes: (id: number) =>
     adminRequest<ClienteErp>(`/erp/clientes/${id}`),
-  clienteHistorico: (id: number) =>
-    adminRequest<ClienteHistorico>(`/erp/clientes/${id}/historico`),
+  clienteHistorico: (id: number, params?: {
+    tenant_id?: number | string | null
+    data_inicio?: string
+    data_fim?: string
+    search?: string
+    tipo?: string
+  }) => {
+    const sp = new URLSearchParams()
+    if (params?.tenant_id && params.tenant_id !== 'todos') sp.set('tenant_id', String(params.tenant_id))
+    if (params?.data_inicio) sp.set('data_inicio', params.data_inicio)
+    if (params?.data_fim) sp.set('data_fim', params.data_fim)
+    if (params?.search) sp.set('search', params.search)
+    if (params?.tipo && params.tipo !== 'todos') sp.set('tipo', params.tipo)
+    const q = sp.toString()
+    return adminRequest<ClienteHistorico>(`/erp/clientes/${id}/historico${q ? `?${q}` : ''}`)
+  },
   criarCliente: (data: {
     nome: string
     placa?: string

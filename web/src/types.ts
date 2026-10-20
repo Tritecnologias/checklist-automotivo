@@ -340,6 +340,12 @@ export interface ClienteHistorico {
     data: string
     total: number
     em_aberto: number
+    vr_dinheiro?: number
+    vr_cartao?: number
+    vr_pix?: number
+    vr_nota?: number
+    tenant_id?: number
+    nome_loja?: string | null
   }[]
   os: {
     id: string
@@ -355,6 +361,8 @@ export interface ClienteHistorico {
     clientPhone?: string | null
     clientDocument?: string | null
     clientAddress?: string | null
+    tenantId?: number
+    nomeLoja?: string | null
   }[]
 }
 

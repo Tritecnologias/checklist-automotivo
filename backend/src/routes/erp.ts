@@ -3747,99 +3747,185 @@ router.delete('/clientes/:id', requireManagerUp, async (req, res) => {
 });
 
 router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
-  const [[cliente]] = await pool.query<any>(
-    'SELECT * FROM cad_clientes WHERE id = ?', [req.params.id]
-  );
-  if (!cliente) { res.status(404).json({ message: 'Cliente não encontrado' }); return; }
+  try {
+    const [[cliente]] = await pool.query<any>(
+      'SELECT * FROM cad_clientes WHERE id = ?', [req.params.id]
+    );
+    if (!cliente) { res.status(404).json({ message: 'Cliente não encontrado' }); return; }
 
-  let placa = extractPlate(cliente.nome_cliente);
+    let placa = extractPlate(cliente.nome_cliente);
+    const cleanPlaca = placa ? placa.replace(/[-\s]/g, '') : '';
 
-  const [vendas] = await pool.query<any>(
-    `SELECT v.controle, v.data_venda, v.vr_total, v.vr_dinheiro,
-            v.vr_cartao, v.vr_carne, v.em_aberto
-     FROM mv_vendas v
-     WHERE v.id_cliente = ?
-     ORDER BY v.data_venda DESC, v.controle DESC
-     LIMIT 50`,
-    [req.params.id]
-  );
+    // Parâmetros de filtro
+    const tenantIdQuery = req.query.tenant_id ? String(req.query.tenant_id).trim() : '';
+    const dataInicio = req.query.data_inicio ? String(req.query.data_inicio).trim() : '';
+    const dataFim = req.query.data_fim ? String(req.query.data_fim).trim() : '';
+    const search = req.query.search ? String(req.query.search).trim() : '';
+    const tipoFiltro = req.query.tipo ? String(req.query.tipo).trim() : 'todos'; // 'todos' | 'vendas' | 'os'
 
-  // Busca OS vinculadas por ID do cliente, documento (CPF/CNPJ) ou placa
-  const cleanPlaca = placa ? placa.replace(/[-\s]/g, '') : '';
-  const osWhereParts: string[] = ['o.client_id = ?'];
-  const osParams: any[] = [cliente.id];
+    // 1. Condições de busca para OS vinculadas ao cliente
+    const osBaseWhere: string[] = ['o.client_id = ?'];
+    const osBaseParams: any[] = [cliente.id];
 
-  if (cliente.cpf_cnpj && String(cliente.cpf_cnpj).trim().length >= 8) {
-    osWhereParts.push('o.client_document = ?');
-    osParams.push(cliente.cpf_cnpj);
+    if (cliente.cpf_cnpj && String(cliente.cpf_cnpj).trim().length >= 8) {
+      osBaseWhere.push('o.client_document = ?');
+      osBaseParams.push(cliente.cpf_cnpj);
+    }
+    if (cleanPlaca) {
+      osBaseWhere.push("REPLACE(REPLACE(UPPER(o.plate), '-', ''), ' ', '') = ?");
+      osBaseParams.push(cleanPlaca);
+    }
+
+    const osWhereClauses: string[] = [`(${osBaseWhere.join(' OR ')})`];
+    const osParams: any[] = [...osBaseParams];
+
+    if (tenantIdQuery && tenantIdQuery !== 'todos' && tenantIdQuery !== 'all' && Number(tenantIdQuery) > 0) {
+      osWhereClauses.push('o.tenant_id = ?');
+      osParams.push(Number(tenantIdQuery));
+    }
+    if (dataInicio) {
+      osWhereClauses.push('(o.created_at >= ? OR DATE(o.created_at) >= ?)');
+      osParams.push(dataInicio, dataInicio);
+    }
+    if (dataFim) {
+      osWhereClauses.push("(o.created_at <= ? OR DATE(o.created_at) <= ? OR o.created_at <= CONCAT(?, ' 23:59:59'))");
+      osParams.push(dataFim, dataFim, dataFim);
+    }
+    if (search.length >= 2) {
+      osWhereClauses.push('(o.plate LIKE ? OR o.model LIKE ? OR o.id LIKE ? OR o.client_name LIKE ?)');
+      osParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    let os: any[] = [];
+    if (tipoFiltro !== 'vendas') {
+      const [osRows] = await pool.query<any>(
+        `SELECT o.id, o.plate, o.model, o.mileage, o.status, o.total_amount, o.labor_amount, o.created_at,
+                o.client_name, o.client_phone, o.client_document, o.client_address,
+                o.tenant_id, t.nome as nome_loja
+         FROM os_orders o
+         LEFT JOIN tenants t ON t.id = o.tenant_id
+         WHERE ${osWhereClauses.join(' AND ')}
+         ORDER BY o.created_at DESC
+         LIMIT 200`,
+        osParams
+      );
+
+      os = (osRows as any[]).map((o: any) => {
+        const totalAmount = Number(o.total_amount || 0);
+        const laborAmount = Number(o.labor_amount ?? 0);
+        const partsAmount = Math.max(0, totalAmount - laborAmount);
+        return {
+          id: o.id,
+          plate: o.plate,
+          model: o.model,
+          mileage: Number(o.mileage || 0),
+          status: o.status,
+          partsAmount,
+          laborAmount,
+          total: totalAmount,
+          createdAt: o.created_at,
+          clientName: o.client_name || null,
+          clientPhone: o.client_phone || null,
+          clientDocument: o.client_document || null,
+          clientAddress: o.client_address || null,
+          tenantId: o.tenant_id ? Number(o.tenant_id) : undefined,
+          nomeLoja: o.nome_loja || null,
+        };
+      });
+    }
+
+    // 2. Condições de busca para Vendas no ERP
+    // Inclui vendas diretas do cliente e vendas originadas das OS deste cliente
+    const vendasWhereClauses: string[] = [
+      `(v.id_cliente = ? OR v.controle IN (
+         SELECT o2.venda_controle FROM os_orders o2 WHERE (${osBaseWhere.join(' OR ')}) AND o2.venda_controle IS NOT NULL
+       ))`
+    ];
+    const vendasParams: any[] = [cliente.id, ...osBaseParams];
+
+    if (tenantIdQuery && tenantIdQuery !== 'todos' && tenantIdQuery !== 'all' && Number(tenantIdQuery) > 0) {
+      vendasWhereClauses.push('v.tenant_id = ?');
+      vendasParams.push(Number(tenantIdQuery));
+    }
+    if (dataInicio) {
+      vendasWhereClauses.push('(v.data_venda >= ? OR DATE(v.data_venda) >= ?)');
+      vendasParams.push(dataInicio, dataInicio);
+    }
+    if (dataFim) {
+      vendasWhereClauses.push("(v.data_venda <= ? OR DATE(v.data_venda) <= ? OR v.data_venda <= CONCAT(?, ' 23:59:59'))");
+      vendasParams.push(dataFim, dataFim, dataFim);
+    }
+    if (search.length >= 2) {
+      vendasWhereClauses.push(`(
+        v.controle LIKE ?
+        OR EXISTS (
+          SELECT 1 FROM mv_vendas_movimento m
+          LEFT JOIN cad_produtos p ON p.id = m.id_produto
+          WHERE m.controle = v.controle AND (p.nome_produto LIKE ? OR m.controle LIKE ?)
+        )
+      )`);
+      vendasParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    let finalVendas: any[] = [];
+    if (tipoFiltro !== 'os') {
+      const [vendasRows] = await pool.query<any>(
+        `SELECT DISTINCT v.id, v.controle, v.data_venda, v.vr_total, v.vr_dinheiro,
+                v.vr_cartao, v.vr_carne, v.vr_pix, v.vr_nota, v.em_aberto,
+                v.tenant_id, t.nome as nome_loja
+         FROM mv_vendas v
+         LEFT JOIN tenants t ON t.id = v.tenant_id
+         WHERE ${vendasWhereClauses.join(' AND ')}
+         ORDER BY v.data_venda DESC, v.controle DESC
+         LIMIT 200`,
+        vendasParams
+      );
+
+      finalVendas = (vendasRows as any[]).map((v: any) => ({
+        controle: v.controle,
+        data: v.data_venda,
+        total: Number(v.vr_total),
+        em_aberto: Number(v.em_aberto),
+        vr_dinheiro: Number(v.vr_dinheiro || 0),
+        vr_cartao: Number(v.vr_cartao || 0),
+        vr_pix: Number(v.vr_pix || 0),
+        vr_nota: Number(v.vr_nota || 0),
+        tenant_id: v.tenant_id ? Number(v.tenant_id) : undefined,
+        nome_loja: v.nome_loja || null,
+      }));
+    }
+
+    if (!placa && os.length > 0 && os[0].plate) {
+      placa = String(os[0].plate).toUpperCase().replace(/[-\s]/g, '');
+    }
+
+    const lastOs = os[0];
+
+    res.json({
+      cliente: {
+        id: cliente.id,
+        nome: stripPlate(cliente.nome_cliente),
+        nome_original: cliente.nome_cliente,
+        placa,
+        modelo: cliente.inf_adicional || lastOs?.model || null,
+        telefone: cliente.telefone || cliente.celular || lastOs?.clientPhone || null,
+        celular: cliente.celular || null,
+        cpf_cnpj: cliente.cpf_cnpj || lastOs?.clientDocument || null,
+        email: cliente.email || null,
+        cep: cliente.cep || null,
+        endereco: cliente.endereco || lastOs?.clientAddress || null,
+        bairro: cliente.bairro || null,
+        cidade: cliente.cidade || null,
+        uf: cliente.uf || null,
+        inativo: Number(cliente.inativo || 0),
+      },
+      vendas: finalVendas,
+      os,
+    });
+  } catch (err: any) {
+    console.error('Erro em GET /clientes/:id/historico:', err);
+    res.status(500).json({ message: 'Erro ao carregar histórico do cliente', error: err?.message });
   }
-  if (cleanPlaca) {
-    osWhereParts.push("REPLACE(REPLACE(UPPER(o.plate), '-', ''), ' ', '') = ?");
-    osParams.push(cleanPlaca);
-  }
-
-  const [osRows] = await pool.query<any>(
-    `SELECT o.id, o.plate, o.model, o.mileage, o.status, o.total_amount, o.labor_amount, o.created_at,
-            o.client_name, o.client_phone, o.client_document, o.client_address
-     FROM os_orders o
-     WHERE ${osWhereParts.join(' OR ')}
-     ORDER BY o.created_at DESC`,
-    osParams
-  );
-
-  const os = (osRows as any[]).map((o: any) => {
-    const totalAmount = Number(o.total_amount || 0);
-    const laborAmount = Number(o.labor_amount ?? 0);
-    const partsAmount = Math.max(0, totalAmount - laborAmount);
-    return {
-      id: o.id,
-      plate: o.plate,
-      model: o.model,
-      mileage: Number(o.mileage || 0),
-      status: o.status,
-      partsAmount,
-      laborAmount,
-      total: totalAmount,
-      createdAt: o.created_at,
-      clientName: o.client_name || null,
-      clientPhone: o.client_phone || null,
-      clientDocument: o.client_document || null,
-      clientAddress: o.client_address || null,
-    };
-  });
-
-  if (!placa && os.length > 0 && os[0].plate) {
-    placa = String(os[0].plate).toUpperCase().replace(/[-\s]/g, '');
-  }
-
-  const lastOs = os[0];
-
-  res.json({
-    cliente: {
-      id: cliente.id,
-      nome: stripPlate(cliente.nome_cliente),
-      nome_original: cliente.nome_cliente,
-      placa,
-      modelo: cliente.inf_adicional || lastOs?.model || null,
-      telefone: cliente.telefone || cliente.celular || lastOs?.clientPhone || null,
-      celular: cliente.celular || null,
-      cpf_cnpj: cliente.cpf_cnpj || lastOs?.clientDocument || null,
-      email: cliente.email || null,
-      cep: cliente.cep || null,
-      endereco: cliente.endereco || lastOs?.clientAddress || null,
-      bairro: cliente.bairro || null,
-      cidade: cliente.cidade || null,
-      uf: cliente.uf || null,
-      inativo: Number(cliente.inativo || 0),
-    },
-    vendas: (vendas as any[]).map((v: any) => ({
-      controle: v.controle,
-      data: v.data_venda,
-      total: Number(v.vr_total),
-      em_aberto: Number(v.em_aberto),
-    })),
-    os,
-  });
 });
 
 // ── ESTOQUE ──────────────────────────────────────────────────────────────────
