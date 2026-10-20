@@ -455,7 +455,7 @@ export default function ClienteHistorico() {
   )
 
   // Consulta do Histórico com Filtros
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
       'cliente-historico',
       id,
@@ -524,13 +524,22 @@ export default function ClienteHistorico() {
   if (isError || !data) {
     return (
       <div className="text-center py-40 space-y-3">
-        <p className="text-red-400">Erro ao carregar histórico do cliente.</p>
-        <button
-          onClick={() => navigate('/erp/clientes')}
-          className="text-sm text-slate-400 hover:text-white underline"
-        >
-          Voltar para Clientes
-        </button>
+        <p className="text-red-400 font-semibold">Erro ao carregar histórico do cliente.</p>
+        <p className="text-xs text-slate-500">{(error as any)?.message || ''}</p>
+        <div className="flex justify-center gap-3 pt-2">
+          <button
+            onClick={() => refetch()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors"
+          >
+            Tentar novamente
+          </button>
+          <button
+            onClick={() => navigate('/erp/clientes')}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors border border-slate-700"
+          >
+            Voltar para Clientes
+          </button>
+        </div>
       </div>
     )
   }

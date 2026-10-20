@@ -3837,8 +3837,11 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
     // 2. Condições de busca para Vendas no ERP
     // Inclui vendas diretas do cliente e vendas originadas das OS deste cliente
     const vendasWhereClauses: string[] = [
-      `(v.id_cliente = ? OR v.controle IN (
-         SELECT o2.venda_controle FROM os_orders o2 WHERE (${osBaseWhere.join(' OR ')}) AND o2.venda_controle IS NOT NULL
+      `(v.id_cliente = ? OR EXISTS (
+         SELECT 1 FROM os_orders o
+         WHERE (${osBaseWhere.join(' OR ')})
+           AND o.venda_controle IS NOT NULL
+           AND CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci
        ))`
     ];
     const vendasParams: any[] = [cliente.id, ...osBaseParams];
@@ -3870,12 +3873,13 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
     let finalVendas: any[] = [];
     if (tipoFiltro !== 'os') {
       const [vendasRows] = await pool.query<any>(
-        `SELECT DISTINCT v.id, v.controle, v.data_venda, v.vr_total, v.vr_dinheiro,
+        `SELECT v.controle, v.data_venda, v.vr_total, v.vr_dinheiro,
                 v.vr_cartao, v.vr_carne, v.vr_pix, v.vr_nota, v.em_aberto,
                 v.tenant_id, t.nome as nome_loja
          FROM mv_vendas v
          LEFT JOIN tenants t ON t.id = v.tenant_id
          WHERE ${vendasWhereClauses.join(' AND ')}
+         GROUP BY v.controle
          ORDER BY v.data_venda DESC, v.controle DESC
          LIMIT 200`,
         vendasParams
