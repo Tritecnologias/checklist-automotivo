@@ -63,7 +63,7 @@ export default function Layout() {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       {/* Top bar */}
       <header className="bg-slate-900 border-b border-slate-800">
-        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-14">
+        <div className="max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
           <div className="flex items-center gap-8">
             <span className="text-base font-bold text-white tracking-tight flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
@@ -147,7 +147,7 @@ export default function Layout() {
       </header>
 
       {/* Page content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 py-8">
         <Outlet />
       </main>
     </div>

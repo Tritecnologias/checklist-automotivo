@@ -1,11 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, oficinaApi } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import type { Order, OrderStatus, Mecanico } from '../types'
 import { useAuth } from '../contexts/AuthContext'
-import { Wrench } from 'lucide-react'
+import { Wrench, ChevronLeft, ChevronRight, ArrowLeftRight } from 'lucide-react'
 import { lookupCep, formatCep } from '../lib/cep'
 
 const currency = (v: number) =>
@@ -35,6 +35,124 @@ export default function Orders() {
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatus] = useState<StatusFilter>('all')
   const [mecanicoFilter, setMecanicoFilter] = useState<string>('all')
+
+  // Controle de rolagem horizontal, scroll da rodinha do mouse e barra flutuante
+  const tableContainerRef = useRef<HTMLDivElement>(null)
+  const theadRef = useRef<HTMLTableSectionElement>(null)
+  const floatingScrollRef = useRef<HTMLDivElement>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+  const [hasOverflow, setHasOverflow] = useState(false)
+  const [tableScrollWidth, setTableScrollWidth] = useState(1200)
+  const [isDragging, setIsDragging] = useState(false)
+  const isDraggingRef = useRef(false)
+  const dragStartX = useRef(0)
+  const dragStartScrollLeft = useRef(0)
+  const hasDragged = useRef(false)
+
+  const updateScrollState = useCallback(() => {
+    const el = tableContainerRef.current
+    if (!el) return
+    const { scrollLeft, scrollWidth, clientWidth } = el
+    const overflow = scrollWidth > clientWidth + 4
+    setHasOverflow(overflow)
+    setCanScrollLeft(scrollLeft > 4)
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4)
+    setTableScrollWidth(scrollWidth)
+
+    if (floatingScrollRef.current && Math.abs(floatingScrollRef.current.scrollLeft - scrollLeft) > 2) {
+      floatingScrollRef.current.scrollLeft = scrollLeft
+    }
+  }, [])
+
+
+  // Rolar com a rodinha do mouse sobre o cabeçalho (thead): converte deltaY da rodinha em rolagem horizontal
+  useEffect(() => {
+    const thead = theadRef.current
+    const tableContainer = tableContainerRef.current
+    if (!thead || !tableContainer) return
+
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY !== 0) {
+        e.preventDefault()
+        tableContainer.scrollLeft += e.deltaY
+        updateScrollState()
+      }
+    }
+
+    thead.addEventListener('wheel', onWheel, { passive: false })
+    return () => thead.removeEventListener('wheel', onWheel)
+  }, [updateScrollState])
+
+  // Rolar horizontalmente segurando Shift em qualquer parte da tabela
+  useEffect(() => {
+    const tableContainer = tableContainerRef.current
+    if (!tableContainer) return
+
+    const onWheel = (e: WheelEvent) => {
+      if (e.shiftKey && e.deltaY !== 0) {
+        e.preventDefault()
+        tableContainer.scrollLeft += e.deltaY
+        updateScrollState()
+      }
+    }
+
+    tableContainer.addEventListener('wheel', onWheel, { passive: false })
+    return () => tableContainer.removeEventListener('wheel', onWheel)
+  }, [updateScrollState])
+
+  const scrollHorizontally = (delta: number) => {
+    if (!tableContainerRef.current) return
+    tableContainerRef.current.scrollBy({ left: delta, behavior: 'smooth' })
+  }
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+    if (target.closest('a') || target.closest('button') || target.closest('input') || target.closest('select')) {
+      return
+    }
+    if (!tableContainerRef.current) return
+    isDraggingRef.current = true
+    setIsDragging(true)
+    hasDragged.current = false
+    dragStartX.current = e.clientX
+    dragStartScrollLeft.current = tableContainerRef.current.scrollLeft
+  }
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingRef.current || !tableContainerRef.current) return
+    const dx = e.clientX - dragStartX.current
+    if (Math.abs(dx) > 3) {
+      hasDragged.current = true
+    }
+    tableContainerRef.current.scrollLeft = dragStartScrollLeft.current - dx
+    updateScrollState()
+  }
+
+  const handleMouseUpOrLeave = () => {
+    if (isDraggingRef.current) {
+      isDraggingRef.current = false
+      setIsDragging(false)
+    }
+  }
+
+  const handleClickCapture = (e: React.MouseEvent) => {
+    if (hasDragged.current) {
+      e.preventDefault()
+      e.stopPropagation()
+      hasDragged.current = false
+    }
+  }
+
+  const handleFloatingScroll = () => {
+    const floatEl = floatingScrollRef.current
+    const tableEl = tableContainerRef.current
+    if (!floatEl || !tableEl) return
+    if (Math.abs(tableEl.scrollLeft - floatEl.scrollLeft) > 2) {
+      tableEl.scrollLeft = floatEl.scrollLeft
+      updateScrollState()
+    }
+  }
 
   // Estado do Modal de Nova OS / Orçamento
   const [modalOpen, setModalOpen]           = useState(false)
@@ -201,6 +319,13 @@ export default function Orders() {
     })
   }, [orders, search, statusFilter, mecanicoFilter])
 
+  useEffect(() => {
+    updateScrollState()
+    const handleResize = () => updateScrollState()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [updateScrollState, filtered])
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -310,101 +435,170 @@ export default function Orders() {
           </button>
         </div>
       ) : (
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+        <div className="bg-slate-900 rounded-2xl border border-slate-800 relative">
           {filtered.length === 0 ? (
             <div className="py-20 text-center text-slate-500">
               Nenhum registro encontrado para os filtros aplicados.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-800">
-                    <th className="px-5 py-3">Registro</th>
-                    <th className="px-5 py-3">Placa / Cliente</th>
-                    <th className="px-5 py-3">Modelo</th>
-                    <th className="px-5 py-3">Mecânico / Técnico</th>
-                    <th className="px-5 py-3">Km</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3 text-right">Total</th>
-                    <th className="px-5 py-3">Data</th>
-                    <th className="px-5 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {filtered.map((o: Order) => (
-                    <tr key={o.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="px-5 py-3 font-mono text-slate-400 text-xs">
-                        #{o.id.split('-')[0].toUpperCase()}
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="font-bold text-white tracking-wide">{o.vehicle.plate}</div>
-                        {o.client?.name ? (
-                          <div className="text-xs text-slate-300 font-medium truncate max-w-[200px]" title={o.client.name}>
-                            👤 {o.client.name}
-                          </div>
-                        ) : (
-                          <div className="text-xs text-slate-500 italic">Cliente s/ cadastro</div>
-                        )}
-                        {o.client?.phone && (
-                          <div className="text-[11px] text-slate-400 font-mono">
-                            📞 {o.client.phone}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 text-slate-300 max-w-[180px] truncate">
-                        {o.vehicle.model}
-                      </td>
-                      <td className="px-5 py-3 whitespace-nowrap">
-                        <div className="flex flex-col gap-1">
-                          {o.mecanicoNome ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 text-slate-200 border border-slate-700/80">
-                              <Wrench className="w-3 h-3 text-blue-400" />
-                              <span>{o.mecanicoNome}</span>
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-500 italic">Não atribuído</span>
-                          )}
-                          {o.auxiliarNome && (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-amber-300 font-medium">
-                              <span>🤝</span>
-                              <span>Aux: {o.auxiliarNome}</span>
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-slate-400">
-                        {o.vehicle.mileage.toLocaleString('pt-BR')}
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
-                          <StatusBadge status={o.status} />
-                          {o.vendaControle && (
-                            <span className="text-[10px] bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-1.5 py-0.5 rounded" title={`Venda #${o.vendaControle}`}>
-                              PDV #{o.vendaControle.slice(-4)}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-right font-semibold text-green-400">
-                        {currency(o.totalAmount)}
-                      </td>
-                      <td className="px-5 py-3 text-slate-400 whitespace-nowrap">
-                        {fmtDate(o.createdAt)}
-                      </td>
-                      <td className="px-5 py-3">
-                        <Link
-                          to={`/orders/${o.id}`}
-                          className="text-xs font-medium text-blue-400 hover:text-blue-300"
-                        >
-                          Ver →
-                        </Link>
-                      </td>
+            <>
+              <div
+                ref={tableContainerRef}
+                onScroll={updateScrollState}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUpOrLeave}
+                onMouseLeave={handleMouseUpOrLeave}
+                onClickCapture={handleClickCapture}
+                className={`overflow-x-auto rounded-t-2xl ${
+                  isDragging ? 'cursor-grabbing select-none' : hasOverflow ? 'cursor-grab' : ''
+                }`}
+              >
+                <table className="w-full text-sm">
+                  <thead ref={theadRef}>
+                    <tr
+                      className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800 bg-slate-900/90 select-none cursor-ew-resize"
+                      title="Gire a rodinha do mouse aqui para rolar horizontalmente"
+                    >
+                      <th className="px-3.5 py-3 whitespace-nowrap">Registro</th>
+                      <th className="px-3.5 py-3 min-w-[150px]">Placa / Cliente</th>
+                      <th className="px-3.5 py-3 min-w-[120px]">Modelo</th>
+                      <th className="px-3.5 py-3 whitespace-nowrap">Mecânico / Técnico</th>
+                      <th className="px-3.5 py-3 whitespace-nowrap">Km</th>
+                      <th className="px-3.5 py-3 whitespace-nowrap">Status</th>
+                      <th className="px-3.5 py-3 text-right whitespace-nowrap">Total</th>
+                      <th className="px-3.5 py-3 whitespace-nowrap">Data</th>
+                      <th className="px-3.5 py-3 text-right whitespace-nowrap"></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {filtered.map((o: Order) => (
+                      <tr key={o.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="px-3.5 py-3 font-mono text-slate-400 text-xs whitespace-nowrap">
+                          #{o.id.split('-')[0].toUpperCase()}
+                        </td>
+                        <td className="px-3.5 py-3">
+                          <div className="font-bold text-white tracking-wide">{o.vehicle.plate}</div>
+                          {o.client?.name ? (
+                            <div className="text-xs text-slate-300 font-medium truncate max-w-[180px]" title={o.client.name}>
+                              👤 {o.client.name}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-slate-500 italic">Cliente s/ cadastro</div>
+                          )}
+                          {o.client?.phone && (
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              📞 {o.client.phone}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3.5 py-3 text-slate-300 max-w-[150px] truncate" title={o.vehicle.model}>
+                          {o.vehicle.model}
+                        </td>
+                        <td className="px-3.5 py-3 whitespace-nowrap">
+                          <div className="flex flex-col gap-1">
+                            {o.mecanicoNome ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-200 border border-slate-700/80">
+                                <Wrench className="w-3 h-3 text-blue-400" />
+                                <span>{o.mecanicoNome}</span>
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-500 italic">Não atribuído</span>
+                            )}
+                            {o.auxiliarNome && (
+                              <span className="inline-flex items-center gap-1 text-[11px] text-amber-300 font-medium">
+                                <span>🤝</span>
+                                <span>Aux: {o.auxiliarNome}</span>
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3.5 py-3 text-slate-400 whitespace-nowrap">
+                          {o.vehicle.mileage.toLocaleString('pt-BR')}
+                        </td>
+                        <td className="px-3.5 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <StatusBadge status={o.status} />
+                            {o.vendaControle && (
+                              <span className="text-[10px] bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-1.5 py-0.5 rounded font-mono" title={`Venda #${o.vendaControle}`}>
+                                PDV #{o.vendaControle.slice(-4)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3.5 py-3 text-right font-semibold text-green-400 whitespace-nowrap">
+                          {currency(o.totalAmount)}
+                        </td>
+                        <td className="px-3.5 py-3 text-slate-400 whitespace-nowrap text-xs">
+                          {fmtDate(o.createdAt)}
+                        </td>
+                        <td className="px-3.5 py-3 text-right whitespace-nowrap">
+                          <Link
+                            to={`/orders/${o.id}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600/10 text-blue-400 hover:bg-blue-600/20 hover:text-blue-300 transition-colors"
+                          >
+                            <span>Ver</span>
+                            <span>→</span>
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Barra de rolagem flutuante sincronizada (Sticky no rodapé da janela) */}
+              {hasOverflow && (
+                <div className="sticky bottom-0 z-20 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-4 py-2.5 flex items-center justify-between rounded-b-2xl shadow-2xl">
+                  <div className="flex items-center gap-2 text-xs text-slate-300">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold text-[11px]">
+                      <ArrowLeftRight className="w-3 h-3" />
+                      Navegação lateral
+                    </span>
+                    <span className="hidden sm:inline text-slate-400 text-xs">
+                      Role com a <strong>rodinha no cabeçalho</strong>, segure <strong>Shift + Scroll</strong> ou use as setas
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => scrollHorizontally(-260)}
+                      disabled={!canScrollLeft}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-25 disabled:cursor-not-allowed text-slate-200 transition-colors border border-slate-700/60"
+                      title="Rolar colunas para a esquerda"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+
+                    {/* Mini barra de rolagem sincronizada */}
+                    <div
+                      ref={floatingScrollRef}
+                      onScroll={handleFloatingScroll}
+                      className="w-32 sm:w-56 h-3 bg-slate-800 rounded-full overflow-x-auto overflow-y-hidden cursor-pointer border border-slate-700/50"
+                      title="Arraste para rolar horizontalmente"
+                    >
+                      <div
+                        style={{
+                          width: `${tableScrollWidth}px`,
+                          height: 1,
+                        }}
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => scrollHorizontally(260)}
+                      disabled={!canScrollRight}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-25 disabled:cursor-not-allowed text-slate-200 transition-colors border border-slate-700/60"
+                      title="Rolar colunas para a direita"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
