@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   XCircle,
   Users,
+  Printer,
 } from 'lucide-react'
 import { erpApi, tenantsApi } from '../lib/api'
 import type { ClienteErp } from '../types'
@@ -60,6 +61,152 @@ function LojasBadge({ lojas }: { lojas: string | null }) {
       ))}
     </div>
   )
+}
+
+// ── Relatório de Clientes para Impressão ──────────────────────────────────────
+
+function buildClientesReportHtml(
+  clientes: ClienteErp[],
+  totalFiltrado: number,
+  filtrosInfo?: string
+) {
+  const now = new Date().toLocaleDateString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+
+  const totalGasto = clientes.reduce((s, c) => s + (Number(c.total_gasto) || 0), 0)
+  const totalCompras = clientes.reduce((s, c) => s + (Number(c.qtd_compras) || 0), 0)
+  const comComprasCount = clientes.filter(c => (Number(c.qtd_compras) || 0) > 0).length
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Relatório de Clientes — 4Rodas ERP</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+           font-size: 11px; color: #111; padding: 18px; line-height: 1.35; background: #fff; }
+    .header { border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-end; }
+    h1 { font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 3px; }
+    .sub { font-size: 10px; color: #64748b; }
+
+    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+    .summary-card { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; background: #f8fafc; }
+    .summary-card .lbl { font-size: 9px; text-transform: uppercase; font-weight: 600; color: #64748b; }
+    .summary-card .val { font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 2px; }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    th { background: #f1f5f9; padding: 6px 8px; border: 1px solid #cbd5e1; font-size: 10px; font-weight: 700; text-transform: uppercase; color: #475569; }
+    td { padding: 5px 8px; border: 1px solid #e2e8f0; vertical-align: top; font-size: 10px; }
+    tr:nth-child(even) td { background: #fafafa; }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .placa { font-family: ui-monospace, SFMono-Regular, monospace; font-weight: 700; background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; font-size: 10px; }
+    .badge { font-size: 9px; font-weight: 600; padding: 1px 4px; border-radius: 3px; display: inline-block; }
+    .badge-ativo { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .badge-inativo { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+
+    tfoot td { font-weight: 700; background: #f8fafc; border-top: 2px solid #94a3b8; }
+    .rodape { margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 8px; font-size: 9px; color: #94a3b8; display: flex; justify-content: space-between; }
+
+    @media print {
+      body { padding: 10px; }
+      tr { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Relatório Geral de Clientes</h1>
+      <p class="sub">4Rodas ERP &nbsp;|&nbsp; Emitido em ${now} ${filtrosInfo ? `&nbsp;|&nbsp; Filtros: ${filtrosInfo}` : ''}</p>
+    </div>
+    <div style="text-align:right">
+      <p class="sub">Histórico de Compras (ERP) e Ordens de Serviço (App)</p>
+    </div>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="lbl">Total Listado</div>
+      <div class="val">${clientes.length} de ${totalFiltrado} clientes</div>
+    </div>
+    <div class="summary-card">
+      <div class="lbl">Com Compras / OS</div>
+      <div class="val">${comComprasCount} clientes</div>
+    </div>
+    <div class="summary-card">
+      <div class="lbl">Total de Compras / OS</div>
+      <div class="val">${totalCompras} transações</div>
+    </div>
+    <div class="summary-card">
+      <div class="lbl">Total Gasto Acumulado</div>
+      <div class="val" style="color:#059669">${currency(totalGasto)}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="text-align:left">#</th>
+        <th style="text-align:left">Cliente</th>
+        <th style="text-align:left">Telefone / Doc</th>
+        <th style="text-align:left">Veículo</th>
+        <th style="text-align:left">Loja(s)</th>
+        <th style="text-align:right">Compras</th>
+        <th style="text-align:center">Última Compra</th>
+        <th style="text-align:right">Total Gasto (ERP + OS)</th>
+        <th style="text-align:center">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${clientes.length === 0 ? `
+        <tr><td colspan="9" style="text-align:center;padding:16px;color:#64748b">Nenhum cliente encontrado para os filtros selecionados.</td></tr>
+      ` : clientes.map((c, idx) => `
+        <tr>
+          <td style="color:#94a3b8;font-size:9px">${idx + 1}</td>
+          <td><strong>${c.nome}</strong></td>
+          <td>
+            ${c.telefone || c.celular || '—'}
+            ${c.cpf_cnpj ? `<br><span class="mono" style="color:#64748b;font-size:9px">${c.cpf_cnpj}</span>` : ''}
+          </td>
+          <td>
+            ${c.placa ? `<span class="placa">${c.placa}</span>` : ''}
+            ${c.modelo ? `<div style="color:#475569;font-size:9px;margin-top:2px">${c.modelo}</div>` : (!c.placa ? '—' : '')}
+          </td>
+          <td>${c.lojas || '—'}</td>
+          <td style="text-align:right">${c.qtd_compras || 0}</td>
+          <td style="text-align:center">${formatDate(c.ultima_compra)}</td>
+          <td style="text-align:right;font-weight:600;color:${(c.total_gasto || 0) > 0 ? '#059669' : '#64748b'}">
+            ${currency(c.total_gasto || 0)}
+          </td>
+          <td style="text-align:center">
+            <span class="badge ${c.inativo ? 'badge-inativo' : 'badge-ativo'}">${c.inativo ? 'Inativo' : 'Ativo'}</span>
+          </td>
+        </tr>
+      `).join('')}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" style="text-align:left">Totais da Lista (${clientes.length} clientes)</td>
+        <td style="text-align:right">${totalCompras}</td>
+        <td></td>
+        <td style="text-align:right;color:#059669">${currency(totalGasto)}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="rodape">
+    <span>4Rodas ERP &nbsp;·&nbsp; Sistema de Gestão Automotiva</span>
+    <span>Documento gerado para controle interno</span>
+  </div>
+
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`
 }
 
 export default function Clientes() {
@@ -244,6 +391,44 @@ export default function Clientes() {
     }
   }
 
+  const [printingRelatorio, setPrintingRelatorio] = useState(false)
+
+  async function handlePrintRelatorio() {
+    setPrintingRelatorio(true)
+    try {
+      const res = await erpApi.clientes({
+        search: debouncedSearch || undefined,
+        status,
+        page: 1,
+        limit: Math.min(1000, Math.max(total, 50)),
+        tenant_id: selectedLoja || undefined,
+        col_cliente: debouncedColCliente || undefined,
+        col_placa: debouncedColPlaca || undefined,
+        col_veiculo: debouncedColVeiculo || undefined,
+        col_loja: colLoja || undefined,
+        com_compras: comCompras !== 'todas' ? comCompras : undefined,
+        sort: sort || undefined,
+      })
+
+      const listaParaImprimir = res.data && res.data.length > 0 ? res.data : clientes
+      const filtrosDesc = [
+        selectedLoja ? `Loja: ${listaLojas.find(l => String(l.id) === selectedLoja)?.nome || selectedLoja}` : 'Todas as Lojas',
+        status !== 'todos' ? `Status: ${status === 'ativos' ? 'Ativos' : 'Inativos'}` : null,
+        comCompras !== 'todas' ? `Compras: ${comCompras === 'com_compras' ? 'Com Compras' : 'Sem Compras'}` : null,
+        debouncedSearch ? `Busca: "${debouncedSearch}"` : null,
+      ].filter(Boolean).join(' | ')
+
+      const win = window.open('', '_blank', 'width=1000,height=800')
+      if (!win) return
+      win.document.write(buildClientesReportHtml(listaParaImprimir, res.total ?? total, filtrosDesc))
+      win.document.close()
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao gerar relatório de clientes')
+    } finally {
+      setPrintingRelatorio(false)
+    }
+  }
+
   const clientes: ClienteErp[] = data?.data ?? []
   const total = data?.total ?? 0
   const pages = data?.pages ?? 1
@@ -307,13 +492,35 @@ export default function Clientes() {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenCreate}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-600/25 transition-all self-start sm:self-auto"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>Novo Cliente</span>
-        </button>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
+          <button
+            type="button"
+            onClick={handlePrintRelatorio}
+            disabled={printingRelatorio}
+            className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-sm font-semibold rounded-xl border border-slate-700 shadow-sm transition-all"
+            title="Imprimir relatório da lista filtrada de clientes"
+          >
+            {printingRelatorio ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                <span>Gerando…</span>
+              </>
+            ) : (
+              <>
+                <Printer className="w-4 h-4 text-blue-400" />
+                <span>Relatório</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={handleOpenCreate}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-600/25 transition-all"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Novo Cliente</span>
+          </button>
+        </div>
       </div>
 
       {/* Feedback Toast */}

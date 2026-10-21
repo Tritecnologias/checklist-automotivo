@@ -3115,7 +3115,7 @@ function getClienteTenantId(req: Request): number | null {
 router.get('/clientes', requireManagerUp, async (req, res) => {
   try {
     const page   = Math.max(1, Number(req.query.page ?? 1));
-    const limit  = 30;
+    const limit  = req.query.limit ? Math.min(5000, Math.max(1, Number(req.query.limit))) : 30;
     const offset = (page - 1) * limit;
     const search = String(req.query.search ?? '').trim();
     const status = String(req.query.status ?? 'ativos');
@@ -3984,10 +3984,42 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
         osParams
       );
 
+      const osIds = (osRows as any[]).map((r: any) => r.id);
+      const itemsByOrderId = new Map<string, any[]>();
+      if (osIds.length > 0) {
+        const [itemsRows] = await pool.query<any>(
+          `SELECT oi.id, oi.order_id, oi.type, oi.description, oi.code,
+                  oi.quantity, oi.unit_price, oi.labor_price, oi.total,
+                  oi.mecanico_nome, oi.created_at
+           FROM os_order_items oi
+           WHERE oi.order_id IN (?)
+           ORDER BY oi.created_at ASC`,
+          [osIds]
+        ).catch(() => [[]]);
+
+        for (const item of (itemsRows || []) as any[]) {
+          const oid = String(item.order_id);
+          if (!itemsByOrderId.has(oid)) itemsByOrderId.set(oid, []);
+          itemsByOrderId.get(oid)!.push({
+            id: Number(item.id),
+            order_id: oid,
+            type: item.type === 'service' ? 'service' : 'product',
+            description: item.description || '',
+            code: item.code || null,
+            quantity: Number(item.quantity || 1),
+            unit_price: Number(item.unit_price || 0),
+            labor_price: Number(item.labor_price || 0),
+            total: Number(item.total || 0),
+            mecanico_nome: item.mecanico_nome || null,
+          });
+        }
+      }
+
       os = (osRows as any[]).map((o: any) => {
         const totalAmount = Number(o.total_amount || 0);
         const laborAmount = Number(o.labor_amount ?? 0);
         const partsAmount = Math.max(0, totalAmount - laborAmount);
+        const oItems = itemsByOrderId.get(String(o.id)) || [];
         return {
           id: o.id,
           plate: o.plate,
@@ -4005,6 +4037,7 @@ router.get('/clientes/:id/historico', requireManagerUp, async (req, res) => {
           vendaControle: o.venda_controle || null,
           tenantId: o.tenant_id ? Number(o.tenant_id) : undefined,
           nomeLoja: o.nome_loja || null,
+          itens: oItems,
         };
       });
     }

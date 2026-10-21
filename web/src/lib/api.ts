@@ -572,6 +572,7 @@ export const erpApi = {
     search?: string
     status?: 'ativos' | 'inativos' | 'todos'
     page?: number
+    limit?: number
     tenant_id?: number | string
     col_cliente?: string
     col_placa?: string
@@ -584,6 +585,7 @@ export const erpApi = {
     if (params.search) q.set('search', params.search)
     if (params.status) q.set('status', params.status)
     if (params.page)   q.set('page',   String(params.page))
+    if (params.limit)  q.set('limit',  String(params.limit))
     if (params.tenant_id !== undefined && params.tenant_id !== '') q.set('tenant_id', String(params.tenant_id))
     if (params.col_cliente) q.set('col_cliente', params.col_cliente)
     if (params.col_placa)   q.set('col_placa',   params.col_placa)

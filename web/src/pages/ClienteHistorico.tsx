@@ -104,16 +104,53 @@ function buildPrintHtml(
             <th style="text-align:right">Total</th>
           </tr></thead>
           <tbody>
-            ${os.map(o => `<tr>
-              <td><span class="mono">#${o.id.split('-')[0].toUpperCase()}</span><br><span class="placa">${o.plate}</span>${o.clientName && o.clientName.toLowerCase() !== cliente.nome.toLowerCase() ? `<br><small style="color:#666">OS: ${o.clientName}</small>` : ''}</td>
-              <td>${o.nomeLoja || '—'}</td>
-              <td>${o.model || '—'}</td>
-              <td>${formatDate(o.createdAt)}</td>
-              <td>${STATUS_LABEL[o.status] ?? o.status}</td>
-              <td style="text-align:right">${currency(o.partsAmount ?? Math.max(0, o.total - o.laborAmount))}</td>
-              <td style="text-align:right">${currency(o.laborAmount)}</td>
-              <td style="text-align:right;font-weight:600">${currency(o.total)}</td>
-            </tr>`).join('')}
+            ${os.map(o => {
+              const itens = o.itens ?? []
+              const itensHtml = itens.length
+                ? `<table class="sub-table">
+                    <thead><tr>
+                      <th style="text-align:left">Serviço / Produto Executado</th>
+                      <th style="text-align:left">Tipo</th>
+                      <th style="text-align:left">Mecânico / Técnico</th>
+                      <th style="text-align:right">Qtd</th>
+                      <th style="text-align:right">Unit.</th>
+                      <th style="text-align:right">M.O.</th>
+                      <th style="text-align:right">Subtotal</th>
+                    </tr></thead>
+                    <tbody>
+                      ${itens.map(i => `
+                        <tr>
+                          <td><strong>${i.description}</strong>${i.code ? ` <small style="color:#777">(${i.code})</small>` : ''}</td>
+                          <td><span class="badge ${i.type === 'service' ? 'badge-servico' : 'badge-peca'}">${i.type === 'service' ? 'Serviço' : 'Peça'}</span></td>
+                          <td>${i.mecanico_nome || '—'}</td>
+                          <td style="text-align:right">${Number(i.quantity).toLocaleString('pt-BR')}</td>
+                          <td style="text-align:right">${currency(i.unit_price)}</td>
+                          <td style="text-align:right">${(i.labor_price || 0) > 0 ? currency(i.labor_price) : '—'}</td>
+                          <td style="text-align:right;font-weight:600">${currency(i.total)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                    <tfoot><tr>
+                      <td colspan="6" style="text-align:left;color:#555">
+                        ${itens.length} ${itens.length === 1 ? 'item executado' : 'itens executados'}
+                        (${itens.filter(i => i.type === 'service').length} serviços, ${itens.filter(i => i.type === 'product').length} peças)
+                      </td>
+                      <td style="text-align:right;font-weight:700">${currency(itens.reduce((s, i) => s + (i.total || 0), 0))}</td>
+                    </tr></tfoot>
+                  </table>`
+                : ''
+
+              return `<tr class="os-row">
+                <td><span class="mono">#${o.id.split('-')[0].toUpperCase()}</span><br><span class="placa">${o.plate}</span>${o.clientName && o.clientName.toLowerCase() !== cliente.nome.toLowerCase() ? `<br><small style="color:#666">OS: ${o.clientName}</small>` : ''}</td>
+                <td>${o.nomeLoja || '—'}</td>
+                <td>${o.model || '—'}</td>
+                <td>${formatDate(o.createdAt)}</td>
+                <td>${STATUS_LABEL[o.status] ?? o.status}</td>
+                <td style="text-align:right">${currency(o.partsAmount ?? Math.max(0, o.total - o.laborAmount))}</td>
+                <td style="text-align:right">${currency(o.laborAmount)}</td>
+                <td style="text-align:right;font-weight:600">${currency(o.total)}</td>
+              </tr>
+              ${itensHtml ? `<tr><td colspan="8" style="padding:0">${itensHtml}</td></tr>` : ''}`
+            }).join('')}
           </tbody>
         </table>`
     : `<h2>Ordens de Serviço — App</h2>
@@ -150,11 +187,16 @@ function buildPrintHtml(
     td { padding: 6px 8px; border: 1px solid #e0e0e0; vertical-align: top; }
     tr:nth-child(even) td { background: #fafafa; }
     .venda-row td { background: #fff; font-weight: 500; border-top: 2px solid #ccc; }
+    .os-row td { background: #fff; font-weight: 500; border-top: 2px solid #ccc; }
 
     .sub-table { margin: 4px 0 4px 24px; width: calc(100% - 24px); border-collapse: collapse; }
     .sub-table th { font-size: 10px; background: #efefef; padding: 4px 6px; border: 1px solid #ddd; }
     .sub-table td { font-size: 11px; padding: 4px 6px; border: 1px solid #e8e8e8; }
     .sub-table tfoot td { font-size: 11px; background: #f5f5f5; border-top: 1px solid #ccc; }
+
+    .badge { font-size: 9px; font-weight: 700; text-transform: uppercase; padding: 1px 5px; border-radius: 3px; display: inline-block; }
+    .badge-servico { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+    .badge-peca { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
 
     .mono  { font-family: monospace; font-size: 11px; }
     .placa { font-family: monospace; font-weight: 700; font-size: 11px; }
@@ -367,6 +409,166 @@ function VendaRow({
   )
 }
 
+// ── Linha expansível de Ordem de Serviço ──────────────────────────────────────
+
+function OsRow({
+  o,
+  clienteNome,
+  forceOpen,
+}: {
+  o: ClienteHistoricoType['os'][number]
+  clienteNome?: string
+  forceOpen?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const isOpen = forceOpen || open
+  const itens = o.itens ?? []
+  const temItens = itens.length > 0
+
+  return (
+    <>
+      <tr
+        onClick={() => !forceOpen && setOpen(prev => !prev)}
+        className={`transition-colors ${forceOpen ? '' : 'hover:bg-slate-800/60 cursor-pointer select-none'}`}
+      >
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            {!forceOpen && (
+              <span className="text-slate-500 text-xs w-3 text-center">
+                {temItens ? (isOpen ? '▼' : '▶') : '·'}
+              </span>
+            )}
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-xs text-blue-400 font-bold">
+                #{o.id.split('-')[0].toUpperCase()}
+              </span>
+              <a
+                href={`/orders/${o.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                title="Abrir Ordem de Serviço em nova aba"
+                className="text-slate-500 hover:text-white p-0.5 rounded transition-colors"
+              >
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+            {o.vendaControle && (
+              <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-800/40">
+                Venda #{o.vendaControle}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5 pl-5">
+            <span className="text-xs text-amber-400 font-mono font-semibold">{o.plate}</span>
+          </div>
+          {o.clientName && o.clientName.trim() && clienteNome && o.clientName.toLowerCase() !== clienteNome.toLowerCase() && (
+            <p className="text-[10px] text-slate-400 mt-1 ml-5 flex items-center gap-1 font-medium bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 w-fit" title="Nome do cliente na OS">
+              👤 {o.clientName}
+            </p>
+          )}
+        </td>
+        <td className="px-4 py-3 text-xs text-slate-400">
+          {o.nomeLoja ? (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-800/40 whitespace-nowrap">
+              {o.nomeLoja}
+            </span>
+          ) : (
+            '—'
+          )}
+        </td>
+        <td className="px-4 py-3 text-slate-300 text-xs font-medium">{o.model || '—'}</td>
+        <td className="px-4 py-3 text-slate-400 text-xs">{formatDate(o.createdAt)}</td>
+        <td className="px-4 py-3">
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_CLASS[o.status] ?? STATUS_CLASS.closed}`}>
+            {STATUS_LABEL[o.status] ?? o.status}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-right text-slate-300 text-xs font-mono">
+          {currency(o.partsAmount ?? Math.max(0, o.total - o.laborAmount))}
+        </td>
+        <td className="px-4 py-3 text-right text-blue-400 text-xs font-mono">
+          {currency(o.laborAmount)}
+        </td>
+        <td className="px-4 py-3 text-right font-bold text-green-400 font-mono text-xs">
+          {currency(o.total)}
+        </td>
+      </tr>
+
+      {isOpen && (
+        <tr>
+          <td colSpan={8} className="bg-slate-950 px-0 py-0">
+            {!temItens ? (
+              <p className="px-10 py-3 text-slate-500 text-xs">Nenhum serviço ou produto detalhado registrado nesta OS.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-t border-b border-slate-800 text-left bg-slate-900/60">
+                      <th className="pl-10 pr-4 py-2 text-slate-400 font-medium">Serviço / Peça Executada</th>
+                      <th className="px-3 py-2 text-slate-400 font-medium">Tipo</th>
+                      <th className="px-3 py-2 text-slate-400 font-medium">Mecânico / Técnico</th>
+                      <th className="px-4 py-2 text-slate-400 font-medium text-right">Qtd</th>
+                      <th className="px-4 py-2 text-slate-400 font-medium text-right">Unitário</th>
+                      <th className="px-4 py-2 text-slate-400 font-medium text-right">M.O.</th>
+                      <th className="px-4 py-2 text-slate-400 font-medium text-right pr-6">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {itens.map(item => (
+                      <tr key={item.id} className="hover:bg-slate-800/40">
+                        <td className="pl-10 pr-4 py-2 text-slate-200">
+                          <span className="font-medium">{item.description}</span>
+                          {item.code && <span className="ml-1.5 text-[11px] text-slate-500 font-mono">({item.code})</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                            item.type === 'service'
+                              ? 'bg-blue-900/40 text-blue-300 border border-blue-800/50'
+                              : 'bg-slate-800 text-slate-300 border border-slate-700'
+                          }`}>
+                            {item.type === 'service' ? 'Serviço' : 'Peça'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-400">
+                          {item.mecanico_nome || '—'}
+                        </td>
+                        <td className="px-4 py-2 text-right text-slate-300 font-mono">
+                          {Number(item.quantity).toLocaleString('pt-BR')}
+                        </td>
+                        <td className="px-4 py-2 text-right text-slate-300 font-mono">
+                          {currency(item.unit_price)}
+                        </td>
+                        <td className="px-4 py-2 text-right text-blue-400 font-mono">
+                          {(item.labor_price || 0) > 0 ? currency(item.labor_price) : '—'}
+                        </td>
+                        <td className="px-4 py-2 text-right text-green-400 font-semibold font-mono pr-6">
+                          {currency(item.total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-slate-800 bg-slate-900/40">
+                      <td colSpan={6} className="pl-10 py-2 text-slate-400 text-xs">
+                        {itens.length} {itens.length === 1 ? 'item executado' : 'itens executados'}
+                        {' '}({itens.filter(i => i.type === 'service').length} serviços, {itens.filter(i => i.type === 'product').length} peças)
+                      </td>
+                      <td className="px-4 py-2 text-right font-bold text-green-400 font-mono pr-6">
+                        {currency(itens.reduce((s, i) => s + (i.total || 0), 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
 // ── Página principal ──────────────────────────────────────────────────────────
 
 export default function ClienteHistorico() {
@@ -390,6 +592,8 @@ export default function ClienteHistorico() {
 
   const [printing, setPrinting] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
+  const [forceOpenVendas, setForceOpenVendas] = useState(false)
+  const [forceOpenOs, setForceOpenOs] = useState(false)
 
   // Debounce do campo de busca rápida
   useEffect(() => {
@@ -819,9 +1023,20 @@ export default function ClienteHistorico() {
                 <span className="ml-2 text-sm font-normal text-slate-500 font-mono">({vendas.length})</span>
               </h2>
             </div>
-            <p className="text-xs text-slate-500 hidden sm:block">
-              Clique em uma compra para expandir os itens e produtos
-            </p>
+            <div className="flex items-center gap-3">
+              {vendas.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setForceOpenVendas(v => !v)}
+                  className="text-xs text-emerald-400 hover:text-emerald-300 font-medium transition-colors py-1 px-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800/40 hover:bg-emerald-900/40"
+                >
+                  {forceOpenVendas ? 'Recolher produtos' : 'Expandir todos os produtos'}
+                </button>
+              )}
+              <p className="text-xs text-slate-500 hidden sm:block">
+                Clique em uma compra para ver itens
+              </p>
+            </div>
           </div>
 
           {vendas.length === 0 ? (
@@ -850,7 +1065,7 @@ export default function ClienteHistorico() {
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {vendas.map(v => (
-                    <VendaRow key={v.controle} v={v} />
+                    <VendaRow key={v.controle} v={v} forceOpen={forceOpenVendas} />
                   ))}
                 </tbody>
               </table>
@@ -870,11 +1085,22 @@ export default function ClienteHistorico() {
                 <span className="ml-2 text-sm font-normal text-slate-500 font-mono">({os.length})</span>
               </h2>
             </div>
-            {cliente.placa && (
-              <span className="text-xs text-slate-400 font-mono bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700">
-                Placa: {cliente.placa}
-              </span>
-            )}
+            <div className="flex items-center gap-3">
+              {os.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setForceOpenOs(o => !o)}
+                  className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors py-1 px-2.5 rounded-lg bg-blue-950/40 border border-blue-800/40 hover:bg-blue-900/40"
+                >
+                  {forceOpenOs ? 'Recolher serviços' : 'Expandir todos os serviços executados'}
+                </button>
+              )}
+              {cliente.placa && (
+                <span className="text-xs text-slate-400 font-mono bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700">
+                  Placa: {cliente.placa}
+                </span>
+              )}
+            </div>
           </div>
 
           {os.length === 0 ? (
@@ -907,67 +1133,7 @@ export default function ClienteHistorico() {
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {os.map(o => (
-                    <tr
-                      key={o.id}
-                      onClick={() => navigate(`/orders/${o.id}`)}
-                      className="hover:bg-slate-800/60 transition-colors cursor-pointer"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <p className="font-mono text-xs text-blue-400 font-bold">
-                            #{o.id.split('-')[0].toUpperCase()}
-                          </p>
-                          <a
-                            href={`/orders/${o.id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={e => e.stopPropagation()}
-                            title="Abrir Ordem de Serviço em nova aba"
-                            className="text-slate-500 hover:text-white p-0.5 rounded transition-colors"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-xs text-amber-400 font-mono font-semibold">{o.plate}</span>
-                          {o.vendaControle && (
-                            <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-800/40">
-                              Venda #{o.vendaControle}
-                            </span>
-                          )}
-                        </div>
-                        {o.clientName && o.clientName.trim() && o.clientName.toLowerCase() !== cliente.nome.toLowerCase() && (
-                          <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1 font-medium bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 w-fit" title="Nome do cliente na OS">
-                            👤 {o.clientName}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-400">
-                        {o.nomeLoja ? (
-                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-800/40 whitespace-nowrap">
-                            {o.nomeLoja}
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-slate-300 text-xs font-medium">{o.model || '—'}</td>
-                      <td className="px-4 py-3 text-slate-400 text-xs">{formatDate(o.createdAt)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_CLASS[o.status] ?? STATUS_CLASS.closed}`}>
-                          {STATUS_LABEL[o.status] ?? o.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-slate-300 text-xs font-mono">
-                        {currency(o.partsAmount ?? Math.max(0, o.total - o.laborAmount))}
-                      </td>
-                      <td className="px-4 py-3 text-right text-blue-400 text-xs font-mono">
-                        {currency(o.laborAmount)}
-                      </td>
-                      <td className="px-4 py-3 text-right font-bold text-green-400 font-mono text-xs">
-                        {currency(o.total)}
-                      </td>
-                    </tr>
+                    <OsRow key={o.id} o={o} clienteNome={cliente.nome} forceOpen={forceOpenOs} />
                   ))}
                 </tbody>
               </table>

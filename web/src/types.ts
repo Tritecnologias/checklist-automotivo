@@ -364,6 +364,18 @@ export interface ClienteHistorico {
     tenantId?: number
     nomeLoja?: string | null
     vendaControle?: string | null
+    itens?: {
+      id: number
+      order_id: string
+      type: 'product' | 'service'
+      description: string
+      code?: string | null
+      quantity: number
+      unit_price: number
+      labor_price: number
+      total: number
+      mecanico_nome?: string | null
+    }[]
   }[]
 }
 
