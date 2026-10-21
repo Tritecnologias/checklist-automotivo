@@ -2,6 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import path from 'path';
+import fs from 'fs';
 import { pool } from '../db';
 import { JWT_SECRET, type JwtPayload } from '../middleware/auth';
 import { getUserPermissions, userHasPermission } from '../lib/permissions';
@@ -95,6 +97,7 @@ async function requireManagerUp(req: Request, res: Response, next: NextFunction)
   else if (path.startsWith('/relatorios/multi-lojas')) neededPerm = 'relatorio_multi_lojas';
   else if (path.startsWith('/vendas')) neededPerm = 'vendas';
   else if (path.startsWith('/config/parametros')) neededPerm = 'config_parametros';
+  else if (path.startsWith('/config/sistema')) neededPerm = 'config_sistema';
 
   if (neededPerm) {
     try {
@@ -113,6 +116,32 @@ async function requireManagerUp(req: Request, res: Response, next: NextFunction)
   res.status(403).json({ message: 'Permissão insuficiente' });
 }
 
+// ── ROTA PÚBLICA PARA LOGO E IDENTIDADE (Acesso deslogado / Tela de Login) ───
+
+router.get('/config/public', async (req, res) => {
+  try {
+    const tenantId = Number(req.headers['x-tenant-id']) || null;
+    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name')`;
+    const params: any[] = [];
+    if (tenantId) {
+      query += ` AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY tenant_id DESC`;
+      params.push(tenantId);
+    } else {
+      query += ` AND tenant_id IS NULL`;
+    }
+    const [rows] = await pool.query<any>(query, params);
+    const map = new Map<string, string>();
+    for (const r of (rows || []) as any[]) {
+      if (!map.has(r.chave)) map.set(r.chave, r.valor);
+    }
+    res.json({
+      logo_url: map.get('system_logo') || null,
+      nome_sistema: map.get('system_name') || '4Rodas ERP',
+    });
+  } catch (err: any) {
+    res.json({ logo_url: null, nome_sistema: '4Rodas ERP' });
+  }
+});
 
 router.use(requireAdmin);
 
@@ -4493,6 +4522,137 @@ router.put('/config/parametros', requireManagerUp, async (req, res) => {
     res.json({ ok: true, limite_desconto_padrao: pct });
   } catch (err: any) {
     res.status(500).json({ message: err?.message || 'Erro ao salvar parâmetros' });
+  }
+});
+
+// ── CONFIGURAÇÕES GERAIS DO SISTEMA (LOGO, NOME, IDENTIDADE) ───────────────
+
+router.get('/config/sistema', async (req, res) => {
+  try {
+    const tenantId = Number(req.headers['x-tenant-id']) || null;
+    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name')`;
+    const params: any[] = [];
+    if (tenantId) {
+      query += ` AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY tenant_id DESC`;
+      params.push(tenantId);
+    } else {
+      query += ` AND tenant_id IS NULL`;
+    }
+    const [rows] = await pool.query<any>(query, params);
+    const map = new Map<string, { valor: string; tenant_id: number | null }>();
+    for (const r of (rows || []) as any[]) {
+      if (!map.has(r.chave)) map.set(r.chave, { valor: r.valor, tenant_id: r.tenant_id });
+    }
+    res.json({
+      logo_url: map.get('system_logo')?.valor || null,
+      nome_sistema: map.get('system_name')?.valor || '4Rodas ERP',
+      tenant_id: map.get('system_logo')?.tenant_id ?? null,
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao carregar configurações do sistema' });
+  }
+});
+
+router.put('/config/sistema', requireManagerUp, async (req, res) => {
+  try {
+    const { logo, nome_sistema, aplicar_todas_lojas } = req.body as {
+      logo?: string | null;
+      nome_sistema?: string;
+      aplicar_todas_lojas?: boolean;
+    };
+
+    const tenantId = Number(req.headers['x-tenant-id']) || null;
+    const targetTenantId = (Boolean(aplicar_todas_lojas) || (req.user?.role === 'owner' && !tenantId)) ? null : tenantId;
+
+    // Se nome do sistema foi enviado
+    if (typeof nome_sistema === 'string' && nome_sistema.trim()) {
+      const cleanName = nome_sistema.trim().slice(0, 100);
+      if (Boolean(aplicar_todas_lojas)) {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_name', NULL, ?, 'Nome principal do sistema exibido na barra superior e menus')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [cleanName]
+        );
+        await pool.query(
+          `DELETE FROM app_config WHERE chave = 'system_name' AND tenant_id IS NOT NULL`
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_name', ?, ?, 'Nome principal do sistema exibido na barra superior e menus')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [targetTenantId, cleanName]
+        );
+      }
+    }
+
+    // Se logo foi enviado (string base64 ou URL ou null para remover)
+    if (logo === null) {
+      if (Boolean(aplicar_todas_lojas) || targetTenantId === null) {
+        await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo'`);
+      } else {
+        await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo' AND tenant_id = ?`, [targetTenantId]);
+      }
+    } else if (typeof logo === 'string' && logo.trim()) {
+      const finalLogoValue = logo.trim();
+
+      // Salva arquivo físico em uploads/ também, para redundância
+      try {
+        const matches = finalLogoValue.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const extension = matches[1].split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+          const buffer = Buffer.from(matches[2], 'base64');
+          const fileName = targetTenantId ? `logo_tenant_${targetTenantId}.${extension}` : `logo.${extension}`;
+          const uploadsPath = path.join(__dirname, '../../uploads');
+          if (!fs.existsSync(uploadsPath)) fs.mkdirSync(uploadsPath, { recursive: true });
+          fs.writeFileSync(path.join(uploadsPath, fileName), buffer);
+        }
+      } catch (fileErr) {
+        console.warn('Aviso ao gravar arquivo de logo em disco:', fileErr);
+      }
+
+      if (Boolean(aplicar_todas_lojas)) {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo', NULL, ?, 'Logotipo customizado do sistema em base64/URL')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [finalLogoValue]
+        );
+        await pool.query(
+          `DELETE FROM app_config WHERE chave = 'system_logo' AND tenant_id IS NOT NULL`
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo', ?, ?, 'Logotipo customizado do sistema em base64/URL')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [targetTenantId, finalLogoValue]
+        );
+      }
+    }
+
+    res.json({ ok: true, message: 'Configurações do sistema atualizadas com sucesso' });
+  } catch (err: any) {
+    console.error('Erro ao salvar configurações do sistema:', err);
+    res.status(500).json({ message: err?.message || 'Erro ao salvar configurações do sistema' });
+  }
+});
+
+router.delete('/config/sistema/logo', requireManagerUp, async (req, res) => {
+  try {
+    const tenantId = Number(req.headers['x-tenant-id']) || null;
+    const isOwner = req.user?.role === 'owner';
+    if (isOwner && !tenantId) {
+      await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo'`);
+    } else if (tenantId) {
+      await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo' AND tenant_id = ?`, [tenantId]);
+    } else {
+      await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo'`);
+    }
+    res.json({ ok: true, message: 'Logotipo padrão restaurado com sucesso' });
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Erro ao restaurar logotipo padrão' });
   }
 });
 

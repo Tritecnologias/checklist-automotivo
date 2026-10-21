@@ -198,6 +198,12 @@ export const PERMISSION_CATALOG: PermissionCategory[] = [
         descricao: 'Definir regras operacionais, juros e padrões da empresa.',
         rota: '/erp/config/parametros',
       },
+      {
+        id: 'config_sistema',
+        nome: 'Configurações do Sistema & Logo',
+        descricao: 'Personalizar logotipo do sistema, nome da empresa e identidade visual.',
+        rota: '/erp/configuracoes',
+      },
     ],
   },
 ];
@@ -210,7 +216,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'dashboard', 'pdv', 'caixa', 'produtos', 'estoque', 'estoque_valorizacao',
     'estoque_curva_abc', 'estoque_sugestao_compras', 'estoque_kardex', 'oficina',
     'vendas', 'contas_receber', 'contas_pagar', 'dre', 'clientes', 'crm',
-    'os_orders', 'quotes', 'relatorio_multi_lojas', 'importar', 'config_tipos', 'config_instalacoes'
+    'os_orders', 'quotes', 'relatorio_multi_lojas', 'importar', 'config_tipos', 'config_instalacoes', 'config_sistema'
   ],
   caixa: [
     'dashboard', 'pdv', 'caixa'

@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useSystemConfig } from '../contexts/ConfigContext'
 import { Boxes, Users, Store, Shield, LogOut, LayoutDashboard, type LucideIcon } from 'lucide-react'
 
 const nav: { to: string; label: string; icon: LucideIcon }[] = [
@@ -11,6 +12,7 @@ const nav: { to: string; label: string; icon: LucideIcon }[] = [
 export default function AdminLayout() {
   const navigate = useNavigate()
   const { logout, user } = useAuth()
+  const { logoUrl, nomeSistema } = useSystemConfig()
 
   function handleLogout() {
     logout()
@@ -22,8 +24,14 @@ export default function AdminLayout() {
       <header className="bg-slate-900 border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-6 flex items-center gap-8 h-14">
           <div className="flex items-center gap-2 text-white font-bold tracking-tight">
-            <Shield className="w-5 h-5 text-blue-500" />
-            <span>Admin 4Rodas</span>
+            {logoUrl ? (
+              <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center p-0.5 overflow-hidden shrink-0">
+                <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+              </div>
+            ) : (
+              <Shield className="w-5 h-5 text-blue-500" />
+            )}
+            <span>{nomeSistema ? `Admin ${nomeSistema}` : 'Admin 4Rodas'}</span>
           </div>
           <nav className="flex items-center gap-1.5 flex-1">
             {nav.map(({ to, label, icon: Icon }) => (

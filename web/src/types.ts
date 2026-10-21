@@ -1199,3 +1199,11 @@ export interface KardexResponse {
   limite: number
   total_paginas: number
 }
+
+// ── Configurações e Identidade do Sistema ─────────────────────────────────────
+
+export interface ConfigSistema {
+  logo_url: string | null
+  nome_sistema: string
+  tenant_id?: number | null
+}

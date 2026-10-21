@@ -37,13 +37,16 @@ import KardexEstoque from './pages/KardexEstoque'
 import OficinaProdutividade from './pages/OficinaProdutividade'
 import DreGerencial from './pages/DreGerencial'
 import GerenciadorPapeis from './pages/GerenciadorPapeis'
+import Configuracoes from './pages/Configuracoes'
+import { ConfigProvider } from './contexts/ConfigContext'
 
 export default function App() {
 
   return (
     <AuthProvider>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
+      <ConfigProvider>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <Routes>
           {/* Login principal (JWT) */}
           <Route path="/login" element={<Login />} />
 
@@ -91,6 +94,8 @@ export default function App() {
               <Route path="/erp/config/instalacoes" element={<ConfigInstalacoes />} />
               <Route path="/erp/config/tipos"       element={<ConfigTiposProdutos />} />
               <Route path="/erp/config/parametros"  element={<ConfigParametros />} />
+              <Route path="/erp/configuracoes"      element={<Configuracoes />} />
+              <Route path="/erp/config"             element={<Navigate to="/erp/configuracoes" replace />} />
               <Route path="/erp/relatorios/multi-lojas" element={<RelatorioMultiLojas />} />
               <Route path="/erp/tipos-produtos"     element={<Navigate to="/erp/config/tipos" replace />} />
             </Route>
@@ -110,6 +115,7 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </ConfigProvider>
     </AuthProvider>
   )
 }

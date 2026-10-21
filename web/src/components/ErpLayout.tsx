@@ -35,8 +35,10 @@ import {
   ShoppingBag,
   History,
   ShieldCheck,
+  Settings,
   type LucideIcon,
 } from 'lucide-react'
+import { useSystemConfig } from '../contexts/ConfigContext'
 
 type NavItem = {
   to: string
@@ -141,6 +143,7 @@ export default function ErpLayout() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { user, tenants, currentTenant, switchTenant, logout, isOwner, hasPermission } = useAuth()
+  const { logoUrl, nomeSistema } = useSystemConfig()
   const visibleNav = nav.filter(item => !item.permission || hasPermission(item.permission))
 
 
@@ -162,12 +165,20 @@ export default function ErpLayout() {
 
         {/* Logo */}
         <div className="px-5 py-4 border-b border-slate-800 shrink-0 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold shrink-0">
-            <span className="text-xs">4R</span>
-          </div>
-          <div>
+          {logoUrl ? (
+            <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/60 flex items-center justify-center p-1 overflow-hidden shrink-0 shadow-sm">
+              <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+            </div>
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold shrink-0">
+              <span className="text-xs">4R</span>
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest leading-none mb-1">Sistema</p>
-            <p className="text-sm font-bold text-white tracking-tight leading-none">4Rodas ERP</p>
+            <p className="text-sm font-bold text-white tracking-tight leading-none truncate" title={nomeSistema || '4Rodas ERP'}>
+              {nomeSistema || '4Rodas ERP'}
+            </p>
           </div>
         </div>
 
@@ -352,6 +363,19 @@ export default function ErpLayout() {
                 >
                   <SlidersHorizontal className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
                   <span>Parâmetros</span>
+                </NavLink>
+              )}
+              {(isOwner || hasPermission('config_sistema') || user?.role === 'manager') && (
+                <NavLink
+                  to="/erp/configuracoes"
+                  className={({ isActive }) =>
+                    `group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                      isActive ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                    }`
+                  }
+                >
+                  <Settings className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105 text-cyan-400" />
+                  <span>Configurações</span>
                 </NavLink>
               )}
             </div>

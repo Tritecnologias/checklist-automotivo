@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth, type Tenant } from '../contexts/AuthContext'
+import { useSystemConfig } from '../contexts/ConfigContext'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
 
 export default function Login() {
   const { login } = useAuth()
+  const { logoUrl, nomeSistema } = useSystemConfig()
   const navigate  = useNavigate()
 
   const [email,    setEmail]    = useState('')
@@ -118,10 +120,16 @@ export default function Login() {
     <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600 text-3xl mb-4">
-            🔧
-          </div>
-          <h1 className="text-2xl font-bold text-white">4Rodas ERP</h1>
+          {logoUrl ? (
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-800 border border-slate-700/80 p-2 flex items-center justify-center overflow-hidden shadow-lg shadow-blue-950/20">
+              <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+            </div>
+          ) : (
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600 text-3xl mb-4">
+              🔧
+            </div>
+          )}
+          <h1 className="text-2xl font-bold text-white tracking-tight">{nomeSistema || '4Rodas ERP'}</h1>
           <p className="text-sm text-slate-400 mt-1">Faça login para continuar</p>
         </div>
 

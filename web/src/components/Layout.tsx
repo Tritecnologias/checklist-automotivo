@@ -47,9 +47,12 @@ const nav: NavItem[] = [
   },
 ]
 
+import { useSystemConfig } from '../contexts/ConfigContext'
+
 export default function Layout() {
   const navigate = useNavigate()
   const { user, currentTenant, switchTenant, tenants, logout, hasPermission, isOwner } = useAuth()
+  const { logoUrl, nomeSistema } = useSystemConfig()
   const [tenantOpen, setTenantOpen] = useState(false)
 
   function handleLogout() {
@@ -66,10 +69,16 @@ export default function Layout() {
         <div className="max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
           <div className="flex items-center gap-8">
             <span className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
-                <Wrench className="w-4 h-4" />
-              </div>
-              <span>Checklist Automotivo</span>
+              {logoUrl ? (
+                <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/60 flex items-center justify-center p-1 overflow-hidden shrink-0 shadow-sm">
+                  <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+                </div>
+              ) : (
+                <div className="w-7 h-7 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                  <Wrench className="w-4 h-4" />
+                </div>
+              )}
+              <span>{nomeSistema || 'Checklist Automotivo'}</span>
             </span>
             <nav className="flex items-center gap-1.5">
               {visibleNav.map(({ to, label, icon: Icon, end }) => (

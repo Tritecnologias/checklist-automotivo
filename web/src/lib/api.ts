@@ -6,7 +6,7 @@ import type {
   ProdutoTipo, ParametrosPdv, RelatorioMultiLojasResponse, CrmManutencoesResponse,
   CurvaAbcResponse, ValorizacaoEstoqueResponse, SugestaoComprasResponse, KardexResponse,
   Mecanico, MecanicoProdutividade, ExtratoItemComissao, ProdutividadeOficinaResponse, MecanicoPagamento,
-  DreResponse, UsuarioSistema, PermissionCategory, UserPermissionsDetail,
+  DreResponse, UsuarioSistema, PermissionCategory, UserPermissionsDetail, ConfigSistema,
 } from '../types'
 
 
@@ -453,6 +453,24 @@ export const erpApi = {
     adminRequest<{ ok: boolean; limite_desconto_padrao: number }>('/erp/config/parametros', {
       method: 'PUT',
       body: JSON.stringify(data),
+    }),
+
+  obterConfigSistema: () => adminRequest<ConfigSistema>('/erp/config/sistema'),
+  obterConfigPublica: async () => {
+    try {
+      const res = await fetch('/api/erp/config/public')
+      if (res.ok) return (await res.json()) as ConfigSistema
+    } catch {}
+    return { logo_url: null, nome_sistema: '4Rodas ERP' }
+  },
+  salvarConfigSistema: (data: { logo?: string | null; nome_sistema?: string; aplicar_todas_lojas?: boolean }) =>
+    adminRequest<{ ok: boolean; message: string }>('/erp/config/sistema', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  removerLogoSistema: () =>
+    adminRequest<{ ok: boolean; message: string }>('/erp/config/sistema/logo', {
+      method: 'DELETE',
     }),
 
   relatorioMultiLojas: (params?: { data_inicio?: string; data_fim?: string }) => {
