@@ -3158,25 +3158,19 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
     const comCompras = String(req.query.com_compras ?? '').trim();
 
     let filterTenantId = getClienteTenantId(req);
-    // Suporte a filtro explícito de tenant_id via query
-    if (req.query.tenant_id !== undefined && req.query.tenant_id !== '') {
-      if (req.query.tenant_id === 'todos' || req.query.tenant_id === 'all') {
+    // Suporte a filtro explícito de loja via query (col_loja tem prioridade sobre tenant_id)
+    const explicitLoja = (colLoja && colLoja !== '') ? colLoja : req.query.tenant_id;
+    if (explicitLoja !== undefined && explicitLoja !== '') {
+      if (explicitLoja === 'todos' || explicitLoja === 'all') {
         if (req.user?.role === 'owner') {
           filterTenantId = null;
         }
       } else {
-        const qTid = Number(req.query.tenant_id);
+        const qTid = Number(explicitLoja);
         if (qTid > 0) {
           if (req.user?.role === 'owner' || (req.user?.tenantIds && req.user.tenantIds.includes(qTid))) {
             filterTenantId = qTid;
           }
-        }
-      }
-    } else if (colLoja && colLoja !== 'todos') {
-      const qColTid = Number(colLoja);
-      if (qColTid > 0) {
-        if (req.user?.role === 'owner' || (req.user?.tenantIds && req.user.tenantIds.includes(qColTid))) {
-          filterTenantId = qColTid;
         }
       }
     }
@@ -3194,13 +3188,8 @@ router.get('/clientes', requireManagerUp, async (req, res) => {
     }
 
     if (filterTenantId !== null) {
-      if (filterTenantId === 1) {
-        tenantJoin = 'LEFT JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id';
-        whereParts.push('(_ctf.tenant_id = 1 OR _ctf.tenant_id IS NULL)');
-      } else {
-        tenantJoin = 'INNER JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id AND _ctf.tenant_id = ?';
-        tenantParams.push(filterTenantId);
-      }
+      tenantJoin = 'INNER JOIN cliente_tenant _ctf ON _ctf.cliente_id = c.id AND _ctf.tenant_id = ?';
+      tenantParams.push(filterTenantId);
     }
 
     const searchParams: any[] = [];

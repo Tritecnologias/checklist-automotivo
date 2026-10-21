@@ -47,18 +47,34 @@ function PlaceBadge({ plate }: { plate: string | null }) {
   )
 }
 
-function LojasBadge({ lojas }: { lojas: string | null }) {
+function LojasBadge({
+  lojas,
+  activeLojaName,
+}: {
+  lojas: string | null
+  activeLojaName?: string | null
+}) {
   if (!lojas) return <span className="text-slate-600 text-xs">—</span>
+  const nomes = lojas.split(', ').map(s => s.trim()).filter(Boolean)
+
   return (
-    <div className="flex flex-wrap gap-1">
-      {lojas.split(', ').map(n => (
-        <span
-          key={n}
-          className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-800/40 whitespace-nowrap"
-        >
-          {n}
-        </span>
-      ))}
+    <div className="flex flex-wrap items-center gap-1">
+      {nomes.map(n => {
+        const isCurrentFiltered = Boolean(activeLojaName && n.toLowerCase() === activeLojaName.toLowerCase())
+        return (
+          <span
+            key={n}
+            className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-all whitespace-nowrap ${
+              isCurrentFiltered
+                ? 'bg-blue-600 text-white border border-blue-400 font-bold shadow-sm ring-1 ring-blue-400/40'
+                : 'bg-slate-800/80 text-slate-300 border border-slate-700/80 hover:bg-slate-700'
+            }`}
+            title={isCurrentFiltered ? `Loja selecionada no filtro: ${n}` : `Cliente também vinculado à: ${n}`}
+          >
+            {n}
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -267,22 +283,34 @@ export default function Clientes() {
     return () => clearTimeout(timer)
   }, [colCliente, colPlaca, colVeiculo])
 
+  function handleLojaChange(val: string) {
+    setSelectedLoja(val)
+    setColLoja(val === 'todos' ? '' : val)
+    setPage(1)
+  }
+
+  const activeLojaNome =
+    selectedLoja && selectedLoja !== 'todos'
+      ? listaLojas.find(l => String(l.id) === selectedLoja)?.nome || null
+      : (colLoja ? listaLojas.find(l => String(l.id) === colLoja)?.nome || null : null)
+
   const hasActiveFilters = Boolean(
     search ||
-    selectedLoja ||
+    (isOwner ? (selectedLoja && selectedLoja !== 'todos') : selectedLoja) ||
+    colLoja ||
     status !== 'ativos' ||
     comCompras !== 'todas' ||
     sort !== 'recentes' ||
     colCliente ||
     colPlaca ||
-    colVeiculo ||
-    colLoja
+    colVeiculo
   )
 
   function handleResetAllFilters() {
     setSearch('')
     setDebouncedSearch('')
-    setSelectedLoja('')
+    setSelectedLoja(isOwner ? 'todos' : '')
+    setColLoja('')
     setStatus('ativos')
     setComCompras('todas')
     setSort('recentes')
@@ -292,7 +320,6 @@ export default function Clientes() {
     setDebouncedColPlaca('')
     setColVeiculo('')
     setDebouncedColVeiculo('')
-    setColLoja('')
     setPage(1)
   }
 
@@ -606,8 +633,8 @@ export default function Clientes() {
               <span>Loja / Unidade</span>
             </label>
             <select
-              value={selectedLoja}
-              onChange={e => { setSelectedLoja(e.target.value); setPage(1); }}
+              value={selectedLoja || (isOwner ? 'todos' : '')}
+              onChange={e => handleLojaChange(e.target.value)}
               className="w-full bg-slate-800/90 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-colors"
             >
               {isOwner && (
@@ -721,14 +748,14 @@ export default function Clientes() {
                 </button>
               </span>
             )}
-            {selectedLoja && (
+            {selectedLoja && selectedLoja !== 'todos' && (
               <span className="inline-flex items-center gap-1 bg-blue-900/30 text-blue-300 px-2.5 py-0.5 rounded-md border border-blue-800/50">
-                Loja: {selectedLoja === 'todos' ? 'Todas as Lojas' : listaLojas.find(l => String(l.id) === selectedLoja)?.nome || selectedLoja}
+                Loja: {listaLojas.find(l => String(l.id) === selectedLoja)?.nome || selectedLoja}
                 <button
                   type="button"
-                  onClick={() => setSelectedLoja('')}
+                  onClick={() => handleLojaChange(isOwner ? 'todos' : '')}
                   className="hover:text-red-400 ml-0.5"
-                  title="Remover filtro"
+                  title="Remover filtro de loja"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -805,19 +832,6 @@ export default function Clientes() {
                 <button
                   type="button"
                   onClick={() => { setColVeiculo(''); setDebouncedColVeiculo(''); }}
-                  className="hover:text-red-400 ml-0.5"
-                  title="Remover filtro"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            )}
-            {colLoja && (
-              <span className="inline-flex items-center gap-1 bg-slate-800 text-slate-200 px-2.5 py-0.5 rounded-md border border-slate-700">
-                Col. Loja: {listaLojas.find(l => String(l.id) === colLoja)?.nome || colLoja}
-                <button
-                  type="button"
-                  onClick={() => setColLoja('')}
                   className="hover:text-red-400 ml-0.5"
                   title="Remover filtro"
                 >
@@ -1027,11 +1041,11 @@ export default function Clientes() {
                     {/* Pesquisa por Loja */}
                     <th className="px-3 py-2 font-normal">
                       <select
-                        value={colLoja}
-                        onChange={e => { setColLoja(e.target.value); setPage(1); }}
+                        value={selectedLoja === 'todos' ? '' : selectedLoja}
+                        onChange={e => handleLojaChange(e.target.value || (isOwner ? 'todos' : ''))}
                         className="w-full bg-slate-800/90 border border-slate-700/80 rounded-md px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
                       >
-                        <option value="">Todas</option>
+                        <option value="">{isOwner ? 'Todas as Lojas' : 'Todas'}</option>
                         {listaLojas.map(l => (
                           <option key={l.id} value={String(l.id)}>
                             {l.nome}
@@ -1051,7 +1065,7 @@ export default function Clientes() {
 
                     {/* Ações: Limpar filtros de coluna */}
                     <th className="px-3 py-2 text-center font-normal">
-                      {(colCliente || colPlaca || colVeiculo || colLoja) && (
+                      {(colCliente || colPlaca || colVeiculo || (selectedLoja && selectedLoja !== 'todos')) && (
                         <button
                           type="button"
                           onClick={() => {
@@ -1061,7 +1075,7 @@ export default function Clientes() {
                             setDebouncedColPlaca('')
                             setColVeiculo('')
                             setDebouncedColVeiculo('')
-                            setColLoja('')
+                            handleLojaChange(isOwner ? 'todos' : '')
                           }}
                           title="Limpar filtros específicos de colunas"
                           className="px-2 py-0.5 rounded bg-slate-800 hover:bg-red-950/40 text-slate-400 hover:text-red-400 border border-slate-700 hover:border-red-800 transition-colors inline-flex items-center gap-1 text-[11px]"
@@ -1140,7 +1154,7 @@ export default function Clientes() {
 
                       {/* Lojas */}
                       <td className="px-4 py-3">
-                        <LojasBadge lojas={c.lojas} />
+                        <LojasBadge lojas={c.lojas} activeLojaName={activeLojaNome} />
                       </td>
 
                       {/* Compras */}

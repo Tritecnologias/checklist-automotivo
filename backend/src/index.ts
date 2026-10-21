@@ -480,6 +480,14 @@ async function runMigrations() {
     await pool.query('INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) SELECT id, 1 FROM cad_clientes')
       .catch(e => console.warn('[migration] Aviso ao popular cliente_tenant inicial:', e));
   }
+  // Garante que qualquer cliente em cad_clientes sem vínculo com cliente_tenant seja associado ao tenant 1 (Loja Principal)
+  await pool.query(`
+    INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id)
+    SELECT c.id, 1
+    FROM cad_clientes c
+    LEFT JOIN cliente_tenant ct ON ct.cliente_id = c.id
+    WHERE ct.cliente_id IS NULL
+  `).catch(e => console.warn('[migration] Aviso ao sincronizar clientes órfãos com tenant 1:', e));
 
   // instalacao_id em os_order_items
   const [[{ cntInstCol }]] = await pool.query<any>(
