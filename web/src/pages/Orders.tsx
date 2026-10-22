@@ -197,7 +197,7 @@ export default function Orders() {
   })
 
   const { data: mecanicos = [] } = useQuery<Mecanico[]>({
-    queryKey: ['mecanicos', tid],
+    queryKey: ['mecanicos', tid, 'ativos'],
     queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true, tenantId: tid }),
   })
 
@@ -397,7 +397,7 @@ export default function Orders() {
         >
           <option value="all">🔧 Todos os Mecânicos</option>
           <option value="sem_mecanico">Sem Mecânico Atribuído</option>
-          {mecanicos.map((m) => (
+          {mecanicos.filter((m) => m.ativo).map((m) => (
             <option key={m.id} value={m.id}>
               🔧 {m.nome} {m.apelido ? `(${m.apelido})` : ''}
             </option>
@@ -889,7 +889,7 @@ export default function Orders() {
                       className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="">Atribuir depois / Geral da Oficina</option>
-                      {mecanicos.map((m) => (
+                      {mecanicos.filter((m) => m.ativo).map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '• [Auxiliar]' : '• [Titular]'}
                         </option>
@@ -908,7 +908,7 @@ export default function Orders() {
                       className="w-full bg-slate-800 border border-slate-700 text-amber-200 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                     >
                       <option value="">Nenhum auxiliar escalado</option>
-                      {mecanicos.map((m) => (
+                      {mecanicos.filter((m) => m.ativo).map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '★ [Auxiliar]' : '• [Mecânico]'}
                         </option>

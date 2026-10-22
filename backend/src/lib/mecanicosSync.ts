@@ -15,19 +15,17 @@ export const PERMISSOES_OPERACIONAIS_OFICINA = ['os_orders', 'oficina'];
  * Sincroniza colaboradores do sistema (users) com a tabela cad_mecanicos e mecanico_tenants.
  * Considera:
  * 1. Usuários com perfil 'mecanico' (sempre vinculados à oficina).
- * 2. Usuários com perfis operacionais ('manager', 'operator').
- * 3. Qualquer usuário que possua permissões ativas para 'os_orders' (Ordens de Serviço) ou 'oficina'.
- * 4. Respeita a customização de permissões: se um usuário tem custom_permissions = 1,
- *    verifica se possui 'os_orders' ou 'oficina' concedidas.
+ * 2. Usuários vinculados a mecânicos existentes em cad_mecanicos.
+ * 3. Preserva ESTRITAMENTE o status ativo configurado na Gestão de Mecânicos pelo administrador.
+ *    Se um mecânico foi inativado (ativo = 0), esta sincronização NÃO o reativa automaticamente.
  */
 export async function syncColaboradoresToMecanicos(pool: Pool, targetUserId?: number): Promise<void> {
   try {
     const userFilter = targetUserId
       ? `AND u.id = ${Number(targetUserId)}`
       : `AND (
-           u.role IN ('mecanico', 'manager', 'operator')
+           u.role = 'mecanico'
            OR EXISTS (SELECT 1 FROM cad_mecanicos cm WHERE cm.user_id = u.id)
-           OR EXISTS (SELECT 1 FROM user_permissions up WHERE up.user_id = u.id AND up.permission IN ('os_orders', 'oficina'))
          )`;
 
     const [users] = await pool.query<any>(`
@@ -44,22 +42,6 @@ export async function syncColaboradoresToMecanicos(pool: Pool, targetUserId?: nu
     const totalTenants = Number(tenantCountRow?.totalTenants || 0);
 
     for (const u of users) {
-      // Determina se o usuário tem permissão para atuar na Oficina / Ordens de Serviço
-      const isMecanico = u.role === 'mecanico';
-      const isCustom = Boolean(u.custom_permissions);
-      const customPerms = u.custom_perms_str ? String(u.custom_perms_str).split(',') : [];
-      const rolePerms = DEFAULT_ROLE_PERMISSIONS[u.role] ?? [];
-      const effectivePerms = isCustom ? customPerms : rolePerms;
-
-      const hasWorkshopPerm = isMecanico ||
-        u.role === 'owner' ||
-        effectivePerms.includes('*') ||
-        effectivePerms.includes('os_orders') ||
-        effectivePerms.includes('oficina') ||
-        ROLES_COLABORADORES_OFICINA.includes(u.role);
-
-      const shouldBeAtivoNaOficina = Boolean(u.ativo) && hasWorkshopPerm;
-
       // Busca mecânico existente por user_id, por nome exato ou aproximação de nome caso ainda não vinculado
       const [existingRows] = await pool.query<any>(
         `SELECT id, tenant_id, ativo, todas_lojas, user_id, nome 
@@ -72,8 +54,8 @@ export async function syncColaboradoresToMecanicos(pool: Pool, targetUserId?: nu
       );
       const existingMec = existingRows[0] || null;
 
-      // Se não deve estar ativo na oficina
-      if (!shouldBeAtivoNaOficina) {
+      // Se o usuário do sistema está inativo (u.ativo = 0), inativa também o registro do mecânico
+      if (!u.ativo) {
         if (existingMec && existingMec.ativo) {
           await pool.query('UPDATE cad_mecanicos SET ativo = 0, updated_at = NOW() WHERE id = ?', [existingMec.id]);
         }
@@ -97,24 +79,33 @@ export async function syncColaboradoresToMecanicos(pool: Pool, targetUserId?: nu
       let mecId: number;
       if (existingMec) {
         mecId = Number(existingMec.id);
+        // REGRA CRÍTICA: Se o administrador desativou este mecânico na Gestão de Mecânicos (existingMec.ativo = 0),
+        // PRESERVA o status inativo (ativo = 0)! NUNCA força ativo = 1 contra a vontade do administrador.
+        const finalAtivo = Number(existingMec.ativo) === 0 ? 0 : 1;
+
         await pool.query(
           `UPDATE cad_mecanicos 
            SET user_id = ?, 
                tenant_id = COALESCE(?, tenant_id), 
                nome = ?, 
-               ativo = 1, 
+               ativo = ?, 
                todas_lojas = ?, 
                updated_at = NOW() 
            WHERE id = ?`,
-          [u.id, primaryTenant, String(u.nome).trim(), isAllStores ? 1 : 0, mecId]
+          [u.id, primaryTenant, String(u.nome).trim(), finalAtivo, isAllStores ? 1 : 0, mecId]
         );
       } else {
-        const [ins] = await pool.query<any>(
-          `INSERT INTO cad_mecanicos (tenant_id, user_id, nome, apelido, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, todas_lojas)
-           VALUES (?, ?, ?, NULL, 0, 0, 1, 0, ?)`,
-          [primaryTenant, u.id, String(u.nome).trim(), isAllStores ? 1 : 0]
-        );
-        mecId = Number(ins.insertId);
+        // Novo registro em cad_mecanicos só deve ser criado automaticamente se o usuário tiver perfil 'mecanico'
+        if (u.role === 'mecanico') {
+          const [ins] = await pool.query<any>(
+            `INSERT INTO cad_mecanicos (tenant_id, user_id, nome, apelido, comissao_servico_pct, comissao_peca_pct, ativo, is_auxiliar, todas_lojas)
+             VALUES (?, ?, ?, NULL, 0, 0, 1, 0, ?)`,
+            [primaryTenant, u.id, String(u.nome).trim(), isAllStores ? 1 : 0]
+          );
+          mecId = Number(ins.insertId);
+        } else {
+          continue;
+        }
       }
 
       // Sincronizar mecanico_tenants
@@ -130,9 +121,10 @@ export async function syncColaboradoresToMecanicos(pool: Pool, targetUserId?: nu
 }
 
 /**
- * Verificação ultra-rápida para garantir sincronização sob demanda.
- * Executa a sincronização caso algum colaborador ativo com permissão de OS ou papel operacional
- * não esteja ativo em cad_mecanicos ou suas lojas em user_tenants não estejam em mecanico_tenants.
+ * Verificação rápida para garantir sincronização sob demanda de mecânicos essenciais.
+ * Executa a sincronização APENAS se algum usuário com perfil 'mecanico' ativo não possuir
+ * registro criado em cad_mecanicos.
+ * NOTA: NÃO verifica 'm.ativo = 1', pois mecânicos inativados pelo administrador não devem disparar sincronização.
  */
 export async function ensureOperationalMecanicosSync(pool: Pool): Promise<void> {
   try {
@@ -140,29 +132,10 @@ export async function ensureOperationalMecanicosSync(pool: Pool): Promise<void> 
       SELECT COUNT(*) as missingCount
       FROM users u
       WHERE u.ativo = 1 
-        AND (
-          u.role IN ('mecanico', 'manager', 'operator')
-          OR (u.custom_permissions = 1 AND EXISTS (
-            SELECT 1 FROM user_permissions up 
-            WHERE up.user_id = u.id AND up.permission IN ('os_orders', 'oficina')
-          ))
-        )
-        AND (
-          NOT EXISTS (
-            SELECT 1 FROM cad_mecanicos m 
-            WHERE (m.user_id = u.id OR LOWER(TRIM(m.nome)) = LOWER(TRIM(u.nome))) 
-              AND m.ativo = 1
-          )
-          OR EXISTS (
-            SELECT 1 FROM user_tenants ut
-            WHERE ut.user_id = u.id
-              AND NOT EXISTS (
-                SELECT 1 FROM mecanico_tenants mt
-                JOIN cad_mecanicos m ON m.id = mt.mecanico_id
-                WHERE (m.user_id = u.id OR LOWER(TRIM(m.nome)) = LOWER(TRIM(u.nome))) 
-                  AND mt.tenant_id = ut.tenant_id
-              )
-          )
+        AND u.role = 'mecanico'
+        AND NOT EXISTS (
+          SELECT 1 FROM cad_mecanicos m 
+          WHERE (m.user_id = u.id OR LOWER(TRIM(m.nome)) = LOWER(TRIM(u.nome)))
         )
     `);
 

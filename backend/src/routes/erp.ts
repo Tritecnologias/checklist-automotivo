@@ -6418,7 +6418,7 @@ router.get('/mecanicos', async (req: Request, res: Response) => {
     }
 
     if (ativo !== undefined && ativo !== '') {
-      const atv = Number(ativo) === 1 ? 1 : 0;
+      const atv = (String(ativo) === '1' || String(ativo).toLowerCase() === 'true') ? 1 : 0;
       conditions.push('m.ativo = ?');
       queryParams.push(atv);
     }

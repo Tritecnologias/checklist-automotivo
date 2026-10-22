@@ -63,23 +63,24 @@ router.post('/login', async (req, res) => {
 
     // Verificar se o usuário está vinculado a um mecânico da oficina
     const [mecRows] = await pool.query<any>(
-      `SELECT id, nome, apelido, user_id FROM cad_mecanicos 
+      `SELECT id, nome, apelido, user_id, ativo FROM cad_mecanicos 
        WHERE (user_id = ? OR (user_id IS NULL AND LOWER(TRIM(nome)) = LOWER(TRIM(?))))
-         AND ativo = 1
+       ORDER BY (user_id = ?) DESC, id ASC
        LIMIT 1`,
-      [user.id, user.nome]
+      [user.id, user.nome, user.id]
     );
-    let mecVinculado = mecRows[0] || null;
-    if (!mecVinculado && ROLES_COLABORADORES_OFICINA.includes(user.role)) {
+    let mecRecord = mecRows[0] || null;
+    if (!mecRecord && user.role === 'mecanico') {
       await syncColaboradoresToMecanicos(pool, user.id);
       const [reMec] = await pool.query<any>(
-        'SELECT id, nome, apelido, user_id FROM cad_mecanicos WHERE user_id = ? AND ativo = 1 LIMIT 1',
+        'SELECT id, nome, apelido, user_id, ativo FROM cad_mecanicos WHERE user_id = ? LIMIT 1',
         [user.id]
       );
-      mecVinculado = reMec[0] || null;
-    } else if (mecVinculado && !mecVinculado.user_id) {
-      await pool.query('UPDATE cad_mecanicos SET user_id = ?, tenant_id = COALESCE(?, tenant_id) WHERE id = ?', [user.id, user.tenant_id, mecVinculado.id]).catch(() => {});
+      mecRecord = reMec[0] || null;
+    } else if (mecRecord && !mecRecord.user_id) {
+      await pool.query('UPDATE cad_mecanicos SET user_id = ?, tenant_id = COALESCE(?, tenant_id) WHERE id = ?', [user.id, user.tenant_id, mecRecord.id]).catch(() => {});
     }
+    const mecVinculado = (mecRecord && Boolean(mecRecord.ativo)) ? mecRecord : null;
     const mecanicoId = mecVinculado ? Number(mecVinculado.id) : null;
     const mecanicoNome = mecVinculado ? (mecVinculado.apelido || mecVinculado.nome) : null;
 
@@ -163,23 +164,24 @@ router.get('/me', requireAuth, async (req, res) => {
 
     // Verificar vínculo com mecânico
     const [mecRows] = await pool.query<any>(
-      `SELECT id, nome, apelido, user_id FROM cad_mecanicos 
+      `SELECT id, nome, apelido, user_id, ativo FROM cad_mecanicos 
        WHERE (user_id = ? OR (user_id IS NULL AND LOWER(TRIM(nome)) = LOWER(TRIM(?))))
-         AND ativo = 1
+       ORDER BY (user_id = ?) DESC, id ASC
        LIMIT 1`,
-      [user.id, user.nome]
+      [user.id, user.nome, user.id]
     );
-    let mecVinculado = mecRows[0] || null;
-    if (!mecVinculado && ROLES_COLABORADORES_OFICINA.includes(user.role)) {
+    let mecRecord = mecRows[0] || null;
+    if (!mecRecord && user.role === 'mecanico') {
       await syncColaboradoresToMecanicos(pool, user.id);
       const [reMec] = await pool.query<any>(
-        'SELECT id, nome, apelido, user_id FROM cad_mecanicos WHERE user_id = ? AND ativo = 1 LIMIT 1',
+        'SELECT id, nome, apelido, user_id, ativo FROM cad_mecanicos WHERE user_id = ? LIMIT 1',
         [user.id]
       );
-      mecVinculado = reMec[0] || null;
-    } else if (mecVinculado && !mecVinculado.user_id) {
-      await pool.query('UPDATE cad_mecanicos SET user_id = ?, tenant_id = COALESCE(?, tenant_id) WHERE id = ?', [user.id, user.tenant_id, mecVinculado.id]).catch(() => {});
+      mecRecord = reMec[0] || null;
+    } else if (mecRecord && !mecRecord.user_id) {
+      await pool.query('UPDATE cad_mecanicos SET user_id = ?, tenant_id = COALESCE(?, tenant_id) WHERE id = ?', [user.id, user.tenant_id, mecRecord.id]).catch(() => {});
     }
+    const mecVinculado = (mecRecord && Boolean(mecRecord.ativo)) ? mecRecord : null;
     const mecanicoId = mecVinculado ? Number(mecVinculado.id) : null;
     const mecanicoNome = mecVinculado ? (mecVinculado.apelido || mecVinculado.nome) : null;
 
@@ -380,19 +382,16 @@ router.patch('/users/:id', requireAuth, requireRole('owner'), async (req, res) =
       }
     }
 
-    // Sincronizar cad_mecanicos se o usuário é colaborador de oficina (mecanico, manager, operator)
+    // Sincronizar cad_mecanicos respeitando status ativo
     const targetUserId = Number(req.params.id);
     const [[currentUserRow]] = await pool.query<any>('SELECT * FROM users WHERE id = ?', [targetUserId]);
     const finalRole = role !== undefined ? role : currentUserRow?.role;
     const finalAtivo = ativo !== undefined ? (ativo ? 1 : 0) : currentUserRow?.ativo;
 
-    if (ROLES_COLABORADORES_OFICINA.includes(finalRole)) {
+    if (finalAtivo === 0) {
+      await pool.query('UPDATE cad_mecanicos SET ativo = 0, updated_at = NOW() WHERE user_id = ?', [targetUserId]).catch(() => {});
+    } else if (finalRole === 'mecanico') {
       await syncColaboradoresToMecanicos(pool, targetUserId);
-    } else {
-      // Se não for perfil operacional e estiver inativo no users, desativa também na oficina
-      if (finalAtivo === 0) {
-        await pool.query('UPDATE cad_mecanicos SET ativo = 0 WHERE user_id = ?', [targetUserId]).catch(() => {});
-      }
     }
 
     res.json({ ok: true });
@@ -437,8 +436,8 @@ router.post('/select-tenant', requireAuth, async (req, res) => {
     const newPayload: JwtPayload = {
       ...user,
       tenantId,
-      mecanicoId: mecVinculado ? Number(mecVinculado.id) : (user.mecanicoId ?? null),
-      mecanicoNome: mecVinculado ? (mecVinculado.apelido || mecVinculado.nome) : (user.mecanicoNome ?? null),
+      mecanicoId: mecVinculado ? Number(mecVinculado.id) : null,
+      mecanicoNome: mecVinculado ? (mecVinculado.apelido || mecVinculado.nome) : null,
     };
     const token = jwt.sign(newPayload, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token });

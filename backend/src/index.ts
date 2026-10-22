@@ -915,7 +915,15 @@ async function runMigrations() {
 
   // ── Sincronização e Isolamento de Mecânicos / Técnicos por Loja ──────────────
   try {
-    // 1. Sincroniza colaboradores do sistema (mecanico, manager, operator) para a tabela cad_mecanicos
+    // 0. Desativa colaboradores que não atuam como mecânicos (ex: Glayce Kelly Lopes Ancelmo e Jennifer Mariana Rodrigues da Silva)
+    await pool.query(`
+      UPDATE cad_mecanicos
+      SET ativo = 0, updated_at = NOW()
+      WHERE (nome LIKE '%Glayce Kelly%' OR nome LIKE '%Jennifer Mariana%')
+        AND ativo = 1
+    `).catch(() => {});
+
+    // 1. Sincroniza colaboradores do sistema para a tabela cad_mecanicos (respeitando status de inativação)
     await syncColaboradoresToMecanicos(pool);
 
     // 2. Vincula mecânicos que possuem nome idêntico a usuários no sistema

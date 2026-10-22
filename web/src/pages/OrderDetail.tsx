@@ -226,7 +226,7 @@ export default function OrderDetail() {
   // Lista de Mecânicos / Técnicos
   const orderTargetTid = order?.tenantId || tid
   const { data: mecanicos = [] } = useQuery<Mecanico[]>({
-    queryKey: ['mecanicos', orderTargetTid],
+    queryKey: ['mecanicos', orderTargetTid, 'ativos'],
     queryFn: () => oficinaApi.listMecanicos({ apenasAtivos: true, tenantId: orderTargetTid }),
   })
 
@@ -1024,12 +1024,12 @@ export default function OrderDetail() {
                       className="bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-white rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors cursor-pointer"
                     >
                       <option value="">Não atribuído (Geral)</option>
-                      {order.mecanicoId && !mecanicos.some((m) => m.id === order.mecanicoId) && (
+                      {order.mecanicoId && !mecanicos.some((m) => m.id === order.mecanicoId && m.ativo) && (
                         <option value={order.mecanicoId}>
-                          {order.mecanicoNome || `Mecânico #${order.mecanicoId}`}
+                          {order.mecanicoNome || `Mecânico #${order.mecanicoId}`} (Inativo)
                         </option>
                       )}
-                      {mecanicos.map((m) => (
+                      {mecanicos.filter((m) => m.ativo).map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '• [Auxiliar]' : '• [Titular]'}
                         </option>
@@ -1064,12 +1064,12 @@ export default function OrderDetail() {
                       className="bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-amber-200 rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors cursor-pointer"
                     >
                       <option value="">Nenhum auxiliar escalado</option>
-                      {order.auxiliarId && !mecanicos.some((m) => m.id === order.auxiliarId) && (
+                      {order.auxiliarId && !mecanicos.some((m) => m.id === order.auxiliarId && m.ativo) && (
                         <option value={order.auxiliarId}>
-                          {order.auxiliarNome || `Auxiliar #${order.auxiliarId}`}
+                          {order.auxiliarNome || `Auxiliar #${order.auxiliarId}`} (Inativo)
                         </option>
                       )}
-                      {mecanicos.map((m) => (
+                      {mecanicos.filter((m) => m.ativo).map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.nome} {m.apelido ? `(${m.apelido})` : ''} {m.is_auxiliar ? '★ [Auxiliar]' : '• [Mecânico]'}
                         </option>
@@ -2486,7 +2486,7 @@ export default function OrderDetail() {
         <ModalRateioItem
           item={rateioModalItem}
           order={order}
-          mecanicos={mecanicos || []}
+          mecanicos={(mecanicos || []).filter((m) => m.ativo)}
           onClose={() => setRateioModalItem(null)}
           onSave={(executantes) =>
             handleUpdateItemRateio({ itemId: rateioModalItem.id, executantes })
@@ -2636,7 +2636,7 @@ function ItemsTable({
                           className="bg-slate-800/90 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 rounded-lg text-xs px-2 py-1 text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[140px] truncate cursor-pointer"
                         >
                           <option value="">Oficina / Padrão</option>
-                          {mecanicos?.map((m) => (
+                          {mecanicos?.filter((m) => m.ativo).map((m) => (
                             <option key={m.id} value={m.id}>
                               {m.nome}
                             </option>

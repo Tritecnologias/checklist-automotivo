@@ -27,6 +27,7 @@ import {
   History,
   FileSpreadsheet,
   Smartphone,
+  Trash2,
 } from 'lucide-react'
 import { oficinaApi, erpApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -170,8 +171,8 @@ export default function OficinaProdutividade() {
 
   // Queries
   const { data: listaMecanicos = [], refetch: refetchMecanicos } = useQuery({
-    queryKey: ['mecanicos', tid],
-    queryFn: () => oficinaApi.listMecanicos(),
+    queryKey: ['mecanicos', tid, 'todos'],
+    queryFn: () => oficinaApi.listMecanicos({ tenantId: tid }),
   })
 
   // Lista de usuários do sistema disponíveis para vínculo
@@ -230,6 +231,7 @@ export default function OficinaProdutividade() {
       qc.invalidateQueries({ queryKey: ['mecanicos'] })
       qc.invalidateQueries({ queryKey: ['oficina-produtividade'] })
       qc.invalidateQueries({ queryKey: ['usuarios-sistema'] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
       setMecanicoModalOpen(false)
       setEditingMecanico(null)
     },
@@ -264,12 +266,26 @@ export default function OficinaProdutividade() {
     },
   })
 
-  const { mutate: alternarStatusMecanico } = useMutation({
+  const { mutate: alternarStatusMecanico, isPending: alternandoStatus } = useMutation({
     mutationFn: (m: Mecanico) =>
       oficinaApi.updateMecanico(m.id, { ativo: !m.ativo }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['mecanicos'] })
       qc.invalidateQueries({ queryKey: ['oficina-produtividade'] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+
+  const { mutate: excluirMecanico, isPending: excluindoMecanico } = useMutation({
+    mutationFn: (id: number) => oficinaApi.deleteMecanico(id),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['mecanicos'] })
+      qc.invalidateQueries({ queryKey: ['oficina-produtividade'] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      alert(data?.message || 'Mecânico excluído / inativado com sucesso')
+    },
+    onError: (err: any) => {
+      alert(err.message || 'Erro ao excluir mecânico')
     },
   })
 
@@ -1497,6 +1513,7 @@ export default function OficinaProdutividade() {
 
                     <button
                       onClick={() => alternarStatusMecanico(m)}
+                      disabled={alternandoStatus}
                       className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors ${
                         m.ativo
                           ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80 hover:bg-emerald-900'
@@ -1610,6 +1627,19 @@ export default function OficinaProdutividade() {
                     >
                       <History className="w-3.5 h-3.5" />
                       <span>Histórico</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        if (confirm(`Deseja remover o profissional "${m.nome}"? Se houver ordens vinculadas, ele será inativado para manter o histórico.`)) {
+                          excluirMecanico(m.id)
+                        }
+                      }}
+                      disabled={excluindoMecanico}
+                      className="p-1.5 bg-slate-800 hover:bg-red-950/60 text-slate-400 hover:text-red-400 rounded-lg text-xs font-medium border border-slate-700 hover:border-red-800 transition-colors"
+                      title="Excluir / Desvincular Mecânico"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
