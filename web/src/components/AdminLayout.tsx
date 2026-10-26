@@ -12,7 +12,7 @@ const nav: { to: string; label: string; icon: LucideIcon }[] = [
 export default function AdminLayout() {
   const navigate = useNavigate()
   const { logout, user } = useAuth()
-  const { logoUrl, nomeSistema } = useSystemConfig()
+  const { logoUrl, nomeSistema, logoSize } = useSystemConfig()
 
   function handleLogout() {
     logout()
@@ -23,10 +23,20 @@ export default function AdminLayout() {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="bg-slate-900 border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-6 flex items-center gap-8 h-14">
-          <div className="flex items-center gap-2 text-white font-bold tracking-tight">
+          <div className="flex items-center gap-2.5 text-white font-bold tracking-tight">
             {logoUrl ? (
-              <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center p-0.5 overflow-hidden shrink-0">
-                <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+              <div
+                className={`flex items-center justify-center overflow-hidden shrink-0 transition-all ${
+                  logoSize === 'sm'
+                    ? 'h-7 w-7'
+                    : logoSize === 'md'
+                    ? 'h-8 w-8'
+                    : logoSize === 'xl'
+                    ? 'h-11 w-11'
+                    : 'h-9 w-9'
+                }`}
+              >
+                <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain drop-shadow-sm" />
               </div>
             ) : (
               <Shield className="w-5 h-5 text-blue-500" />

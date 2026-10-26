@@ -1205,5 +1205,7 @@ export interface KardexResponse {
 export interface ConfigSistema {
   logo_url: string | null
   nome_sistema: string
+  logo_size?: 'sm' | 'md' | 'lg' | 'xl'
+  logo_layout?: 'inline' | 'stacked'
   tenant_id?: number | null
 }

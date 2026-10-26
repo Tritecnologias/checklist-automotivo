@@ -121,7 +121,7 @@ async function requireManagerUp(req: Request, res: Response, next: NextFunction)
 router.get('/config/public', async (req, res) => {
   try {
     const tenantId = Number(req.headers['x-tenant-id']) || null;
-    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name')`;
+    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name', 'system_logo_size', 'system_logo_layout')`;
     const params: any[] = [];
     if (tenantId) {
       query += ` AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY tenant_id DESC`;
@@ -137,9 +137,11 @@ router.get('/config/public', async (req, res) => {
     res.json({
       logo_url: map.get('system_logo') || null,
       nome_sistema: map.get('system_name') || '4Rodas ERP',
+      logo_size: map.get('system_logo_size') || 'lg',
+      logo_layout: map.get('system_logo_layout') || 'inline',
     });
   } catch (err: any) {
-    res.json({ logo_url: null, nome_sistema: '4Rodas ERP' });
+    res.json({ logo_url: null, nome_sistema: '4Rodas ERP', logo_size: 'lg', logo_layout: 'inline' });
   }
 });
 
@@ -4519,7 +4521,7 @@ router.put('/config/parametros', requireManagerUp, async (req, res) => {
 router.get('/config/sistema', async (req, res) => {
   try {
     const tenantId = Number(req.headers['x-tenant-id']) || null;
-    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name')`;
+    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name', 'system_logo_size', 'system_logo_layout')`;
     const params: any[] = [];
     if (tenantId) {
       query += ` AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY tenant_id DESC`;
@@ -4535,6 +4537,8 @@ router.get('/config/sistema', async (req, res) => {
     res.json({
       logo_url: map.get('system_logo')?.valor || null,
       nome_sistema: map.get('system_name')?.valor || '4Rodas ERP',
+      logo_size: map.get('system_logo_size')?.valor || 'lg',
+      logo_layout: map.get('system_logo_layout')?.valor || 'inline',
       tenant_id: map.get('system_logo')?.tenant_id ?? null,
     });
   } catch (err: any) {
@@ -4544,9 +4548,11 @@ router.get('/config/sistema', async (req, res) => {
 
 router.put('/config/sistema', requireManagerUp, async (req, res) => {
   try {
-    const { logo, nome_sistema, aplicar_todas_lojas } = req.body as {
+    const { logo, nome_sistema, logo_size, logo_layout, aplicar_todas_lojas } = req.body as {
       logo?: string | null;
       nome_sistema?: string;
+      logo_size?: string;
+      logo_layout?: string;
       aplicar_todas_lojas?: boolean;
     };
 
@@ -4572,6 +4578,50 @@ router.put('/config/sistema', requireManagerUp, async (req, res) => {
            VALUES ('system_name', ?, ?, 'Nome principal do sistema exibido na barra superior e menus')
            ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
           [targetTenantId, cleanName]
+        );
+      }
+    }
+
+    // Se tamanho do logotipo foi enviado (sm, md, lg, xl)
+    if (typeof logo_size === 'string' && ['sm', 'md', 'lg', 'xl'].includes(logo_size)) {
+      if (Boolean(aplicar_todas_lojas)) {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo_size', NULL, ?, 'Tamanho de exibição do logotipo (sm, md, lg, xl)')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [logo_size]
+        );
+        await pool.query(
+          `DELETE FROM app_config WHERE chave = 'system_logo_size' AND tenant_id IS NOT NULL`
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo_size', ?, ?, 'Tamanho de exibição do logotipo (sm, md, lg, xl)')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [targetTenantId, logo_size]
+        );
+      }
+    }
+
+    // Se layout da barra lateral foi enviado (inline, stacked)
+    if (typeof logo_layout === 'string' && ['inline', 'stacked'].includes(logo_layout)) {
+      if (Boolean(aplicar_todas_lojas)) {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo_layout', NULL, ?, 'Layout do logotipo na barra lateral (inline, stacked)')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [logo_layout]
+        );
+        await pool.query(
+          `DELETE FROM app_config WHERE chave = 'system_logo_layout' AND tenant_id IS NOT NULL`
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo_layout', ?, ?, 'Layout do logotipo na barra lateral (inline, stacked)')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [targetTenantId, logo_layout]
         );
       }
     }
@@ -4633,11 +4683,11 @@ router.delete('/config/sistema/logo', requireManagerUp, async (req, res) => {
     const tenantId = Number(req.headers['x-tenant-id']) || null;
     const isOwner = req.user?.role === 'owner';
     if (isOwner && !tenantId) {
-      await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo'`);
+      await pool.query(`DELETE FROM app_config WHERE chave IN ('system_logo', 'system_logo_size', 'system_logo_layout')`);
     } else if (tenantId) {
-      await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo' AND tenant_id = ?`, [tenantId]);
+      await pool.query(`DELETE FROM app_config WHERE chave IN ('system_logo', 'system_logo_size', 'system_logo_layout') AND tenant_id = ?`, [tenantId]);
     } else {
-      await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo'`);
+      await pool.query(`DELETE FROM app_config WHERE chave IN ('system_logo', 'system_logo_size', 'system_logo_layout')`);
     }
     res.json({ ok: true, message: 'Logotipo padrão restaurado com sucesso' });
   } catch (err: any) {

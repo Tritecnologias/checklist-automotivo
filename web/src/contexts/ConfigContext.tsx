@@ -7,6 +7,8 @@ import type { ConfigSistema } from '../types'
 interface ConfigContextValue {
   logoUrl: string | null
   nomeSistema: string
+  logoSize: 'sm' | 'md' | 'lg' | 'xl'
+  logoLayout: 'inline' | 'stacked'
   tenantId?: number | null
   isLoading: boolean
   refetchConfig: () => void
@@ -15,6 +17,8 @@ interface ConfigContextValue {
 const ConfigContext = createContext<ConfigContextValue>({
   logoUrl: null,
   nomeSistema: '4Rodas ERP',
+  logoSize: 'lg',
+  logoLayout: 'inline',
   isLoading: false,
   refetchConfig: () => {},
 })
@@ -40,6 +44,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
   const logoUrl = data?.logo_url || null
   const nomeSistema = data?.nome_sistema || '4Rodas ERP'
+  const logoSize = (data?.logo_size as 'sm' | 'md' | 'lg' | 'xl') || 'lg'
+  const logoLayout = (data?.logo_layout as 'inline' | 'stacked') || 'inline'
 
   // Atualiza favicon dinamicamente se houver logo customizada
   useEffect(() => {
@@ -56,6 +62,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       value={{
         logoUrl,
         nomeSistema,
+        logoSize,
+        logoLayout,
         tenantId: data?.tenant_id,
         isLoading,
         refetchConfig: () => {

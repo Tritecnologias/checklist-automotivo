@@ -143,7 +143,7 @@ export default function ErpLayout() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { user, tenants, currentTenant, switchTenant, logout, isOwner, hasPermission } = useAuth()
-  const { logoUrl, nomeSistema } = useSystemConfig()
+  const { logoUrl, nomeSistema, logoSize, logoLayout } = useSystemConfig()
   const visibleNav = nav.filter(item => !item.permission || hasPermission(item.permission))
 
 
@@ -164,23 +164,64 @@ export default function ErpLayout() {
       <aside className="w-52 shrink-0 h-full bg-slate-900 border-r border-slate-800 flex flex-col">
 
         {/* Logo */}
-        <div className="px-5 py-4 border-b border-slate-800 shrink-0 flex items-center gap-3">
-          {logoUrl ? (
-            <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/60 flex items-center justify-center p-1 overflow-hidden shrink-0 shadow-sm">
-              <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+        {logoLayout === 'stacked' && logoUrl ? (
+          <div className="px-4 py-4 border-b border-slate-800 shrink-0 flex flex-col items-center text-center">
+            <div
+              className={`flex items-center justify-center overflow-hidden transition-all ${
+                logoSize === 'sm'
+                  ? 'h-11 max-w-[140px]'
+                  : logoSize === 'md'
+                  ? 'h-14 max-w-[160px]'
+                  : logoSize === 'xl'
+                  ? 'h-20 max-w-[180px]'
+                  : 'h-16 max-w-[170px]'
+              }`}
+            >
+              <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain drop-shadow-md" />
             </div>
-          ) : (
-            <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold shrink-0">
-              <span className="text-xs">4R</span>
-            </div>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest leading-none mb-1">Sistema</p>
-            <p className="text-sm font-bold text-white tracking-tight leading-none truncate" title={nomeSistema || '4Rodas ERP'}>
-              {nomeSistema || '4Rodas ERP'}
-            </p>
+            {nomeSistema && (
+              <p
+                className="text-xs font-bold text-white tracking-tight mt-2 truncate max-w-full"
+                title={nomeSistema}
+              >
+                {nomeSistema}
+              </p>
+            )}
           </div>
-        </div>
+        ) : (
+          <div className="px-4 py-3.5 border-b border-slate-800 shrink-0 flex items-center gap-3">
+            {logoUrl ? (
+              <div
+                className={`rounded-xl flex items-center justify-center overflow-hidden shrink-0 transition-all ${
+                  logoSize === 'sm'
+                    ? 'w-9 h-9'
+                    : logoSize === 'md'
+                    ? 'w-11 h-11'
+                    : logoSize === 'xl'
+                    ? 'w-15 h-15'
+                    : 'w-13 h-13'
+                }`}
+              >
+                <img src={logoUrl} alt="Logo" className="w-full h-full object-contain drop-shadow-sm" />
+              </div>
+            ) : (
+              <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold shrink-0">
+                <span className="text-xs">4R</span>
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest leading-none mb-1">
+                Sistema
+              </p>
+              <p
+                className="text-sm font-bold text-white tracking-tight leading-snug break-words line-clamp-2"
+                title={nomeSistema || '4Rodas ERP'}
+              >
+                {nomeSistema || '4Rodas ERP'}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Usuário logado */}
         <div className="px-4 py-3 border-b border-slate-800 shrink-0">

@@ -456,14 +456,20 @@ export const erpApi = {
     }),
 
   obterConfigSistema: () => adminRequest<ConfigSistema>('/erp/config/sistema'),
-  obterConfigPublica: async () => {
+  obterConfigPublica: async (): Promise<ConfigSistema> => {
     try {
       const res = await fetch('/api/erp/config/public')
       if (res.ok) return (await res.json()) as ConfigSistema
     } catch {}
-    return { logo_url: null, nome_sistema: '4Rodas ERP' }
+    return { logo_url: null, nome_sistema: '4Rodas ERP', logo_size: 'lg', logo_layout: 'inline' }
   },
-  salvarConfigSistema: (data: { logo?: string | null; nome_sistema?: string; aplicar_todas_lojas?: boolean }) =>
+  salvarConfigSistema: (data: {
+    logo?: string | null
+    nome_sistema?: string
+    logo_size?: 'sm' | 'md' | 'lg' | 'xl'
+    logo_layout?: 'inline' | 'stacked'
+    aplicar_todas_lojas?: boolean
+  }) =>
     adminRequest<{ ok: boolean; message: string }>('/erp/config/sistema', {
       method: 'PUT',
       body: JSON.stringify(data),

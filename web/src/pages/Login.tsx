@@ -7,7 +7,7 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
 
 export default function Login() {
   const { login } = useAuth()
-  const { logoUrl, nomeSistema } = useSystemConfig()
+  const { logoUrl, nomeSistema, logoSize } = useSystemConfig()
   const navigate  = useNavigate()
 
   const [email,    setEmail]    = useState('')
@@ -121,8 +121,18 @@ export default function Login() {
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 w-full max-w-sm">
         <div className="text-center mb-8">
           {logoUrl ? (
-            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-800 border border-slate-700/80 p-2 flex items-center justify-center overflow-hidden shadow-lg shadow-blue-950/20">
-              <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+            <div
+              className={`mx-auto mb-4 flex items-center justify-center overflow-hidden transition-all ${
+                logoSize === 'sm'
+                  ? 'h-16 max-w-[180px]'
+                  : logoSize === 'md'
+                  ? 'h-20 max-w-[220px]'
+                  : logoSize === 'xl'
+                  ? 'h-28 max-w-[280px]'
+                  : 'h-24 max-w-[240px]'
+              }`}
+            >
+              <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain drop-shadow-lg" />
             </div>
           ) : (
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600 text-3xl mb-4">
