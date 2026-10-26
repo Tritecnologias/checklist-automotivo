@@ -461,13 +461,15 @@ export const erpApi = {
       const res = await fetch('/api/erp/config/public')
       if (res.ok) return (await res.json()) as ConfigSistema
     } catch {}
-    return { logo_url: null, nome_sistema: '4Rodas ERP', logo_size: 'lg', logo_layout: 'inline' }
+    return { logo_url: null, nome_sistema: '4Rodas ERP', logo_size: 'lg', logo_layout: 'inline', logo_width: null, logo_height: null }
   },
   salvarConfigSistema: (data: {
     logo?: string | null
     nome_sistema?: string
     logo_size?: 'sm' | 'md' | 'lg' | 'xl'
     logo_layout?: 'inline' | 'stacked'
+    logo_width?: number | null
+    logo_height?: number | null
     aplicar_todas_lojas?: boolean
   }) =>
     adminRequest<{ ok: boolean; message: string }>('/erp/config/sistema', {

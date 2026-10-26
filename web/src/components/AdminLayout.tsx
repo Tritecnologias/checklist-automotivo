@@ -12,7 +12,7 @@ const nav: { to: string; label: string; icon: LucideIcon }[] = [
 export default function AdminLayout() {
   const navigate = useNavigate()
   const { logout, user } = useAuth()
-  const { logoUrl, nomeSistema, logoSize } = useSystemConfig()
+  const { logoUrl, nomeSistema, logoSize, logoWidth, logoHeight } = useSystemConfig()
 
   function handleLogout() {
     logout()
@@ -27,14 +27,26 @@ export default function AdminLayout() {
             {logoUrl ? (
               <div
                 className={`flex items-center justify-center overflow-hidden shrink-0 transition-all ${
-                  logoSize === 'sm'
-                    ? 'h-7 w-7'
-                    : logoSize === 'md'
-                    ? 'h-8 w-8'
-                    : logoSize === 'xl'
-                    ? 'h-11 w-11'
-                    : 'h-9 w-9'
+                  !logoWidth && !logoHeight
+                    ? logoSize === 'sm'
+                      ? 'h-7 w-7'
+                      : logoSize === 'md'
+                      ? 'h-8 w-8'
+                      : logoSize === 'xl'
+                      ? 'h-11 w-11'
+                      : 'h-9 w-9'
+                    : ''
                 }`}
+                style={
+                  logoWidth || logoHeight
+                    ? {
+                        width: logoWidth ? `${logoWidth}px` : 'auto',
+                        height: logoHeight ? `${Math.min(logoHeight, 46)}px` : 'auto',
+                        maxHeight: '46px',
+                        maxWidth: '200px',
+                      }
+                    : undefined
+                }
               >
                 <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain drop-shadow-sm" />
               </div>

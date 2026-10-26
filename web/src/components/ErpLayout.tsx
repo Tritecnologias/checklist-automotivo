@@ -143,7 +143,7 @@ export default function ErpLayout() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { user, tenants, currentTenant, switchTenant, logout, isOwner, hasPermission } = useAuth()
-  const { logoUrl, nomeSistema, logoSize, logoLayout } = useSystemConfig()
+  const { logoUrl, nomeSistema, logoSize, logoLayout, logoWidth, logoHeight } = useSystemConfig()
   const visibleNav = nav.filter(item => !item.permission || hasPermission(item.permission))
 
 
@@ -158,6 +158,8 @@ export default function ErpLayout() {
     navigate('/login')
   }
 
+  const hasCustomDimensions = Boolean(logoWidth || logoHeight)
+
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex overflow-hidden">
       {/* Sidebar */}
@@ -168,14 +170,26 @@ export default function ErpLayout() {
           <div className="px-4 py-4 border-b border-slate-800 shrink-0 flex flex-col items-center text-center">
             <div
               className={`flex items-center justify-center overflow-hidden transition-all ${
-                logoSize === 'sm'
-                  ? 'h-11 max-w-[140px]'
-                  : logoSize === 'md'
-                  ? 'h-14 max-w-[160px]'
-                  : logoSize === 'xl'
-                  ? 'h-20 max-w-[180px]'
-                  : 'h-16 max-w-[170px]'
+                !hasCustomDimensions
+                  ? logoSize === 'sm'
+                    ? 'h-11 max-w-[140px]'
+                    : logoSize === 'md'
+                    ? 'h-14 max-w-[160px]'
+                    : logoSize === 'xl'
+                    ? 'h-20 max-w-[180px]'
+                    : 'h-16 max-w-[170px]'
+                  : ''
               }`}
+              style={
+                hasCustomDimensions
+                  ? {
+                      width: logoWidth ? `${logoWidth}px` : 'auto',
+                      height: logoHeight ? `${logoHeight}px` : 'auto',
+                      maxWidth: '180px',
+                      maxHeight: '140px',
+                    }
+                  : undefined
+              }
             >
               <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain drop-shadow-md" />
             </div>
@@ -193,16 +207,28 @@ export default function ErpLayout() {
             {logoUrl ? (
               <div
                 className={`rounded-xl flex items-center justify-center overflow-hidden shrink-0 transition-all ${
-                  logoSize === 'sm'
-                    ? 'w-9 h-9'
-                    : logoSize === 'md'
-                    ? 'w-11 h-11'
-                    : logoSize === 'xl'
-                    ? 'w-15 h-15'
-                    : 'w-13 h-13'
+                  !hasCustomDimensions
+                    ? logoSize === 'sm'
+                      ? 'w-9 h-9'
+                      : logoSize === 'md'
+                      ? 'w-11 h-11'
+                      : logoSize === 'xl'
+                      ? 'w-15 h-15'
+                      : 'w-13 h-13'
+                    : ''
                 }`}
+                style={
+                  hasCustomDimensions
+                    ? {
+                        width: logoWidth ? `${logoWidth}px` : 'auto',
+                        height: logoHeight ? `${logoHeight}px` : 'auto',
+                        maxWidth: '110px',
+                        maxHeight: '90px',
+                      }
+                    : undefined
+                }
               >
-                <img src={logoUrl} alt="Logo" className="w-full h-full object-contain drop-shadow-sm" />
+                <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain drop-shadow-sm" />
               </div>
             ) : (
               <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold shrink-0">

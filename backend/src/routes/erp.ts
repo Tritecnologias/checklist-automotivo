@@ -121,7 +121,7 @@ async function requireManagerUp(req: Request, res: Response, next: NextFunction)
 router.get('/config/public', async (req, res) => {
   try {
     const tenantId = Number(req.headers['x-tenant-id']) || null;
-    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name', 'system_logo_size', 'system_logo_layout')`;
+    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name', 'system_logo_size', 'system_logo_layout', 'system_logo_width', 'system_logo_height')`;
     const params: any[] = [];
     if (tenantId) {
       query += ` AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY tenant_id DESC`;
@@ -139,9 +139,11 @@ router.get('/config/public', async (req, res) => {
       nome_sistema: map.get('system_name') || '4Rodas ERP',
       logo_size: map.get('system_logo_size') || 'lg',
       logo_layout: map.get('system_logo_layout') || 'inline',
+      logo_width: map.get('system_logo_width') ? Number(map.get('system_logo_width')) : null,
+      logo_height: map.get('system_logo_height') ? Number(map.get('system_logo_height')) : null,
     });
   } catch (err: any) {
-    res.json({ logo_url: null, nome_sistema: '4Rodas ERP', logo_size: 'lg', logo_layout: 'inline' });
+    res.json({ logo_url: null, nome_sistema: '4Rodas ERP', logo_size: 'lg', logo_layout: 'inline', logo_width: null, logo_height: null });
   }
 });
 
@@ -4521,7 +4523,7 @@ router.put('/config/parametros', requireManagerUp, async (req, res) => {
 router.get('/config/sistema', async (req, res) => {
   try {
     const tenantId = Number(req.headers['x-tenant-id']) || null;
-    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name', 'system_logo_size', 'system_logo_layout')`;
+    let query = `SELECT chave, valor, tenant_id FROM app_config WHERE chave IN ('system_logo', 'system_name', 'system_logo_size', 'system_logo_layout', 'system_logo_width', 'system_logo_height')`;
     const params: any[] = [];
     if (tenantId) {
       query += ` AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY tenant_id DESC`;
@@ -4539,6 +4541,8 @@ router.get('/config/sistema', async (req, res) => {
       nome_sistema: map.get('system_name')?.valor || '4Rodas ERP',
       logo_size: map.get('system_logo_size')?.valor || 'lg',
       logo_layout: map.get('system_logo_layout')?.valor || 'inline',
+      logo_width: map.get('system_logo_width')?.valor ? Number(map.get('system_logo_width')?.valor) : null,
+      logo_height: map.get('system_logo_height')?.valor ? Number(map.get('system_logo_height')?.valor) : null,
       tenant_id: map.get('system_logo')?.tenant_id ?? null,
     });
   } catch (err: any) {
@@ -4548,11 +4552,13 @@ router.get('/config/sistema', async (req, res) => {
 
 router.put('/config/sistema', requireManagerUp, async (req, res) => {
   try {
-    const { logo, nome_sistema, logo_size, logo_layout, aplicar_todas_lojas } = req.body as {
+    const { logo, nome_sistema, logo_size, logo_layout, logo_width, logo_height, aplicar_todas_lojas } = req.body as {
       logo?: string | null;
       nome_sistema?: string;
       logo_size?: string;
       logo_layout?: string;
+      logo_width?: number | null;
+      logo_height?: number | null;
       aplicar_todas_lojas?: boolean;
     };
 
@@ -4626,6 +4632,60 @@ router.put('/config/sistema', requireManagerUp, async (req, res) => {
       }
     }
 
+    // Se largura da logo foi enviada
+    if (typeof logo_width === 'number' && logo_width > 0) {
+      const valStr = String(Math.round(logo_width));
+      if (Boolean(aplicar_todas_lojas)) {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo_width', NULL, ?, 'Largura customizada do logotipo em pixels')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [valStr]
+        );
+        await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo_width' AND tenant_id IS NOT NULL`);
+      } else {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo_width', ?, ?, 'Largura customizada do logotipo em pixels')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [targetTenantId, valStr]
+        );
+      }
+    } else if (logo_width === null) {
+      if (Boolean(aplicar_todas_lojas) || targetTenantId === null) {
+        await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo_width'`);
+      } else {
+        await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo_width' AND tenant_id = ?`, [targetTenantId]);
+      }
+    }
+
+    // Se altura da logo foi enviada
+    if (typeof logo_height === 'number' && logo_height > 0) {
+      const valStr = String(Math.round(logo_height));
+      if (Boolean(aplicar_todas_lojas)) {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo_height', NULL, ?, 'Altura customizada do logotipo em pixels')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [valStr]
+        );
+        await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo_height' AND tenant_id IS NOT NULL`);
+      } else {
+        await pool.query(
+          `INSERT INTO app_config (chave, tenant_id, valor, descricao)
+           VALUES ('system_logo_height', ?, ?, 'Altura customizada do logotipo em pixels')
+           ON DUPLICATE KEY UPDATE valor = VALUES(valor)`,
+          [targetTenantId, valStr]
+        );
+      }
+    } else if (logo_height === null) {
+      if (Boolean(aplicar_todas_lojas) || targetTenantId === null) {
+        await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo_height'`);
+      } else {
+        await pool.query(`DELETE FROM app_config WHERE chave = 'system_logo_height' AND tenant_id = ?`, [targetTenantId]);
+      }
+    }
+
     // Se logo foi enviado (string base64 ou URL ou null para remover)
     if (logo === null) {
       if (Boolean(aplicar_todas_lojas) || targetTenantId === null) {
@@ -4683,11 +4743,11 @@ router.delete('/config/sistema/logo', requireManagerUp, async (req, res) => {
     const tenantId = Number(req.headers['x-tenant-id']) || null;
     const isOwner = req.user?.role === 'owner';
     if (isOwner && !tenantId) {
-      await pool.query(`DELETE FROM app_config WHERE chave IN ('system_logo', 'system_logo_size', 'system_logo_layout')`);
+      await pool.query(`DELETE FROM app_config WHERE chave IN ('system_logo', 'system_logo_size', 'system_logo_layout', 'system_logo_width', 'system_logo_height')`);
     } else if (tenantId) {
-      await pool.query(`DELETE FROM app_config WHERE chave IN ('system_logo', 'system_logo_size', 'system_logo_layout') AND tenant_id = ?`, [tenantId]);
+      await pool.query(`DELETE FROM app_config WHERE chave IN ('system_logo', 'system_logo_size', 'system_logo_layout', 'system_logo_width', 'system_logo_height') AND tenant_id = ?`, [tenantId]);
     } else {
-      await pool.query(`DELETE FROM app_config WHERE chave IN ('system_logo', 'system_logo_size', 'system_logo_layout')`);
+      await pool.query(`DELETE FROM app_config WHERE chave IN ('system_logo', 'system_logo_size', 'system_logo_layout', 'system_logo_width', 'system_logo_height')`);
     }
     res.json({ ok: true, message: 'Logotipo padrão restaurado com sucesso' });
   } catch (err: any) {

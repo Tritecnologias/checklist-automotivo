@@ -1207,5 +1207,7 @@ export interface ConfigSistema {
   nome_sistema: string
   logo_size?: 'sm' | 'md' | 'lg' | 'xl'
   logo_layout?: 'inline' | 'stacked'
+  logo_width?: number | null
+  logo_height?: number | null
   tenant_id?: number | null
 }

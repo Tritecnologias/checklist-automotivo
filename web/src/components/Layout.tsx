@@ -52,7 +52,7 @@ import { useSystemConfig } from '../contexts/ConfigContext'
 export default function Layout() {
   const navigate = useNavigate()
   const { user, currentTenant, switchTenant, tenants, logout, hasPermission, isOwner } = useAuth()
-  const { logoUrl, nomeSistema, logoSize } = useSystemConfig()
+  const { logoUrl, nomeSistema, logoSize, logoWidth, logoHeight } = useSystemConfig()
   const [tenantOpen, setTenantOpen] = useState(false)
 
   function handleLogout() {
@@ -72,14 +72,26 @@ export default function Layout() {
               {logoUrl ? (
                 <div
                   className={`flex items-center justify-center overflow-hidden shrink-0 transition-all ${
-                    logoSize === 'sm'
-                      ? 'h-8 w-8'
-                      : logoSize === 'md'
-                      ? 'h-9 w-9'
-                      : logoSize === 'xl'
-                      ? 'h-11 w-11'
-                      : 'h-10 w-10'
+                    !logoWidth && !logoHeight
+                      ? logoSize === 'sm'
+                        ? 'h-8 w-8'
+                        : logoSize === 'md'
+                        ? 'h-9 w-9'
+                        : logoSize === 'xl'
+                        ? 'h-11 w-11'
+                        : 'h-10 w-10'
+                      : ''
                   }`}
+                  style={
+                    logoWidth || logoHeight
+                      ? {
+                          width: logoWidth ? `${logoWidth}px` : 'auto',
+                          height: logoHeight ? `${Math.min(logoHeight, 46)}px` : 'auto',
+                          maxHeight: '46px',
+                          maxWidth: '220px',
+                        }
+                      : undefined
+                  }
                 >
                   <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain drop-shadow-sm" />
                 </div>

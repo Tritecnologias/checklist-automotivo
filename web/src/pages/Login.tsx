@@ -7,7 +7,7 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
 
 export default function Login() {
   const { login } = useAuth()
-  const { logoUrl, nomeSistema, logoSize } = useSystemConfig()
+  const { logoUrl, nomeSistema, logoSize, logoWidth, logoHeight } = useSystemConfig()
   const navigate  = useNavigate()
 
   const [email,    setEmail]    = useState('')
@@ -123,14 +123,26 @@ export default function Login() {
           {logoUrl ? (
             <div
               className={`mx-auto mb-4 flex items-center justify-center overflow-hidden transition-all ${
-                logoSize === 'sm'
-                  ? 'h-16 max-w-[180px]'
-                  : logoSize === 'md'
-                  ? 'h-20 max-w-[220px]'
-                  : logoSize === 'xl'
-                  ? 'h-28 max-w-[280px]'
-                  : 'h-24 max-w-[240px]'
+                !logoWidth && !logoHeight
+                  ? logoSize === 'sm'
+                    ? 'h-16 max-w-[180px]'
+                    : logoSize === 'md'
+                    ? 'h-20 max-w-[220px]'
+                    : logoSize === 'xl'
+                    ? 'h-28 max-w-[280px]'
+                    : 'h-24 max-w-[240px]'
+                  : ''
               }`}
+              style={
+                logoWidth || logoHeight
+                  ? {
+                      width: logoWidth ? `${Math.max(logoWidth, 64)}px` : 'auto',
+                      height: logoHeight ? `${Math.max(logoHeight, 64)}px` : 'auto',
+                      maxWidth: '280px',
+                      maxHeight: '160px',
+                    }
+                  : undefined
+              }
             >
               <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain drop-shadow-lg" />
             </div>
