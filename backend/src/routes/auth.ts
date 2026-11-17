@@ -1,3 +1,4 @@
+import rateLimit from 'express-rate-limit';
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -6,7 +7,16 @@ import { JWT_SECRET } from '../middleware/auth';
 
 const router = Router();
 
-router.post('/verify-supervisor-pin', async (req: Request, res: Response) => {
+const pinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  message: { message: 'Muitas tentativas de validação de PIN/Desconto. Por segurança, aguarde 15 minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+
+router.post('/verify-supervisor-pin', pinLimiter, async (req: Request, res: Response) => {
   const { pin } = req.body as { pin?: string };
 
   if (!pin || !/^\d{4}$/.test(pin)) {
@@ -46,7 +56,7 @@ router.post('/verify-supervisor-pin', async (req: Request, res: Response) => {
  * Autoriza desconto mediante seleção de um Administrador ou Gerente e sua respectiva senha.
  * Também mantém suporte a PIN como fallback para compatibilidade.
  */
-router.post('/authorize-discount', async (req: Request, res: Response) => {
+router.post('/authorize-discount', pinLimiter, async (req: Request, res: Response) => {
   const { userId, email, password, tenantId, pin } = req.body as {
     userId?: number;
     email?: string;

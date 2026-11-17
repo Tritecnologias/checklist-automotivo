@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   Pencil,
   MapPin,
@@ -586,6 +586,8 @@ export default function ClienteHistorico() {
   const [dataPreset, setDataPreset] = useState<'todos' | 'hoje' | '7dias' | '30dias' | 'mes' | 'ano'>('todos')
   const [dataInicio, setDataInicio] = useState<string>('')
   const [dataFim, setDataFim] = useState<string>('')
+  const [appliedDataInicio, setAppliedDataInicio] = useState<string>('')
+  const [appliedDataFim, setAppliedDataFim] = useState<string>('')
   const [tipoFiltro, setTipoFiltro] = useState<'todos' | 'vendas' | 'os'>('todos')
   const [busca, setBusca] = useState<string>('')
   const [debouncedBusca, setDebouncedBusca] = useState<string>('')
@@ -603,40 +605,64 @@ export default function ClienteHistorico() {
     return () => clearTimeout(timer)
   }, [busca])
 
+  // Debounce e validação das datas personalizadas para evitar requisições prematuras enquanto o usuário navega no calendário
+  useEffect(() => {
+    const isValidDate = (d: string) => {
+      if (!d) return true
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false
+      const year = Number(d.slice(0, 4))
+      return year >= 1990 && year <= 2100
+    }
+    if (!isValidDate(dataInicio) || !isValidDate(dataFim)) return
+    if (dataInicio && dataFim && dataInicio > dataFim) return
+
+    const timer = setTimeout(() => {
+      setAppliedDataInicio(dataInicio)
+      setAppliedDataFim(dataFim)
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [dataInicio, dataFim])
+
   // Aplicação rápida de presets de data
   function aplicarPreset(preset: 'todos' | 'hoje' | '7dias' | '30dias' | 'mes' | 'ano') {
     setDataPreset(preset)
     const now = new Date()
     const fmt = (d: Date) => d.toISOString().slice(0, 10)
 
+    let nextInicio = ''
+    let nextFim = ''
     if (preset === 'todos') {
-      setDataInicio('')
-      setDataFim('')
+      nextInicio = ''
+      nextFim = ''
     } else if (preset === 'hoje') {
       const todayStr = fmt(now)
-      setDataInicio(todayStr)
-      setDataFim(todayStr)
+      nextInicio = todayStr
+      nextFim = todayStr
     } else if (preset === '7dias') {
       const past = new Date(now)
       past.setDate(past.getDate() - 6)
-      setDataInicio(fmt(past))
-      setDataFim(fmt(now))
+      nextInicio = fmt(past)
+      nextFim = fmt(now)
     } else if (preset === '30dias') {
       const past = new Date(now)
       past.setDate(past.getDate() - 29)
-      setDataInicio(fmt(past))
-      setDataFim(fmt(now))
+      nextInicio = fmt(past)
+      nextFim = fmt(now)
     } else if (preset === 'mes') {
       const start = new Date(now.getFullYear(), now.getMonth(), 1)
       const end = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-      setDataInicio(fmt(start))
-      setDataFim(fmt(end))
+      nextInicio = fmt(start)
+      nextFim = fmt(end)
     } else if (preset === 'ano') {
       const start = new Date(now.getFullYear(), 0, 1)
       const end = new Date(now.getFullYear(), 11, 31)
-      setDataInicio(fmt(start))
-      setDataFim(fmt(end))
+      nextInicio = fmt(start)
+      nextFim = fmt(end)
     }
+    setDataInicio(nextInicio)
+    setDataFim(nextFim)
+    setAppliedDataInicio(nextInicio)
+    setAppliedDataFim(nextFim)
   }
 
   function handleResetFilters() {
@@ -644,6 +670,8 @@ export default function ClienteHistorico() {
     setDataPreset('todos')
     setDataInicio('')
     setDataFim('')
+    setAppliedDataInicio('')
+    setAppliedDataFim('')
     setTipoFiltro('todos')
     setBusca('')
     setDebouncedBusca('')
@@ -659,24 +687,25 @@ export default function ClienteHistorico() {
   )
 
   // Consulta do Histórico com Filtros
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: [
       'cliente-historico',
       id,
       selectedLoja,
-      dataInicio,
-      dataFim,
+      appliedDataInicio,
+      appliedDataFim,
       debouncedBusca,
       tipoFiltro,
     ],
     queryFn: () => erpApi.clienteHistorico(Number(id), {
       tenant_id: selectedLoja !== 'todos' ? selectedLoja : undefined,
-      data_inicio: dataInicio || undefined,
-      data_fim: dataFim || undefined,
+      data_inicio: appliedDataInicio || undefined,
+      data_fim: appliedDataFim || undefined,
       search: debouncedBusca || undefined,
       tipo: tipoFiltro !== 'todos' ? tipoFiltro : undefined,
     }),
     enabled: Boolean(id),
+    placeholderData: keepPreviousData,
   })
 
   const handlePrint = useCallback(async () => {
@@ -864,6 +893,12 @@ export default function ClienteHistorico() {
             {hasActiveFilters && (
               <span className="px-2 py-0.5 text-[11px] font-semibold bg-blue-500/10 text-blue-400 rounded-full border border-blue-500/20">
                 Filtros ativos
+              </span>
+            )}
+            {isFetching && (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium bg-slate-800 text-slate-300 rounded-full border border-slate-700">
+                <span className="w-2.5 h-2.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                Atualizando…
               </span>
             )}
           </div>

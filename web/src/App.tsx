@@ -50,8 +50,8 @@ export default function App() {
           {/* Login principal (JWT) */}
           <Route path="/login" element={<Login />} />
 
-          {/* Login legado de admin (mantido por compatibilidade) */}
-          <Route path="/admin/login" element={<AdminLogin />} />
+          {/* Redirecionamento de login legado para login seguro */}
+          <Route path="/admin/login" element={<Navigate to="/login" replace />} />
 
           {/* ERP + Admin — exige JWT e role != operator */}
           <Route element={<ErpGuard />}>

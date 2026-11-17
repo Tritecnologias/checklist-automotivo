@@ -46,25 +46,23 @@ function getErpTenantFilter(req: Request, existingWhere = false, column = 'tenan
 }
 
 const router = Router();
-const ADMIN_TOKEN = process.env.ADMIN_PASSWORD ?? 'admin@2026';
-
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers['authorization'];
-  if (authHeader?.startsWith('Bearer ')) {
-    try {
-      const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as JwtPayload;
-      if (payload && payload.userId) {
-        req.user = payload;
-        next();
-        return;
-      }
-    } catch { /* tenta legado */ }
-  }
-  if (req.headers['x-admin-token'] === ADMIN_TOKEN) {
-    next();
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.status(401).json({ message: 'Não autorizado: Token JWT obrigatório' });
     return;
   }
-  res.status(401).json({ message: 'Não autorizado' });
+  try {
+    const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as JwtPayload;
+    if (payload && payload.userId) {
+      req.user = payload;
+      next();
+      return;
+    }
+    res.status(401).json({ message: 'Token inválido' });
+  } catch {
+    res.status(401).json({ message: 'Token inválido ou expirado' });
+  }
 }
 
 // Rotas restritas: owner/manager têm acesso geral; outros cargos/usuários dependem de permissões específicas
@@ -4700,12 +4698,21 @@ router.put('/config/sistema', requireManagerUp, async (req, res) => {
       try {
         const matches = finalLogoValue.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
         if (matches && matches.length === 3) {
-          const extension = matches[1].split('/')[1]?.replace('jpeg', 'jpg') || 'png';
-          const buffer = Buffer.from(matches[2], 'base64');
-          const fileName = targetTenantId ? `logo_tenant_${targetTenantId}.${extension}` : `logo.${extension}`;
-          const uploadsPath = path.join(__dirname, '../../uploads');
-          if (!fs.existsSync(uploadsPath)) fs.mkdirSync(uploadsPath, { recursive: true });
-          fs.writeFileSync(path.join(uploadsPath, fileName), buffer);
+          const mime = matches[1].toLowerCase();
+          const allowedMimes: Record<string, string> = {
+            'image/png': 'png',
+            'image/jpeg': 'jpg',
+            'image/jpg': 'jpg',
+            'image/webp': 'webp',
+          };
+          const extension = allowedMimes[mime];
+          if (extension) {
+            const buffer = Buffer.from(matches[2], 'base64');
+            const fileName = targetTenantId ? `logo_tenant_${targetTenantId}.${extension}` : `logo.${extension}`;
+            const uploadsPath = path.join(__dirname, '../../uploads');
+            if (!fs.existsSync(uploadsPath)) fs.mkdirSync(uploadsPath, { recursive: true });
+            fs.writeFileSync(path.join(uploadsPath, fileName), buffer);
+          }
         }
       } catch (fileErr) {
         console.warn('Aviso ao gravar arquivo de logo em disco:', fileErr);

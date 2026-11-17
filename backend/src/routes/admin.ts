@@ -5,57 +5,55 @@ import { JWT_SECRET, type JwtPayload } from '../middleware/auth';
 import { getUserPermissions, userHasPermission } from '../lib/permissions';
 
 const router = Router();
-const ADMIN_TOKEN = process.env.ADMIN_PASSWORD ?? 'admin@2026';
-
 async function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  // Aceita JWT OU token fixo legado
+  // Autenticação estrita via JWT com verificação de papéis e permissões
   const authHeader = req.headers['authorization'];
-  if (authHeader?.startsWith('Bearer ')) {
-    try {
-      const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as JwtPayload;
-      req.user = payload;
-
-      if (payload.role === 'owner' || payload.role === 'manager') {
-        next();
-        return;
-      }
-
-      // Verifica se o usuário (ex: caixa ou operador) tem permissão para a funcionalidade
-      const perms = await getUserPermissions(payload.userId, payload.role);
-      const path = req.path;
-      let needed = 'produtos';
-      if (path.includes('clients')) {
-        needed = 'clientes';
-      } else if (path.includes('product-types')) {
-        // Leitura de tipos para seleção em produtos é liberada com 'produtos' ou 'config_tipos'
-        if (req.method === 'GET' && userHasPermission(perms, 'produtos', payload.role)) {
-          needed = 'produtos';
-        } else {
-          needed = 'config_tipos';
-        }
-      } else if (path.includes('instalacoes')) {
-        // Leitura de instalações ou vínculo ao produto é liberada com 'produtos' ou 'config_instalacoes'
-        if ((req.method === 'GET' || path.includes('/products/')) && userHasPermission(perms, 'produtos', payload.role)) {
-          needed = 'produtos';
-        } else {
-          needed = 'config_instalacoes';
-        }
-      }
-
-      if (userHasPermission(perms, needed, payload.role)) {
-        next();
-        return;
-      } else {
-        res.status(403).json({ message: 'Permissão insuficiente para este recurso' });
-        return;
-      }
-    } catch { /* token inválido — tenta legado */ }
-  }
-  if (req.headers['x-admin-token'] === ADMIN_TOKEN) {
-    next();
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.status(401).json({ message: 'Não autorizado: Token JWT obrigatório' });
     return;
   }
-  res.status(401).json({ message: 'Não autorizado' });
+
+  try {
+    const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as JwtPayload;
+    req.user = payload;
+
+    if (payload.role === 'owner' || payload.role === 'manager') {
+      next();
+      return;
+    }
+
+    // Verifica se o usuário (ex: caixa ou operador) tem permissão para a funcionalidade
+    const perms = await getUserPermissions(payload.userId, payload.role);
+    const path = req.path;
+    let needed = 'produtos';
+    if (path.includes('clients')) {
+      needed = 'clientes';
+    } else if (path.includes('product-types')) {
+      // Leitura de tipos para seleção em produtos é liberada com 'produtos' ou 'config_tipos'
+      if (req.method === 'GET' && userHasPermission(perms, 'produtos', payload.role)) {
+        needed = 'produtos';
+      } else {
+        needed = 'config_tipos';
+      }
+    } else if (path.includes('instalacoes')) {
+      // Leitura de instalações ou vínculo ao produto é liberada com 'produtos' ou 'config_instalacoes'
+      if ((req.method === 'GET' || path.includes('/products/')) && userHasPermission(perms, 'produtos', payload.role)) {
+        needed = 'produtos';
+      } else {
+        needed = 'config_instalacoes';
+      }
+    }
+
+    if (userHasPermission(perms, needed, payload.role)) {
+      next();
+      return;
+    } else {
+      res.status(403).json({ message: 'Permissão insuficiente para este recurso' });
+      return;
+    }
+  } catch {
+    res.status(401).json({ message: 'Token inválido ou expirado' });
+  }
 }
 
 
@@ -264,33 +262,63 @@ router.patch('/products/:id/estoque', async (req, res) => {
 // ── CLIENTES ─────────────────────────────────────────────────────────────────
 
 router.get('/clients', async (req, res) => {
-  const search = String(req.query.search ?? '');
+  const tenantId = getAdminTenantId(req);
+  const search = String(req.query.search ?? '').trim();
   const page   = Math.max(1, Number(req.query.page ?? 1));
   const limit  = 50;
   const offset = (page - 1) * limit;
 
-  const where  = search.length >= 2
-    ? 'WHERE nome_cliente LIKE ? OR cpf_cnpj LIKE ? OR telefone LIKE ? OR celular LIKE ?'
-    : '';
-  const params = search.length >= 2
-    ? [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`]
-    : [];
+  const user = req.user as JwtPayload | undefined;
+  const isOwnerAll = user?.role === 'owner' && !req.headers['x-tenant-id'];
+
+  let tenantJoin = '';
+  const tenantParams: any[] = [];
+  if (!isOwnerAll) {
+    tenantJoin = 'INNER JOIN cliente_tenant ct ON ct.cliente_id = c.id AND ct.tenant_id = ?';
+    tenantParams.push(tenantId);
+  }
+
+  const whereParts: string[] = [];
+  const searchParams: any[] = [];
+  if (search.length >= 2) {
+    whereParts.push('(c.nome_cliente LIKE ? OR c.cpf_cnpj LIKE ? OR c.telefone LIKE ? OR c.celular LIKE ?)');
+    searchParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  const where = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
 
   const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total FROM cad_clientes ${where}`, params
+    `SELECT COUNT(DISTINCT c.id) as total FROM cad_clientes c ${tenantJoin} ${where}`,
+    [...tenantParams, ...searchParams]
   );
   const [rows] = await pool.query<any>(
-    `SELECT id, nome_cliente, cpf_cnpj, telefone, celular,
-            email, cep, endereco, bairro, cidade, uf, inativo
-     FROM cad_clientes ${where}
-     ORDER BY nome_cliente LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+    `SELECT DISTINCT c.id, c.nome_cliente, c.cpf_cnpj, c.telefone, c.celular,
+            c.email, c.cep, c.endereco, c.bairro, c.cidade, c.uf, c.inativo
+     FROM cad_clientes c
+     ${tenantJoin}
+     ${where}
+     ORDER BY c.nome_cliente LIMIT ? OFFSET ?`,
+    [...tenantParams, ...searchParams, limit, offset]
   );
 
   res.json({ data: rows, total, page, pages: Math.ceil(total / limit) });
 });
 
 router.put('/clients/:id', async (req, res) => {
+  const user = req.user as JwtPayload | undefined;
+  const tenantId = getAdminTenantId(req);
+
+  if (user?.role !== 'owner') {
+    const [ct] = await pool.query<any>(
+      'SELECT 1 FROM cliente_tenant WHERE cliente_id = ? AND tenant_id = ?',
+      [req.params.id, tenantId]
+    );
+    if (!ct.length) {
+      res.status(403).json({ message: 'Sem permissão para alterar cliente de outra loja' });
+      return;
+    }
+  }
+
   const { nome_cliente, cpf_cnpj, telefone, celular, email, cep, endereco, bairro, cidade, uf } = req.body;
   await pool.query(
     `UPDATE cad_clientes
@@ -303,6 +331,7 @@ router.put('/clients/:id', async (req, res) => {
 });
 
 router.post('/clients', async (req, res) => {
+  const tenantId = getAdminTenantId(req);
   const { nome_cliente, cpf_cnpj, telefone, celular, email, cep, endereco, bairro, cidade, uf } = req.body;
   const [result] = await pool.query<any>(
     `INSERT INTO cad_clientes
@@ -310,10 +339,30 @@ router.post('/clients', async (req, res) => {
      VALUES (?,?,?,?,?,?,?,?,?,?,0)`,
     [nome_cliente, cpf_cnpj, telefone, celular, email, cep, endereco, bairro, cidade, uf]
   );
-  res.status(201).json({ id: result.insertId });
+  const newClientId = result.insertId;
+  await pool.query(
+    'INSERT IGNORE INTO cliente_tenant (cliente_id, tenant_id) VALUES (?, ?)',
+    [newClientId, tenantId]
+  ).catch(() => {});
+
+  res.status(201).json({ id: newClientId });
 });
 
 router.patch('/clients/:id/toggle', async (req, res) => {
+  const user = req.user as JwtPayload | undefined;
+  const tenantId = getAdminTenantId(req);
+
+  if (user?.role !== 'owner') {
+    const [ct] = await pool.query<any>(
+      'SELECT 1 FROM cliente_tenant WHERE cliente_id = ? AND tenant_id = ?',
+      [req.params.id, tenantId]
+    );
+    if (!ct.length) {
+      res.status(403).json({ message: 'Sem permissão para alterar cliente de outra loja' });
+      return;
+    }
+  }
+
   await pool.query(
     'UPDATE cad_clientes SET inativo = IF(inativo=0,1,0) WHERE id=?',
     [req.params.id]
@@ -322,6 +371,21 @@ router.patch('/clients/:id/toggle', async (req, res) => {
 });
 
 router.delete('/clients/:id', async (req, res) => {
+  const user = req.user as JwtPayload | undefined;
+  const tenantId = getAdminTenantId(req);
+
+  if (user?.role !== 'owner') {
+    const [ct] = await pool.query<any>(
+      'SELECT 1 FROM cliente_tenant WHERE cliente_id = ? AND tenant_id = ?',
+      [req.params.id, tenantId]
+    );
+    if (!ct.length) {
+      res.status(403).json({ message: 'Sem permissão para excluir cliente de outra loja' });
+      return;
+    }
+  }
+
+  await pool.query('DELETE FROM cliente_tenant WHERE cliente_id = ?', [req.params.id]).catch(() => {});
   await pool.query('DELETE FROM cad_clientes WHERE id=?', [req.params.id]);
   res.status(204).end();
 });

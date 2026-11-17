@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db';
+import { requireAuth, type JwtPayload } from '../middleware/auth';
 
 const router = Router();
+router.use(requireAuth);
 
 router.get('/', async (req: Request, res: Response) => {
   const search = String(req.query.search ?? '').trim();
@@ -11,8 +13,20 @@ router.get('/', async (req: Request, res: Response) => {
     return;
   }
 
+  const user = req.user as JwtPayload | undefined;
   const tenantHeader = Number(req.headers['x-tenant-id']);
-  const tenantId = tenantHeader > 0 ? tenantHeader : 1;
+  let tenantId = 1;
+  if (user) {
+    if (user.role === 'owner') {
+      tenantId = tenantHeader > 0 ? tenantHeader : 1;
+    } else {
+      tenantId = (tenantHeader > 0 && user.tenantIds?.includes(tenantHeader))
+        ? tenantHeader
+        : (user.tenantId ?? user.tenantIds?.[0] ?? 1);
+    }
+  } else {
+    tenantId = tenantHeader > 0 ? tenantHeader : 1;
+  }
 
   try {
     const like = `%${search}%`;

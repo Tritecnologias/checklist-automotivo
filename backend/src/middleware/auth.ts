@@ -1,6 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
+if (!process.env.JWT_SECRET) {
+  console.warn('[AVISO DE SEGURANÇA] JWT_SECRET não configurado no .env! Configure uma chave secreta segura para produção.');
+}
 export const JWT_SECRET = process.env.JWT_SECRET ?? 'checklist-jwt-secret-change-in-prod';
 
 export interface JwtPayload {

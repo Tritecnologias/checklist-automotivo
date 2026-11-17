@@ -1,3 +1,4 @@
+import rateLimit from 'express-rate-limit';
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -15,10 +16,19 @@ import { ROLES_COLABORADORES_OFICINA, syncColaboradoresToMecanicos } from '../li
 
 const router = Router();
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { message: 'Muitas tentativas de login incorretas. Por segurança, tente novamente em alguns minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+
 
 // ── POST /auth/login ──────────────────────────────────────────────────────────
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body as { email?: string; password?: string };
   if (!email || !password) {
     res.status(400).json({ message: 'Email e senha obrigatórios' });
