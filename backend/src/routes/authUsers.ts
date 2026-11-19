@@ -443,15 +443,17 @@ router.post('/select-tenant', requireAuth, async (req, res) => {
     );
     const mecVinculado = mecRows[0] || null;
 
+    const { iat: _iat, exp: _exp, ...cleanUser } = user as JwtPayload & { iat?: number; exp?: number };
     const newPayload: JwtPayload = {
-      ...user,
-      tenantId,
+      ...cleanUser,
+      tenantId: Number(tenantId),
       mecanicoId: mecVinculado ? Number(mecVinculado.id) : null,
       mecanicoNome: mecVinculado ? (mecVinculado.apelido || mecVinculado.nome) : null,
     };
     const token = jwt.sign(newPayload, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token });
   } catch (err) {
+    console.error('POST /auth/select-tenant error:', err);
     res.status(500).json({ message: 'Erro interno' });
   }
 });

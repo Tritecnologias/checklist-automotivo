@@ -1,4 +1,4 @@
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
@@ -15,8 +15,11 @@ export default function SelectTenantScreen() {
       router.replace('/');
     } catch (e: any) {
       setLoading(null);
+      Alert.alert('Erro ao trocar loja', e?.message ?? 'Não foi possível selecionar esta loja.');
     }
   }
+
+  const sortedTenants = [...tenants].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 
   return (
     <View className="flex-1 bg-slate-900 items-center justify-center px-6">
@@ -29,7 +32,7 @@ export default function SelectTenantScreen() {
         </Text>
 
         <View className="gap-3">
-          {tenants.map(t => {
+          {sortedTenants.map(t => {
             const isActive = activeTenant?.id === t.id;
             const isLoading = loading === t.id;
             return (

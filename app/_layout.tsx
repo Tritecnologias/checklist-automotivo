@@ -91,10 +91,8 @@ function AuthGate() {
       if (!inTenantSelect) {
         router.replace('/select-tenant' as any);
       }
-    } else {
-      if (inLogin || inTenantSelect) {
-        router.replace('/');
-      }
+    } else if (inLogin) {
+      router.replace('/');
     }
   }, [token, needsTenantSelection, isLoading, segments]);
 

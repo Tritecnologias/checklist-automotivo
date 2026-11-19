@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -62,7 +63,20 @@ const LAST_MECANICO_KEY = '@last_selected_mecanico_id';
 export default function IdentificationScreen() {
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const { logout, user, tenants, activeTenant } = useAuth();
+  const { logout, user, tenants, activeTenant, selectTenant } = useAuth();
+  const [switchingTenantId, setSwitchingTenantId] = useState<number | null>(null);
+
+  async function handleQuickSelectTenant(t: typeof tenants[number]) {
+    if (activeTenant?.id === t.id || switchingTenantId !== null) return;
+    try {
+      setSwitchingTenantId(t.id);
+      await selectTenant(t);
+    } catch (e: any) {
+      Alert.alert('Erro ao trocar loja', e?.message ?? 'Não foi possível trocar a loja.');
+    } finally {
+      setSwitchingTenantId(null);
+    }
+  }
 
   const { data: mecanicos = [] } = useQuery({
     queryKey: ['mecanicos', activeTenant?.id],
@@ -446,31 +460,39 @@ export default function IdentificationScreen() {
             <Text style={{ fontSize: 32 }}>🔧</Text>
           </View>
 
-          {/* Lojas do usuário — exibe acima do título */}
+          {/* Lojas do usuário — exibe acima do título (tocável para trocar rápido) */}
           {tenants.length > 0 && (
             <View className="flex-row flex-wrap justify-center gap-2 mb-3">
               {[...tenants]
                 .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
                 .map(t => {
                   const isActive = activeTenant?.id === t.id;
+                  const isSwitching = switchingTenantId === t.id;
                   return (
-                    <View
+                    <TouchableOpacity
                       key={t.id}
-                      className={`flex-row items-center gap-1.5 px-3 py-1 rounded-full ${
+                      onPress={() => handleQuickSelectTenant(t)}
+                      disabled={tenants.length <= 1 || isActive || switchingTenantId !== null}
+                      activeOpacity={0.7}
+                      className={`flex-row items-center gap-1.5 px-3 py-1.5 rounded-full ${
                         isActive
                           ? 'bg-blue-600'
                           : 'bg-slate-200 dark:bg-slate-700'
                       }`}
                     >
-                      <Text style={{ fontSize: 12 }}>🏪</Text>
+                      {isSwitching ? (
+                        <ActivityIndicator size="small" color={isActive ? '#ffffff' : '#2563eb'} />
+                      ) : (
+                        <Text style={{ fontSize: 12 }}>🏪</Text>
+                      )}
                       <Text className={`text-xs font-semibold ${
                         isActive
                           ? 'text-white'
-                          : 'text-slate-500 dark:text-slate-400'
+                          : 'text-slate-600 dark:text-slate-300'
                       }`}>
                         {t.nome}
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                   );
                 })}
             </View>

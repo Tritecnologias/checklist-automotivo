@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { authApi, AUTH_TOKEN_KEY, type LoginResult } from './api';
+import { queryClient } from './queryClient';
 
 type Tenant = LoginResult['tenants'][number];
 
@@ -128,12 +129,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
     setUser(null);
     setTenants([]);
+    queryClient.clear();
   }
 
   async function selectTenant(tenant: Tenant) {
     const result = await authApi.selectTenant(tenant.id);
     await AsyncStorage.setItem(AUTH_TOKEN_KEY, result.token);
     setToken(result.token);
+    queryClient.clear();
   }
 
   return (
