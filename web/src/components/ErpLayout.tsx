@@ -161,9 +161,9 @@ export default function ErpLayout() {
   const hasCustomDimensions = Boolean(logoWidth || logoHeight)
 
   return (
-    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex overflow-hidden">
+    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex overflow-hidden print:h-auto print:w-auto print:overflow-visible print:block print:bg-white print:text-black">
       {/* Sidebar */}
-      <aside className="w-52 shrink-0 h-full bg-slate-900 border-r border-slate-800 flex flex-col">
+      <aside className="w-52 shrink-0 h-full bg-slate-900 border-r border-slate-800 flex flex-col print:hidden">
 
         {/* Logo */}
         {logoLayout === 'stacked' && logoUrl ? (
@@ -481,8 +481,8 @@ export default function ErpLayout() {
       </aside>
 
       {/* Main */}
-      <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-        <header className="h-11 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
+      <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden print:h-auto print:overflow-visible print:block">
+        <header className="h-11 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0 print:hidden">
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <MapPin className="w-3.5 h-3.5 text-blue-400 shrink-0" />
             <span className="font-medium text-slate-300">
@@ -500,7 +500,7 @@ export default function ErpLayout() {
             </button>
           </div>
         </header>
-        <main className="flex-1 p-6 overflow-y-auto">
+        <main className="flex-1 p-6 overflow-y-auto print:p-0 print:overflow-visible">
           <Outlet />
         </main>
       </div>

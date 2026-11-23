@@ -6127,6 +6127,7 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
   try {
     const tenantId = getErpWriteTenantId(req);
     const produtoId = req.query.produto_id ? Number(req.query.produto_id) : null;
+    const idTipoFiltro = req.query.id_tipo ? Number(req.query.id_tipo) : null;
     const tipoFiltro = String(req.query.tipo || 'todos'); // 'todos', 'entrada', 'saida', 'ajuste'
     const origemFiltro = String(req.query.origem || 'todos'); // 'todos', 'ajuste_manual', 'ordem_servico', 'pdv_venda'
     const search = String(req.query.search || '').trim().toLowerCase();
@@ -6198,18 +6199,21 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
     // B) os_order_items + os_orders (Peças aplicadas em Ordens de Serviço)
     // C) mv_vendas_movimento + mv_vendas (Vendas diretas de balcão / PDV)
 
-    const prodFilterEm = produtoId ? 'AND em.produto_id = ?' : '';
-    const prodFilterOi = produtoId ? 'AND oi.product_id = ?' : '';
-    const prodFilterM  = produtoId ? 'AND m.id_produto = ?' : '';
+    const prodFilterEm = (produtoId ? ' AND em.produto_id = ?' : '') + (idTipoFiltro ? ' AND p.id_tipo = ?' : '');
+    const prodFilterOi = (produtoId ? ' AND oi.product_id = ?' : '') + (idTipoFiltro ? ' AND p.id_tipo = ?' : '');
+    const prodFilterM  = (produtoId ? ' AND m.id_produto = ?' : '') + (idTipoFiltro ? ' AND p.id_tipo = ?' : '');
 
-    const paramsEm = [tenantId, dataInicioCompleta, dataFimCompleta];
+    const paramsEm: any[] = [tenantId, dataInicioCompleta, dataFimCompleta];
     if (produtoId) paramsEm.push(produtoId);
+    if (idTipoFiltro) paramsEm.push(idTipoFiltro);
 
-    const paramsOi = [tenantId, dataInicioCompleta, dataFimCompleta];
+    const paramsOi: any[] = [tenantId, dataInicioCompleta, dataFimCompleta];
     if (produtoId) paramsOi.push(produtoId);
+    if (idTipoFiltro) paramsOi.push(idTipoFiltro);
 
-    const paramsM = [tenantId, dataInicioIso, dataFimIso, tenantId];
+    const paramsM: any[] = [tenantId, dataInicioIso, dataFimIso, tenantId];
     if (produtoId) paramsM.push(produtoId);
+    if (idTipoFiltro) paramsM.push(idTipoFiltro);
 
     const unionSql = `
       SELECT 
@@ -6334,6 +6338,7 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
 
     if (search) {
       filtered = filtered.filter((item: any) =>
+        String(item.produto_id).includes(search) ||
         item.nome_produto.toLowerCase().includes(search) ||
         (item.cod_barra && item.cod_barra.toLowerCase().includes(search)) ||
         (item.documento_ref && item.documento_ref.toLowerCase().includes(search)) ||

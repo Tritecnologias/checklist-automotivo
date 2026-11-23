@@ -556,6 +556,7 @@ export const erpApi = {
 
   kardexEstoque: (params?: {
     produto_id?: number
+    id_tipo?: number
     tipo?: string
     origem?: string
     dias?: number
@@ -567,6 +568,7 @@ export const erpApi = {
   }) => {
     const q = new URLSearchParams()
     if (params?.produto_id) q.set('produto_id', String(params.produto_id))
+    if (params?.id_tipo) q.set('id_tipo', String(params.id_tipo))
     if (params?.tipo) q.set('tipo', params.tipo)
     if (params?.origem) q.set('origem', params.origem)
     if (params?.dias) q.set('dias', String(params.dias))

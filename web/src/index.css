@@ -9,19 +9,28 @@ body {
 }
 
 @media print {
+  @page {
+    margin: 10mm;
+  }
+
   /* Oculta elementos de navegação */
   aside, header, nav, .no-print { display: none !important; }
 
   /* Fundo branco, texto preto */
-  body, html { background: #fff !important; color: #000 !important; }
+  body, html {
+    background: #fff !important;
+    color: #000 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
 
-  /* Remove margens do layout flex */
-  .min-h-screen { min-height: unset !important; }
-  .flex { display: block !important; }
+  /* Remove travas de altura em impressão */
+  .min-h-screen, .h-screen, .h-full { min-height: unset !important; height: auto !important; }
 
   /* Garante que tabelas não quebrem no meio */
-  table { width: 100% !important; border-collapse: collapse; }
-  tr { break-inside: avoid; }
+  table { width: 100% !important; border-collapse: collapse; page-break-inside: auto; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  thead { display: table-header-group; }
 
   /* Cores de texto para impressão */
   * { color: #000 !important; background: transparent !important;

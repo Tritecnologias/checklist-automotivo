@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { erpApi, adminApi } from '../lib/api'
-import type { KardexMovimentacao, KardexTipo, KardexOrigem, ProdutoEstoque } from '../types'
+import type { KardexMovimentacao, KardexTipo, KardexOrigem, ProdutoEstoque, ProdutoTipo } from '../types'
 import Modal from '../components/Modal'
 import { useAuth } from '../contexts/AuthContext'
 import {
@@ -64,6 +64,7 @@ export default function KardexEstoque() {
 
   const [tipoFiltro, setTipoFiltro] = useState<string>('todos')
   const [origemFiltro, setOrigemFiltro] = useState<string>('todos')
+  const [tipoProdutoFiltro, setTipoProdutoFiltro] = useState<string>('todos')
   const [busca, setBusca] = useState<string>('')
   const [produtoIdFiltro, setProdutoIdFiltro] = useState<number | null>(null)
 
@@ -80,6 +81,12 @@ export default function KardexEstoque() {
   const [modalDoc, setModalDoc] = useState<string>('')
   const [modalErro, setModalErro] = useState<string>('')
 
+  // Busca categorias/tipos de produtos
+  const { data: tiposProdutos = [] } = useQuery<ProdutoTipo[]>({
+    queryKey: ['admin-product-types'],
+    queryFn: () => adminApi.getProductTypes(),
+  })
+
   // Busca lista de produtos do estoque para autocomplete e modal
   const { data: produtosEstoqueRes } = useQuery({
     queryKey: ['estoque-produtos-select', tid],
@@ -95,6 +102,7 @@ export default function KardexEstoque() {
       isCustomDate ? `${dataInicio}_${dataFim}` : periodoDias,
       tipoFiltro,
       origemFiltro,
+      tipoProdutoFiltro,
       produtoIdFiltro,
       busca,
       pagina,
@@ -107,6 +115,7 @@ export default function KardexEstoque() {
         data_fim: isCustomDate ? dataFim : undefined,
         tipo: tipoFiltro !== 'todos' ? tipoFiltro : undefined,
         origem: origemFiltro !== 'todos' ? origemFiltro : undefined,
+        id_tipo: tipoProdutoFiltro !== 'todos' ? Number(tipoProdutoFiltro) : undefined,
         produto_id: produtoIdFiltro || undefined,
         search: busca || undefined,
         page: pagina,
@@ -154,7 +163,135 @@ export default function KardexEstoque() {
   })
 
   const handlePrint = () => {
-    window.print()
+    const win = window.open('', '_blank', 'width=1120,height=780')
+    if (!win) {
+      window.print()
+      return
+    }
+
+    const esc = (s: string) =>
+      String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+
+    const nomeCategoria =
+      tipoProdutoFiltro !== 'todos'
+        ? tiposProdutos.find((t) => String(t.id) === tipoProdutoFiltro)?.nome_tipo || tipoProdutoFiltro
+        : 'Todas'
+
+    const periodoTexto = isCustomDate
+      ? `${dataInicio || '—'} até ${dataFim || '—'}`
+      : `Últimos ${periodoDias} dias`
+
+    const filtrosDesc = [
+      `Loja: ${currentTenant?.nome || 'Loja Principal'}`,
+      `Período: ${periodoTexto}`,
+      `Categoria: ${nomeCategoria}`,
+      tipoFiltro !== 'todos' ? `Tipo: ${tipoFiltro.toUpperCase()}` : null,
+      origemFiltro !== 'todos' ? `Origem: ${origemFiltro}` : null,
+      busca.trim() ? `Busca: "${busca.trim()}"` : null,
+    ]
+      .filter(Boolean)
+      .join(' &nbsp;|&nbsp; ')
+
+    const rowsHtml = movimentacoes
+      .map((m) => {
+        const dt = new Date(m.data_hora).toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+        const tipoLbl = m.tipo === 'entrada' ? 'Entrada' : m.tipo === 'saida' ? 'Saída' : 'Ajuste'
+        const origemLbl =
+          m.origem === 'ordem_servico' ? 'OS' : m.origem === 'pdv_venda' ? 'PDV' : 'Manual'
+        const qtdStr = `${m.quantidade > 0 ? '+' : ''}${N(m.quantidade)} ${m.unidade}`
+        const saldoStr =
+          m.saldo_anterior !== 0 || m.saldo_posterior !== 0
+            ? `${N(m.saldo_anterior)} → ${N(m.saldo_posterior)}`
+            : '—'
+        return `
+          <tr>
+            <td>${esc(dt)}</td>
+            <td><strong>${esc(tipoLbl)}</strong><br><span class="muted">${esc(origemLbl)}</span></td>
+            <td><strong>${esc(m.nome_produto)}</strong>${m.cod_barra ? `<br><span class="muted">Cód: ${esc(m.cod_barra)}</span>` : ''}</td>
+            <td>${esc(m.documento_ref || '—')}</td>
+            <td class="num ${m.quantidade > 0 ? 'pos' : m.quantidade < 0 ? 'neg' : ''}"><strong>${esc(qtdStr)}</strong>${m.vr_total > 0 ? `<br><span class="muted">${esc(R(m.vr_total))}</span>` : ''}</td>
+            <td class="num">${esc(saldoStr)}</td>
+            <td>${esc(m.motivo || '—')}${m.responsavel ? `<br><span class="muted">${esc(m.responsavel)}</span>` : ''}</td>
+          </tr>`
+      })
+      .join('')
+
+    const html = `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Kardex de Estoque - ${esc(currentTenant?.nome || '4Rodas')}</title>
+  <style>
+    @page { size: A4 landscape; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; padding: 0; background: #fff; }
+    .header { border-bottom: 2px solid #1e293b; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .title { font-size: 16px; font-weight: 700; margin: 0 0 3px 0; }
+    .meta { font-size: 10px; color: #475569; }
+    .kpis { display: flex; gap: 10px; margin-bottom: 10px; }
+    .kpi { flex: 1; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; }
+    .kpi-lbl { font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 700; }
+    .kpi-val { font-size: 13px; font-weight: 700; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    thead { display: table-header-group; }
+    th { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 6px 6px; text-align: left; font-size: 9.5px; text-transform: uppercase; color: #334155; }
+    td { border: 1px solid #e2e8f0; padding: 5px 6px; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; font-size: 10px; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    .num { text-align: right; white-space: nowrap; }
+    .pos { color: #047857; }
+    .neg { color: #be123c; }
+    .muted { color: #64748b; font-size: 9px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1 class="title">Kardex de Estoque &amp; Movimentações</h1>
+      <div class="meta">${filtrosDesc}</div>
+    </div>
+    <div class="meta">Emitido em ${esc(new Date().toLocaleString('pt-BR'))} &nbsp;|&nbsp; Pág. ${pagina} (${movimentacoes.length} de ${totalRegistros} registros)</div>
+  </div>
+  ${
+    resumo
+      ? `<div class="kpis">
+          <div class="kpi"><div class="kpi-lbl">Movimentações</div><div class="kpi-val">${totalRegistros}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Total Entradas</div><div class="kpi-val pos">+${N(resumo.total_entradas_qtd)} un</div></div>
+          <div class="kpi"><div class="kpi-lbl">Total Saídas</div><div class="kpi-val neg">-${N(resumo.total_saidas_qtd)} un</div></div>
+          <div class="kpi"><div class="kpi-lbl">Saldo Líquido Período</div><div class="kpi-val">${resumo.saldo_liquido_periodo >= 0 ? '+' : ''}${N(resumo.saldo_liquido_periodo)} un</div></div>
+        </div>`
+      : ''
+  }
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 11%;">Data / Hora</th>
+        <th style="width: 9%;">Tipo</th>
+        <th style="width: 24%;">Peça / Produto</th>
+        <th style="width: 15%;">Documento</th>
+        <th style="width: 11%; text-align:right;">Qtd / Valor</th>
+        <th style="width: 10%; text-align:right;">Saldo</th>
+        <th style="width: 20%;">Motivo / Responsável</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml || '<tr><td colspan="7" style="text-align:center;padding:16px;">Nenhuma movimentação encontrada.</td></tr>'}
+    </tbody>
+  </table>
+  <script>window.onload = () => { window.print(); };</script>
+</body>
+</html>`
+
+    win.document.write(html)
+    win.document.close()
   }
 
   // Exportação CSV
@@ -528,8 +665,8 @@ export default function KardexEstoque() {
           )}
         </div>
 
-        {/* Linha secundária de filtros: Tipo, Origem, Filtro de Produto e Busca */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-800/80">
+        {/* Linha secundária de filtros: Categoria, Tipo, Origem, Filtro de Produto e Busca */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2 border-t border-slate-800/80">
           {/* Busca por texto */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -543,6 +680,25 @@ export default function KardexEstoque() {
               }}
               className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl pl-9 pr-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-500"
             />
+          </div>
+
+          {/* Filtro por Categoria / Grupo de Produtos */}
+          <div>
+            <select
+              value={tipoProdutoFiltro}
+              onChange={(e) => {
+                setTipoProdutoFiltro(e.target.value)
+                setPagina(1)
+              }}
+              className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="todos">🏷️ Todas as Categorias / Grupos</option>
+              {tiposProdutos.map((tp) => (
+                <option key={tp.id} value={String(tp.id)}>
+                  {tp.nome_tipo}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Filtro por Produto Específico */}
