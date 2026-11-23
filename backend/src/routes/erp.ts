@@ -2012,7 +2012,7 @@ router.post('/vendas', async (req, res) => {
 router.get('/contas', requireManagerUp, async (req, res) => {
   try {
     const page   = Math.max(1, Number(req.query.page ?? 1));
-    const limit  = 50;
+    const limit  = Math.max(10, Math.min(2000, Number(req.query.limit ?? 50)));
     const offset = (page - 1) * limit;
     const statusQ = req.query.status;
     const status = statusQ === '1' || statusQ === 'pago' ? 1 : statusQ === '' || statusQ === 'todos' ? null : 0;
@@ -2357,7 +2357,7 @@ router.get('/fornecedores', requireManagerUp, async (req, res) => {
 router.get('/contas-pagar', requireManagerUp, async (req, res) => {
   try {
     const page   = Math.max(1, Number(req.query.page ?? 1));
-    const limit  = 50;
+    const limit  = Math.max(10, Math.min(2000, Number(req.query.limit ?? 50)));
     const offset = (page - 1) * limit;
     const statusQ = req.query.status;
     const status = statusQ === '1' || statusQ === 'pago' ? 1 : statusQ === '' || statusQ === 'todos' ? null : 0;

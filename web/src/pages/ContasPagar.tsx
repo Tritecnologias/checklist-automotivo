@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   TrendingDown, CheckCircle2, Clock, AlertTriangle,
   CreditCard, Banknote, Zap, FileText, Calendar, X, Plus,
-  Edit2, Trash2, RotateCcw, Building2, Tag, ShieldCheck, DollarSign
+  Edit2, Trash2, RotateCcw, Building2, Tag, ShieldCheck, DollarSign, Printer
 } from 'lucide-react'
 
 const R = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -124,6 +124,7 @@ export default function ContasPagar() {
   // Form Baixa / Pagar
   const [baixaData, setBaixaData] = useState(new Date().toISOString().slice(0, 10))
   const [baixaModo, setBaixaModo] = useState<number>(1)
+  const [printingReport, setPrintingReport] = useState(false)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -284,6 +285,173 @@ export default function ContasPagar() {
   const totais = res?.totais
   const somaPagina = contas.reduce((acc, c) => acc + Number(c.valor || 0), 0)
 
+  const handlePrintReport = async () => {
+    if (printingReport) return
+    setPrintingReport(true)
+    try {
+      const fullRes = await erpApi.contasPagar({
+        status,
+        search: debouncedSearch,
+        data_inicio: dataInicio,
+        data_fim: dataFim,
+        forma_pagto: formaPagto,
+        categoria: categoriaId,
+        page: 1,
+        limit: 2000,
+      })
+
+      const lista = fullRes?.data ?? []
+      const totaisRep = fullRes?.totais
+
+      const win = window.open('', '_blank', 'width=1120,height=780')
+      if (!win) {
+        alert('Permita pop-ups para visualizar e imprimir o relatório.')
+        return
+      }
+
+      const esc = (s: string) =>
+        String(s ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+
+      const tituloStatus =
+        status === '1'
+          ? 'Relatório de Contas Pagas'
+          : status === '0'
+          ? 'Relatório de Contas a Pagar (Em Aberto)'
+          : 'Relatório Geral de Contas a Pagar'
+
+      const periodoTxt =
+        dataInicio && dataFim
+          ? `${fmtDate(dataInicio)} até ${fmtDate(dataFim)}`
+          : dataInicio
+          ? `A partir de ${fmtDate(dataInicio)}`
+          : dataFim
+          ? `Até ${fmtDate(dataFim)}`
+          : 'Todas as datas'
+
+      const catNome = categoriaId
+        ? categorias.find(c => c.id === categoriaId)?.nome || `Categoria #${categoriaId}`
+        : 'Todas'
+
+      const formaNome = formaPagto
+        ? FORMAS_OPTS.find(f => f.value === formaPagto)?.label.replace(/^[^\wÀ-ú]+\s*/, '') || formaPagto
+        : 'Todas'
+
+      const filtrosDesc = [
+        `Loja: ${currentTenant?.nome || 'Loja Principal'}`,
+        `Período: ${periodoTxt}`,
+        `Categoria: ${catNome}`,
+        `Forma: ${formaNome}`,
+        debouncedSearch ? `Busca: "${debouncedSearch}"` : null,
+      ]
+        .filter(Boolean)
+        .join(' &nbsp;|&nbsp; ')
+
+      const totalValorLista = lista.reduce((acc, item) => acc + Number(item.valor || 0), 0)
+
+      const rowsHtml = lista
+        .map(c => {
+          const isPago = c.status === 1
+          const docStr = c.documento ? `<br><span class="muted">Doc: ${esc(c.documento)}</span>` : ''
+          return `
+            <tr>
+              <td class="nowrap">${esc(fmtDate(c.data_vencimento))}</td>
+              <td class="nowrap">${isPago ? esc(fmtDate(c.data_pagamento)) : '<span class="muted">Em aberto</span>'}</td>
+              <td><strong>${esc(c.favorecido || '—')}</strong></td>
+              <td>${esc(c.historico || '—')}${docStr}</td>
+              <td>${esc(c.categoria || 'Despesa')}</td>
+              <td>${esc(c.modo_lancamento || 'Boleto')}</td>
+              <td class="center"><span class="badge ${isPago ? 'badge-ok' : 'badge-warn'}">${isPago ? 'Pago' : 'A Pagar'}</span></td>
+              <td class="num"><strong>${esc(R(Number(c.valor || 0)))}</strong></td>
+            </tr>`
+        })
+        .join('')
+
+      const html = `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>${esc(tituloStatus)} - ${esc(currentTenant?.nome || '4Rodas')}</title>
+  <style>
+    @page { size: A4 landscape; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; margin: 0; padding: 0; background: #fff; }
+    .header { border-bottom: 2px solid #1e293b; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .title { font-size: 16px; font-weight: 700; margin: 0 0 3px 0; }
+    .meta { font-size: 10px; color: #475569; }
+    .kpis { display: flex; gap: 10px; margin-bottom: 10px; }
+    .kpi { flex: 1; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; }
+    .kpi-lbl { font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 700; }
+    .kpi-val { font-size: 13px; font-weight: 700; margin-top: 2px; }
+    .ok { color: #047857; }
+    .warn { color: #b45309; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    thead { display: table-header-group; }
+    th { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 6px; text-align: left; font-size: 9.5px; text-transform: uppercase; color: #334155; }
+    td { border: 1px solid #e2e8f0; padding: 5px 6px; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; font-size: 10px; }
+    tfoot td { background: #f8fafc; border-top: 2px solid #334155; font-weight: 700; font-size: 11px; padding: 7px 6px; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    .num { text-align: right; white-space: nowrap; }
+    .center { text-align: center; }
+    .nowrap { white-space: nowrap; }
+    .muted { color: #64748b; font-size: 9px; }
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 9px; font-weight: 700; }
+    .badge-ok { background: #d1fae5; color: #065f46; }
+    .badge-warn { background: #fef3c7; color: #92400e; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1 class="title">${esc(tituloStatus)}</h1>
+      <div class="meta">${filtrosDesc}</div>
+    </div>
+    <div class="meta">Emitido em ${esc(new Date().toLocaleString('pt-BR'))} &nbsp;|&nbsp; ${lista.length} lançamento(s)</div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="kpi-lbl">Lançamentos</div><div class="kpi-val">${lista.length}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Total Filtrado</div><div class="kpi-val">${esc(R(totaisRep?.total ?? totalValorLista))}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Total Pago</div><div class="kpi-val ok">${esc(R(totaisRep?.total_pago ?? 0))}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Total Em Aberto</div><div class="kpi-val warn">${esc(R(totaisRep?.total_pendente ?? 0))}</div></div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 9%;">Vencimento</th>
+        <th style="width: 9%;">Pagamento</th>
+        <th style="width: 18%;">Fornecedor / Favorecido</th>
+        <th style="width: 24%;">Descrição / Documento</th>
+        <th style="width: 14%;">Categoria</th>
+        <th style="width: 10%;">Forma</th>
+        <th style="width: 7%; text-align:center;">Status</th>
+        <th style="width: 9%; text-align:right;">Valor</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml || '<tr><td colspan="8" style="text-align:center;padding:16px;">Nenhum lançamento encontrado para os filtros selecionados.</td></tr>'}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="7" class="num">TOTAL CONSOLIDADO DO PERÍODO (${lista.length} lançamento(s)):</td>
+        <td class="num">${esc(R(totalValorLista))}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <script>window.onload = () => { window.print(); };</script>
+</body>
+</html>`
+
+      win.document.write(html)
+      win.document.close()
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao gerar relatório de contas a pagar.')
+    } finally {
+      setPrintingReport(false)
+    }
+  }
+
   return (
     <div className="space-y-6 max-w-6xl">
       {/* ── SELETOR DE ABA (RECEBER / PAGAR) & CABEÇALHO ── */}
@@ -313,16 +481,29 @@ export default function ContasPagar() {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            limparFormNovo()
-            setModalNovo(true)
-          }}
-          className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-rose-950/50 flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Nova Conta a Pagar</span>
-        </button>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            type="button"
+            onClick={handlePrintReport}
+            disabled={printingReport}
+            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 disabled:opacity-60"
+            title="Imprimir ou salvar em PDF o relatório consolidado do filtro atual"
+          >
+            <Printer className="w-4 h-4 text-blue-400" />
+            <span>{printingReport ? 'Gerando...' : 'Imprimir / Gerar Relatório'}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              limparFormNovo()
+              setModalNovo(true)
+            }}
+            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-rose-950/50 flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Nova Conta a Pagar</span>
+          </button>
+        </div>
       </div>
 
       {/* ── CARDS DE TOTAIS GERAIS ── */}

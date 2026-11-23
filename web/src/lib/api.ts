@@ -379,6 +379,7 @@ export const erpApi = {
   contasPagar: (params: {
     status?: string
     page?: number
+    limit?: number
     search?: string
     data_inicio?: string
     data_fim?: string
@@ -388,6 +389,7 @@ export const erpApi = {
     const q = new URLSearchParams()
     if (params.status) q.set('status', params.status)
     if (params.page)   q.set('page',   String(params.page))
+    if (params.limit)  q.set('limit',  String(params.limit))
     if (params.search) q.set('search', params.search)
     if (params.data_inicio) q.set('data_inicio', params.data_inicio)
     if (params.data_fim)    q.set('data_fim',    params.data_fim)
