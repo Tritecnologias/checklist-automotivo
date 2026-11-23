@@ -6276,7 +6276,7 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
       UNION ALL
 
       SELECT 
-        CONCAT('PDV-', MAX(v.controle), '-', m.id) as id,
+        CONCAT('PDV-', v.controle, '-', m.id_produto) as id,
         CONCAT(MAX(v.data_venda), ' 12:00:00') as data_hora,
         m.id_produto as produto_id,
         MAX(p.nome_produto) as nome_produto,
@@ -6284,14 +6284,24 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
         COALESCE(MAX(p.unidade), 'UN') as unidade,
         'saida' as tipo,
         'pdv_venda' as origem,
-        (-1 * ABS(m.quant)) as quantidade,
+        (-1 * CASE
+          WHEN COUNT(*) > 1 AND MAX(COALESCE(v.vr_total, 0)) > 0
+               AND SUM(ABS(m.quant) * COALESCE(m.valor, p.vr_venda, 0)) > (MAX(COALESCE(v.vr_total, 0)) + 0.50)
+          THEN MAX(ABS(m.quant))
+          ELSE SUM(ABS(m.quant))
+        END) as quantidade,
         0 as saldo_anterior,
         0 as saldo_posterior,
-        CONCAT('Venda PDV #', MAX(v.controle)) as documento_ref,
+        CONCAT('Venda PDV #', v.controle) as documento_ref,
         CONCAT('Venda Balcão • Cliente: ', COALESCE(MAX(c.nome_cliente), 'Consumidor')) as motivo,
         COALESCE(MAX(u.nome), MAX(u.email), 'Operador de Caixa / Vendedor') as responsavel,
-        COALESCE(m.valor, MAX(p.vr_venda), 0) as vr_unitario,
-        (ABS(m.quant) * COALESCE(m.valor, MAX(p.vr_venda), 0)) as vr_total
+        COALESCE(MAX(m.valor), MAX(p.vr_venda), 0) as vr_unitario,
+        CASE
+          WHEN COUNT(*) > 1 AND MAX(COALESCE(v.vr_total, 0)) > 0
+               AND SUM(ABS(m.quant) * COALESCE(m.valor, p.vr_venda, 0)) > (MAX(COALESCE(v.vr_total, 0)) + 0.50)
+          THEN MAX(ABS(m.quant) * COALESCE(m.valor, p.vr_venda, 0))
+          ELSE SUM(ABS(m.quant) * COALESCE(m.valor, p.vr_venda, 0))
+        END as vr_total
       FROM mv_vendas_movimento m
       JOIN mv_vendas v ON v.controle = m.controle
         AND (m.data_venda IS NULL OR m.data_venda = v.data_venda)
@@ -6303,7 +6313,7 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
         AND m.controle IS NOT NULL AND TRIM(m.controle) != ''
         AND NOT EXISTS (SELECT 1 FROM os_orders o WHERE CONVERT(o.venda_controle USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(v.controle USING utf8mb4) COLLATE utf8mb4_unicode_ci AND o.tenant_id = ?)
         ${prodFilterM}
-      GROUP BY m.id, m.id_produto, m.quant, m.valor
+      GROUP BY v.controle, m.id_produto
 
       ORDER BY data_hora DESC
     `;
