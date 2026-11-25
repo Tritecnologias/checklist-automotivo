@@ -164,13 +164,23 @@ router.put('/products/:id', async (req, res) => {
   } = req.body;
   const ctrlEstoque = controla_estoque !== undefined ? (Number(controla_estoque) === 0 ? 0 : 1) : 1;
 
-  await pool.query(
-    `UPDATE cad_produtos
-     SET nome_produto=?, cod_barra=?, unidade=?, id_tipo=?,
-         vr_compra=?, vr_venda=?, vr_venda_2=?, estoque=?, controla_estoque=?
-     WHERE id=?`,
-    [nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, estoque, ctrlEstoque, prodId]
-  );
+  if (tenantId === 1) {
+    await pool.query(
+      `UPDATE cad_produtos
+       SET nome_produto=?, cod_barra=?, unidade=?, id_tipo=?,
+           vr_compra=?, vr_venda=?, vr_venda_2=?, estoque=?, controla_estoque=?
+       WHERE id=?`,
+      [nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, estoque, ctrlEstoque, prodId]
+    );
+  } else {
+    await pool.query(
+      `UPDATE cad_produtos
+       SET nome_produto=?, cod_barra=?, unidade=?, id_tipo=?,
+           vr_compra=?, vr_venda=?, vr_venda_2=?, controla_estoque=?
+       WHERE id=?`,
+      [nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, ctrlEstoque, prodId]
+    );
+  }
   if (ctrlEstoque === 1 && estoque !== undefined && !isNaN(Number(estoque))) {
     await pool.query(
       `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo) VALUES (?, ?, ?)
@@ -189,19 +199,22 @@ router.post('/products', async (req, res) => {
     controla_estoque,
   } = req.body;
   const ctrlEstoque = controla_estoque !== undefined ? (Number(controla_estoque) === 0 ? 0 : 1) : 1;
+  const estoqueInicial = Number(estoque ?? 0) || 0;
+  // Só grava em cad_produtos.estoque se estiver na loja 1; nas demais lojas grava 0 para não vazar saldo para o fallback da loja 1
+  const estoqueGlobal = tenantId === 1 ? estoqueInicial : 0;
 
   const [result] = await pool.query<any>(
     `INSERT INTO cad_produtos
        (nome_produto, cod_barra, unidade, id_tipo, vr_compra, vr_venda, vr_venda_2, estoque, controla_estoque, inativo)
      VALUES (?,?,?,?,?,?,?,?,?,0)`,
-    [nome_produto, cod_barra, unidade, id_tipo ?? 1, vr_compra ?? 0, vr_venda ?? 0, vr_venda_2 ?? 0, estoque ?? 0, ctrlEstoque]
+    [nome_produto, cod_barra, unidade, id_tipo ?? 1, vr_compra ?? 0, vr_venda ?? 0, vr_venda_2 ?? 0, estoqueGlobal, ctrlEstoque]
   );
   const newId = result.insertId;
-  if (ctrlEstoque === 1 && estoque !== undefined && Number(estoque) > 0) {
+  if (ctrlEstoque === 1) {
     await pool.query(
       `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo) VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)`,
-      [newId, tenantId, Number(estoque)]
+      [newId, tenantId, estoqueInicial]
     );
   }
   res.status(201).json({ id: newId });
