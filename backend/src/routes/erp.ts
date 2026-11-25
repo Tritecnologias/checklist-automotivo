@@ -1599,7 +1599,19 @@ router.delete('/vendas/:controle', requireManagerUp, async (req, res) => {
   }
 });
 
+interface RecentVendaEntry {
+  status: 'pending' | 'done';
+  expiresAt: number;
+  controle?: string;
+  id?: number;
+  vr_total?: number;
+}
+const recentVendasLock = new Map<string, RecentVendaEntry>();
+const VENDA_IDEMPOTENCY_TTL_MS = 15_000;
+
 router.post('/vendas', async (req, res) => {
+  let lockKey: string | null = null;
+  let saleCommitted = false;
   try {
     const {
       id_cliente = 0,
@@ -1622,6 +1634,7 @@ router.post('/vendas', async (req, res) => {
       supervisor_token,
       supervisor_user_id,
       supervisor_password,
+      idempotency_key,
     } = req.body as {
       id_cliente?: number;
       itens: { id_produto: number; valor: number; quant: number }[];
@@ -1643,11 +1656,54 @@ router.post('/vendas', async (req, res) => {
       supervisor_token?: string;
       supervisor_user_id?: number;
       supervisor_password?: string;
+      idempotency_key?: string;
     };
 
     const itensArray = Array.isArray(itens) ? itens : [];
     const hasItens = itensArray.length > 0;
     const finalVrTicket = Number(vr_ticket || 0) + Number(vr_outros || 0);
+    const tenantIdForLock = getErpWriteTenantId(req);
+    const userAuthForLock = req.user as any;
+    const userIdForLock = userAuthForLock?.userId ?? userAuthForLock?.id ?? Number(id_login || 1);
+
+    // Trava de idempotência (15s) para impedir duplicação por duplo clique ou retry de rede
+    const nowMs = Date.now();
+    for (const [k, v] of recentVendasLock.entries()) {
+      if (v.expiresAt <= nowMs) recentVendasLock.delete(k);
+    }
+
+    const headerIdemp = String(req.headers['x-idempotency-key'] || idempotency_key || '').trim();
+    const sortedItemsKey = itensArray
+      .map(i => `${Number(i.id_produto || 0)}:${Number(i.quant || 0)}:${Number(i.valor || 0).toFixed(2)}`)
+      .sort()
+      .join('|');
+    const fingerprintRaw = headerIdemp
+      ? `key:${tenantIdForLock}:${headerIdemp}`
+      : `fp:${tenantIdForLock}:${userIdForLock}:${Number(id_cliente || 0)}:${id_os || ''}:${Number(vr_dinheiro || 0).toFixed(2)}:${Number(vr_cartao || 0).toFixed(2)}:${Number(vr_pix || 0).toFixed(2)}:${Number(vr_nota || 0).toFixed(2)}:${Number(vr_cheque || 0).toFixed(2)}:${Number(vr_carne || 0).toFixed(2)}:${finalVrTicket.toFixed(2)}:${Number(vr_adicional || 0).toFixed(2)}:${sortedItemsKey}`;
+
+    lockKey = crypto.createHash('sha256').update(fingerprintRaw).digest('hex');
+    const existingLock = recentVendasLock.get(lockKey);
+    if (existingLock && existingLock.expiresAt > nowMs) {
+      if (existingLock.status === 'pending') {
+        lockKey = null; // não remove a trava da requisição que está em andamento
+        res.status(409).json({
+          message: 'Esta venda já está sendo processada. Aguarde alguns segundos.',
+        });
+        return;
+      }
+      lockKey = null; // mantém a trava 'done' ativa pelo restante dos 15s
+      res.status(409).json({
+        message: `Venda idêntica já foi registrada há poucos segundos (Venda #${existingLock.controle}). Aguarde antes de lançar novamente.`,
+        controle: existingLock.controle,
+        deduplicated: true,
+      });
+      return;
+    }
+
+    recentVendasLock.set(lockKey, {
+      status: 'pending',
+      expiresAt: nowMs + 30_000,
+    });
 
     // Valida se a OS já foi faturada anteriormente
     if (id_os) {
@@ -2000,10 +2056,25 @@ router.post('/vendas', async (req, res) => {
       }
     }
 
+    if (lockKey) {
+      recentVendasLock.set(lockKey, {
+        status: 'done',
+        expiresAt: Date.now() + VENDA_IDEMPOTENCY_TTL_MS,
+        controle,
+        id: id_venda,
+        vr_total,
+      });
+      saleCommitted = true;
+    }
+
     res.status(201).json({ controle, id: id_venda, vr_total });
   } catch (err: any) {
     console.error('POST /erp/vendas error:', err);
     res.status(500).json({ message: err?.message || 'Erro ao processar venda' });
+  } finally {
+    if (lockKey && !saleCommitted) {
+      recentVendasLock.delete(lockKey);
+    }
   }
 });
 
@@ -6277,7 +6348,11 @@ router.get('/estoque/kardex', requireManagerUp, async (req, res) => {
 
       SELECT 
         CONCAT('PDV-', v.controle, '-', m.id_produto) as id,
-        CONCAT(MAX(v.data_venda), ' 12:00:00') as data_hora,
+        CASE
+          WHEN v.controle REGEXP '^[0-9]{14}$'
+          THEN CONCAT(MAX(v.data_venda), ' ', SUBSTRING(v.controle, 9, 2), ':', SUBSTRING(v.controle, 11, 2), ':', SUBSTRING(v.controle, 13, 2))
+          ELSE CONCAT(MAX(v.data_venda), ' 12:00:00')
+        END as data_hora,
         m.id_produto as produto_id,
         MAX(p.nome_produto) as nome_produto,
         MAX(p.cod_barra) as cod_barra,
