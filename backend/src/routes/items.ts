@@ -42,7 +42,8 @@ router.get('/', async (req: Request, res: Response) => {
        FROM cad_produtos p
        LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
        LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-       WHERE p.inativo = 0
+       WHERE COALESCE(pst.inativo, p.inativo) = 0
+         AND COALESCE(pst.excluido, 0) = 0
          AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
        ORDER BY p.nome_produto
        LIMIT 30`,

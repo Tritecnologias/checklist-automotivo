@@ -461,9 +461,29 @@ async function runMigrations() {
       \`produto_id\` INT NOT NULL,
       \`tenant_id\`  INT NOT NULL,
       \`saldo\`      DECIMAL(10,2) NOT NULL DEFAULT 0,
+      \`inativo\`    TINYINT(1) NOT NULL DEFAULT 0,
+      \`excluido\`   TINYINT(1) NOT NULL DEFAULT 0,
       PRIMARY KEY (\`produto_id\`, \`tenant_id\`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  const [[{ cntPstInativo }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntPstInativo FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'produto_saldo_tenant' AND COLUMN_NAME = 'inativo'`
+  );
+  if (Number(cntPstInativo) === 0) {
+    await pool.query('ALTER TABLE produto_saldo_tenant ADD COLUMN inativo TINYINT(1) NOT NULL DEFAULT 0');
+    console.log('[migration] produto_saldo_tenant.inativo adicionada');
+  }
+
+  const [[{ cntPstExcluido }]] = await pool.query<any>(
+    `SELECT COUNT(*) as cntPstExcluido FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'produto_saldo_tenant' AND COLUMN_NAME = 'excluido'`
+  );
+  if (Number(cntPstExcluido) === 0) {
+    await pool.query('ALTER TABLE produto_saldo_tenant ADD COLUMN excluido TINYINT(1) NOT NULL DEFAULT 0');
+    console.log('[migration] produto_saldo_tenant.excluido adicionada');
+  }
 
   // Tabela de associação cliente ↔ tenant (qual loja o cliente pertence)
   await pool.query(`

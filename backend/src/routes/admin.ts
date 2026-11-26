@@ -81,13 +81,13 @@ router.get('/products', async (req, res) => {
   const status = String(req.query.status ?? 'ativos'); // 'ativos' | 'inativos' | 'todos'
   const tipoFilter = req.query.tipo ? Number(req.query.tipo) : null;
 
-  const whereParts: string[] = [];
+  const whereParts: string[] = ['COALESCE(pst.excluido, 0) = 0'];
   const params: any[] = [];
 
   if (status === 'ativos') {
-    whereParts.push('p.inativo = 0');
+    whereParts.push('COALESCE(pst.inativo, p.inativo) = 0');
   } else if (status === 'inativos') {
-    whereParts.push('p.inativo = 1');
+    whereParts.push('COALESCE(pst.inativo, p.inativo) = 1');
   }
 
   if (tipoFilter) {
@@ -100,18 +100,25 @@ router.get('/products', async (req, res) => {
     params.push(`%${search}%`, `%${search}%`);
   }
 
-  const where = whereParts.length ? 'WHERE ' + whereParts.join(' AND ') : '';
+  const where = 'WHERE ' + whereParts.join(' AND ');
 
   const [[{ total }]] = await pool.query<any>(
-    `SELECT COUNT(*) as total FROM cad_produtos p ${where}`, params
+    `SELECT COUNT(*) as total
+     FROM cad_produtos p
+     LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+     ${where}`,
+    [tenantId, ...params]
   );
 
   const [[counts]] = await pool.query<any>(
     `SELECT
        COUNT(*) as total,
-       COUNT(CASE WHEN inativo = 0 THEN 1 END) as total_ativos,
-       COUNT(CASE WHEN inativo = 1 THEN 1 END) as total_inativos
-     FROM cad_produtos`
+       COUNT(CASE WHEN COALESCE(pst.inativo, p.inativo) = 0 THEN 1 END) as total_ativos,
+       COUNT(CASE WHEN COALESCE(pst.inativo, p.inativo) = 1 THEN 1 END) as total_inativos
+     FROM cad_produtos p
+     LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+     WHERE COALESCE(pst.excluido, 0) = 0`,
+    [tenantId]
   );
 
   const saldoExpr = `COALESCE(pst.saldo, IF(? = 1, p.estoque, 0))`;
@@ -123,7 +130,7 @@ router.get('/products', async (req, res) => {
             p.vr_compra, p.vr_venda, p.vr_venda_2,
             ${saldoExpr} AS estoque,
             COALESCE(p.controla_estoque, 1) AS controla_estoque,
-            p.inativo
+            COALESCE(pst.inativo, p.inativo) AS inativo
      FROM cad_produtos p
      LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
@@ -221,15 +228,43 @@ router.post('/products', async (req, res) => {
 });
 
 router.patch('/products/:id/toggle', async (req, res) => {
-  await pool.query(
-    'UPDATE cad_produtos SET inativo = IF(inativo=0,1,0) WHERE id=?',
-    [req.params.id]
+  const tenantId = getAdminTenantId(req);
+  const prodId = Number(req.params.id);
+
+  const [[row]] = await pool.query<any>(
+    `SELECT COALESCE(pst.inativo, p.inativo) AS atual_inativo,
+            COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS saldo_atual
+     FROM cad_produtos p
+     LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
+     WHERE p.id = ?`,
+    [tenantId, tenantId, prodId]
   );
-  res.json({ ok: true });
+  if (!row) {
+    res.status(404).json({ message: 'Produto não encontrado' });
+    return;
+  }
+
+  const novoInativo = Number(row.atual_inativo) === 0 ? 1 : 0;
+  await pool.query(
+    `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo, inativo, excluido)
+     VALUES (?, ?, ?, ?, 0)
+     ON DUPLICATE KEY UPDATE inativo = VALUES(inativo), excluido = 0`,
+    [prodId, tenantId, Number(row.saldo_atual ?? 0), novoInativo]
+  );
+  res.json({ ok: true, inativo: novoInativo });
 });
 
 router.delete('/products/:id', async (req, res) => {
-  await pool.query('DELETE FROM cad_produtos WHERE id=?', [req.params.id]);
+  const tenantId = getAdminTenantId(req);
+  const prodId = Number(req.params.id);
+
+  // Exclui/oculta o produto apenas no tenant atual, preservando nas demais lojas e no histórico de vendas/OS
+  await pool.query(
+    `INSERT INTO produto_saldo_tenant (produto_id, tenant_id, saldo, inativo, excluido)
+     VALUES (?, ?, 0, 1, 1)
+     ON DUPLICATE KEY UPDATE saldo = 0, inativo = 1, excluido = 1`,
+    [prodId, tenantId]
+  );
   res.status(204).end();
 });
 

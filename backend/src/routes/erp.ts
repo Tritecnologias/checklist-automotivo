@@ -182,7 +182,7 @@ router.get('/dashboard', async (req, res) => {
     `SELECT p.id, p.nome_produto, COALESCE(pst.saldo, IF(? = 1, p.estoque, 0)) AS estoque, p.min_estoque
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-     WHERE p.inativo = 0 AND p.min_estoque > 0 AND COALESCE(p.controla_estoque, 1) = 1
+     WHERE COALESCE(pst.inativo, p.inativo) = 0 AND COALESCE(pst.excluido, 0) = 0 AND p.min_estoque > 0 AND COALESCE(p.controla_estoque, 1) = 1
      HAVING estoque <= p.min_estoque
      ORDER BY estoque ASC LIMIT 8`,
     [tenantId, tenantId]
@@ -2821,7 +2821,7 @@ router.get('/busca/produtos', async (req, res) => {
             CASE WHEN p.id_tipo IN (2, 9) THEN 1 ELSE 0 END AS is_service
      FROM cad_produtos p
      LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-     WHERE p.inativo = 0 AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
+     WHERE COALESCE(pst.inativo, p.inativo) = 0 AND COALESCE(pst.excluido, 0) = 0 AND (p.nome_produto LIKE ? OR p.cod_barra LIKE ?)
      ORDER BY p.nome_produto LIMIT 20`,
     [tenantId, tenantId, `%${q}%`, `%${q}%`]
   );
@@ -4247,8 +4247,8 @@ router.get('/estoque', requireManagerUp, async (req, res) => {
 
   const saldoExpr = `COALESCE(pst.saldo, IF(? = 1, p.estoque, 0))`;
 
-  // Exibe todos os produtos ativos do catálogo para qualquer loja (itens sem movimentação nesta filial têm saldo 0)
-  const whereParts: string[] = ['p.inativo = 0'];
+  // Exibe produtos ativos e não excluídos para esta loja
+  const whereParts: string[] = ['COALESCE(pst.inativo, p.inativo) = 0', 'COALESCE(pst.excluido, 0) = 0'];
   const whereParams: any[] = [];
 
   if (search.length > 0) {
@@ -5486,7 +5486,8 @@ router.get('/estoque/curva-abc', requireManagerUp, async (req, res) => {
          FROM cad_produtos p
          LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
          LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-         WHERE p.inativo = 0
+         WHERE COALESCE(pst.inativo, p.inativo) = 0
+           AND COALESCE(pst.excluido, 0) = 0
            ${serviceFilter}`,
         [tenantId, tenantId]
       );
@@ -5733,7 +5734,8 @@ router.get('/estoque/valorizacao', requireManagerUp, async (req, res) => {
        FROM cad_produtos p
        LEFT JOIN cad_produtos_tipo t ON t.id = p.id_tipo
        LEFT JOIN produto_saldo_tenant pst ON pst.produto_id = p.id AND pst.tenant_id = ?
-       WHERE p.inativo = 0
+       WHERE COALESCE(pst.inativo, p.inativo) = 0
+         AND COALESCE(pst.excluido, 0) = 0
          ${serviceFilter}
        ORDER BY p.nome_produto ASC`,
       [tenantId, tenantId]
@@ -6014,7 +6016,8 @@ router.get('/estoque/sugestao-compras', requireManagerUp, async (req, res) => {
          JOIN cad_fornecedores f ON f.id = pf.id_fornecedor
          WHERE COALESCE(f.inativo, 0) = 0
        ) forn ON forn.id_produto = p.id
-       WHERE p.inativo = 0
+       WHERE COALESCE(pst.inativo, p.inativo) = 0
+         AND COALESCE(pst.excluido, 0) = 0
          ${serviceFilter}`,
       [tenantId, tenantId]
     );
