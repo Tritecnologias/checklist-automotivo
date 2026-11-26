@@ -161,14 +161,81 @@ router.get('/products', async (req, res) => {
   });
 });
 
+async function validateProductUniqueness(params: {
+  nome_produto?: string;
+  cod_barra?: string;
+  excludeId?: number;
+  confirmar_nome_duplicado?: boolean;
+}): Promise<{ status: number; code: string; message: string } | null> {
+  const nome = String(params.nome_produto ?? '').trim();
+  const cod = String(params.cod_barra ?? '').trim();
+
+  if (!nome) {
+    return { status: 400, code: 'NAME_REQUIRED', message: 'O nome do produto é obrigatório.' };
+  }
+
+  if (cod) {
+    const sqlCod = params.excludeId
+      ? `SELECT id, nome_produto FROM cad_produtos
+         WHERE TRIM(cod_barra) != '' AND LOWER(TRIM(cod_barra)) = LOWER(?) AND id <> ?
+         LIMIT 1`
+      : `SELECT id, nome_produto FROM cad_produtos
+         WHERE TRIM(cod_barra) != '' AND LOWER(TRIM(cod_barra)) = LOWER(?)
+         LIMIT 1`;
+    const codParams = params.excludeId ? [cod, params.excludeId] : [cod];
+    const [[dupCod]] = await pool.query<any>(sqlCod, codParams);
+    if (dupCod) {
+      return {
+        status: 409,
+        code: 'DUPLICATE_CODE',
+        message: `Já existe um produto cadastrado com este código ("${dupCod.nome_produto}").`,
+      };
+    }
+  }
+
+  if (!params.confirmar_nome_duplicado) {
+    const sqlNome = params.excludeId
+      ? `SELECT id, nome_produto, cod_barra FROM cad_produtos
+         WHERE LOWER(TRIM(nome_produto)) = LOWER(?) AND id <> ?
+         LIMIT 1`
+      : `SELECT id, nome_produto, cod_barra FROM cad_produtos
+         WHERE LOWER(TRIM(nome_produto)) = LOWER(?)
+         LIMIT 1`;
+    const nomeParams = params.excludeId ? [nome, params.excludeId] : [nome];
+    const [[dupNome]] = await pool.query<any>(sqlNome, nomeParams);
+    if (dupNome) {
+      const codInfo = dupNome.cod_barra ? ` - Cód: ${dupNome.cod_barra}` : '';
+      return {
+        status: 409,
+        code: 'DUPLICATE_NAME',
+        message: `Já existe um produto cadastrado com este nome ("${dupNome.nome_produto}"${codInfo}). Deseja continuar mesmo assim?`,
+      };
+    }
+  }
+
+  return null;
+}
+
 router.put('/products/:id', async (req, res) => {
   const tenantId = getAdminTenantId(req);
   const prodId = Number(req.params.id);
   const {
     nome_produto, cod_barra, unidade, id_tipo,
     vr_compra, vr_venda, vr_venda_2, estoque,
-    controla_estoque,
+    controla_estoque, confirmar_nome_duplicado,
   } = req.body;
+
+  const dupErr = await validateProductUniqueness({
+    nome_produto,
+    cod_barra,
+    excludeId: prodId,
+    confirmar_nome_duplicado: Boolean(confirmar_nome_duplicado),
+  });
+  if (dupErr) {
+    res.status(dupErr.status).json({ code: dupErr.code, message: dupErr.message });
+    return;
+  }
+
   const ctrlEstoque = controla_estoque !== undefined ? (Number(controla_estoque) === 0 ? 0 : 1) : 1;
 
   if (tenantId === 1) {
@@ -203,8 +270,19 @@ router.post('/products', async (req, res) => {
   const {
     nome_produto, cod_barra, unidade, id_tipo,
     vr_compra, vr_venda, vr_venda_2, estoque,
-    controla_estoque,
+    controla_estoque, confirmar_nome_duplicado,
   } = req.body;
+
+  const dupErr = await validateProductUniqueness({
+    nome_produto,
+    cod_barra,
+    confirmar_nome_duplicado: Boolean(confirmar_nome_duplicado),
+  });
+  if (dupErr) {
+    res.status(dupErr.status).json({ code: dupErr.code, message: dupErr.message });
+    return;
+  }
+
   const ctrlEstoque = controla_estoque !== undefined ? (Number(controla_estoque) === 0 ? 0 : 1) : 1;
   const estoqueInicial = Number(estoque ?? 0) || 0;
   // Só grava em cad_produtos.estoque se estiver na loja 1; nas demais lojas grava 0 para não vazar saldo para o fallback da loja 1

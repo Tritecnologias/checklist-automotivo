@@ -589,6 +589,15 @@ async function runMigrations() {
       await pool.query('ALTER TABLE cad_produtos ADD INDEX idx_cad_produtos_busca (inativo, nome_produto(50))');
       console.log('[migration] idx_cad_produtos_busca adicionada');
     }
+
+    const [[{ cntIdxCodBarra }]] = await pool.query<any>(
+      `SELECT COUNT(*) as cntIdxCodBarra FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cad_produtos' AND INDEX_NAME = 'idx_cad_produtos_cod_barra'`
+    );
+    if (Number(cntIdxCodBarra) === 0) {
+      await pool.query('ALTER TABLE cad_produtos ADD INDEX idx_cad_produtos_cod_barra (cod_barra(50))');
+      console.log('[migration] idx_cad_produtos_cod_barra adicionada');
+    }
   } catch (idxErr) {
     console.warn('[migration] Aviso ao criar idx_cad_produtos_busca:', idxErr);
   }

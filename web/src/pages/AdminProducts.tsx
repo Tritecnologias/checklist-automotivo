@@ -58,6 +58,8 @@ export default function AdminProducts() {
   const [quickTipoNome, setQuickTipoNome] = useState('')
   const [quickTipoIsService, setQuickTipoIsService] = useState(0)
   const [quickTipoErro, setQuickTipoErro] = useState('')
+  const [formError, setFormError] = useState('')
+  const [dupNamePrompt, setDupNamePrompt] = useState<string | null>(null)
 
   const { data: todosTipos = [] } = useQuery<ProdutoTipo[]>({
     queryKey: ['product-types'],
@@ -82,20 +84,37 @@ export default function AdminProducts() {
   }, [editing?.id])
 
   const updateMut = useMutation({
-    mutationFn: async (p: Product) => {
-      await adminApi.updateProduct(p.id, p)
-      await adminApi.setProductInstalacoes(p.id, editingInstIds)
+    mutationFn: async (vars: { p: Product; confirmarNome?: boolean }) => {
+      await adminApi.updateProduct(vars.p.id, {
+        ...vars.p,
+        ...(vars.confirmarNome ? { confirmar_nome_duplicado: true } : {}),
+      } as any)
+      await adminApi.setProductInstalacoes(vars.p.id, editingInstIds)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-products'] })
       qc.invalidateQueries({ queryKey: ['estoque'] })
+      setFormError('')
+      setDupNamePrompt(null)
       setEditing(null)
+    },
+    onError: (err: any) => {
+      if (err?.code === 'DUPLICATE_NAME') {
+        setFormError('')
+        setDupNamePrompt(err.message)
+      } else {
+        setDupNamePrompt(null)
+        setFormError(err?.message || 'Erro ao atualizar produto.')
+      }
     },
   })
 
   const createMut = useMutation({
-    mutationFn: async () => {
-      const res = await adminApi.createProduct(form) as { id: number }
+    mutationFn: async (vars?: { confirmarNome?: boolean }) => {
+      const payload = vars?.confirmarNome
+        ? { ...form, confirmar_nome_duplicado: true }
+        : form
+      const res = await adminApi.createProduct(payload) as { id: number }
       if (res.id && addingInstIds.length > 0) {
         await adminApi.setProductInstalacoes(res.id, addingInstIds)
       }
@@ -103,9 +122,20 @@ export default function AdminProducts() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-products'] })
       qc.invalidateQueries({ queryKey: ['estoque'] })
+      setFormError('')
+      setDupNamePrompt(null)
       setAdding(false)
       setForm(empty)
       setAddingInstIds([])
+    },
+    onError: (err: any) => {
+      if (err?.code === 'DUPLICATE_NAME') {
+        setFormError('')
+        setDupNamePrompt(err.message)
+      } else {
+        setDupNamePrompt(null)
+        setFormError(err?.message || 'Erro ao cadastrar produto.')
+      }
     },
   })
 
@@ -356,11 +386,14 @@ export default function AdminProducts() {
       )}
 
       {editing && (
-        <Modal title="Editar Produto" onClose={() => setEditing(null)}>
+        <Modal title="Editar Produto" onClose={() => { setEditing(null); setFormError(''); setDupNamePrompt(null) }}>
           <ProductForm
             value={editing}
-            onChange={v => setEditing(v as Product)}
-            onSubmit={() => updateMut.mutate(editing)}
+            onChange={v => { setEditing(v as Product); setFormError(''); setDupNamePrompt(null) }}
+            onSubmit={() => { setFormError(''); setDupNamePrompt(null); updateMut.mutate({ p: editing }) }}
+            onConfirmDuplicateName={() => updateMut.mutate({ p: editing, confirmarNome: true })}
+            formError={formError}
+            dupNamePrompt={dupNamePrompt}
             loading={updateMut.isPending}
             label="Salvar alterações"
             todasInstalacoes={todasInstalacoes}
@@ -373,11 +406,14 @@ export default function AdminProducts() {
       )}
 
       {adding && (
-        <Modal title="Novo Produto" onClose={() => setAdding(false)}>
+        <Modal title="Novo Produto" onClose={() => { setAdding(false); setFormError(''); setDupNamePrompt(null) }}>
           <ProductForm
             value={form}
-            onChange={setForm}
-            onSubmit={() => createMut.mutate()}
+            onChange={v => { setForm(v); setFormError(''); setDupNamePrompt(null) }}
+            onSubmit={() => { setFormError(''); setDupNamePrompt(null); createMut.mutate(undefined) }}
+            onConfirmDuplicateName={() => createMut.mutate({ confirmarNome: true })}
+            formError={formError}
+            dupNamePrompt={dupNamePrompt}
             loading={createMut.isPending}
             label="Criar produto"
             todasInstalacoes={todasInstalacoes}
@@ -518,13 +554,17 @@ export default function AdminProducts() {
 }
 
 function ProductForm({
-  value, onChange, onSubmit, loading, label,
+  value, onChange, onSubmit, onConfirmDuplicateName, formError, dupNamePrompt,
+  loading, label,
   todasInstalacoes, selectedInstIds, onInstChange,
   todosTipos, onOpenQuickTipo,
 }: {
   value: Omit<Product, 'id'>
   onChange: (v: Omit<Product, 'id'>) => void
   onSubmit: () => void
+  onConfirmDuplicateName?: () => void
+  formError?: string
+  dupNamePrompt?: string | null
   loading: boolean
   label: string
   todasInstalacoes: Instalacao[]
@@ -724,6 +764,32 @@ function ProductForm({
           </div>
         </Field>
       )}
+      {formError && (
+        <div className="bg-red-950/60 border border-red-700/80 rounded-xl p-3 text-xs text-red-200 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+          <span>{formError}</span>
+        </div>
+      )}
+
+      {dupNamePrompt && (
+        <div className="bg-amber-950/60 border border-amber-600/80 rounded-xl p-3 text-xs text-amber-200 space-y-2.5">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <span>{dupNamePrompt}</span>
+          </div>
+          {onConfirmDuplicateName && (
+            <button
+              type="button"
+              onClick={onConfirmDuplicateName}
+              disabled={loading}
+              className="w-full py-1.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-semibold transition-colors"
+            >
+              {loading ? 'Salvando...' : 'Confirmar e salvar mesmo assim'}
+            </button>
+          )}
+        </div>
+      )}
+
       <button
         onClick={onSubmit}
         disabled={loading || !value.nome_produto}
